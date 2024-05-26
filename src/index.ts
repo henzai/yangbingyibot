@@ -12,14 +12,11 @@ app.get('/', (c) => c.text('Hello Cloudflare Workers!'));
 
 app.post('/', verifyDiscordInteraction, async (c) => {
 	const body = await c.req.json();
-	console.log(body);
 	try {
 		switch (body.type) {
 			case InteractionType.APPLICATION_COMMAND:
-				console.log('111111');
 				//　時間がかかるので先にレスポンスを返す
 				c.executionCtx.waitUntil(handleRequest(body.data.options[0].value, body.token, c.env));
-				console.log('222222');
 				return c.json({
 					type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
 				});
@@ -33,12 +30,9 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 
 async function handleRequest(message: string, token: string, env: Bindings) {
 	try {
-		console.log('handleRequest');
 		const sheet = await getSheetInfo(env.GOOGLE_SERVICE_ACCOUNT);
 		const llm = new GeminiClient(env.GEMINI_API_KEY);
 		const result = await llm.ask(message, sheet);
-		console.log('conplete llm');
-
 		const endpoint = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${token}`;
 		await fetch(endpoint, {
 			method: 'POST',
