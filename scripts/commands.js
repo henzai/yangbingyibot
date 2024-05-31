@@ -3,9 +3,9 @@
  * and registration.
  */
 
-export const WEN_COMMAND = {
-	name: 'yby',
-	description: 'Ask yby a question',
+const WEN_COMMAND = {
+	name: 'ask',
+	description: 'Ask 433 a question',
 	options: [
 		{
 			type: 3,
@@ -14,4 +14,8 @@ export const WEN_COMMAND = {
 			required: true,
 		},
 	],
+};
+
+module.exports = {
+	WEN_COMMAND,
 };
