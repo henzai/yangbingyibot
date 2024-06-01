@@ -44,7 +44,16 @@ async function handleRequest(message: string, token: string, env: Bindings) {
 			},
 		});
 	} catch (error) {
-		console.error(error);
+		const endpoint = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${token}`;
+		await fetch(endpoint, {
+			method: 'POST',
+			body: JSON.stringify({
+				content: `> ${error instanceof Error ? error.message : 'Unknown error'}`,
+			}),
+			headers: {
+				'Content-Type': 'application/json',
+			},
+		});
 	}
 }
 
