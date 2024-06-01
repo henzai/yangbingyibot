@@ -30,7 +30,7 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 
 async function handleRequest(message: string, token: string, env: Bindings) {
 	try {
-		const sheet = await getSheetInfo(env.GOOGLE_SERVICE_ACCOUNT);
+		const sheet = await getSheetInfo(env.GOOGLE_SERVICE_ACCOUNT, env.sushanshan_bot);
 		const llm = new GeminiClient(env.GEMINI_API_KEY);
 		const result = await llm.ask(message, sheet);
 		const endpoint = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${token}`;
