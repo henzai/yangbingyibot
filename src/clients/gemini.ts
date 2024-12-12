@@ -9,7 +9,7 @@ export class GeminiClient {
 
 	async ask(input: string, sheet: string) {
 		const model = this.llm.getGenerativeModel({
-			model: 'gemini-1.5-pro',
+			model: 'gemini-2.0-flash-exp',
 		});
 
 		const chatSession = model.startChat({
@@ -87,7 +87,7 @@ export class GeminiClient {
 const generationConfig = {
 	temperature: 1,
 	topP: 0.95,
-	topK: 64,
+	topK: 40,
 	maxOutputTokens: 8192,
 	responseMimeType: 'text/plain',
 };
