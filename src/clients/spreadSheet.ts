@@ -43,27 +43,4 @@ export const getSheetInfo = async function (sa: string, kv: KVNamespace): Promis
 	await kv.put(SHEET_INFO, JSON.stringify({ time: Date.now(), sheetInfo: ttt }));
 
 	return ttt;
-	// const rows = await sheet.getRows();
-
-	// let csvContent = '';
-
-	// rows.forEach((row, index) => {
-	// 	// 最初の行をスキップ
-	// 	// if (index === 0) return;
-
-	// 	const rowValues = Object.values(row).map((cell, i) => {
-	// 		if (index < 5) {
-	// 			console.log(`index: ${index}, i: ${i}, cell: ${cell}`);
-	// 		}
-
-	// 		// セル内にカンマが含まれる場合はダブルクォートで囲む
-	// 		cell.toString().includes(',') ? `"${cell}"` : cell;
-	// 	});
-
-	// 	csvContent += rowValues.slice(0, 33).join(',') + '\n'; // A列からAG列まで
-	// });
-
-	// console.log(csvContent);
-
-	// return csvContent;
 };
