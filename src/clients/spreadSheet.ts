@@ -5,7 +5,7 @@ import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
 const DOC_ID = '1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg';
 
 // 定数を上部にまとめる
-const GOOGLE_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+const GOOGLE_SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const SHEET_NAME = 'test';
 
 // スプレッドシートの情報を取得するためのシート
@@ -23,7 +23,7 @@ export const getSheetInfo = async function (serviceAccountJson: string): Promise
 	await doc.loadInfo();
 
 	const sheet = doc.sheetsByTitle[SHEET_NAME];
-	await sheet.loadHeaderRow();
+	await sheet.loadHeaderRow(2);
 
 	const csvBuffer = await sheet.downloadAsCSV();
 	const csvContent = new TextDecoder().decode(csvBuffer);
@@ -42,6 +42,6 @@ export const getSheetDescription = async function (serviceAccountJson: string): 
 	await doc.loadInfo();
 	const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
 	await sheet.loadCells('A1');
-	const cell = sheet.getCell(0, 0);
+	const cell = sheet.getCellByA1('A1');
 	return cell.value?.toString() || '';
 };
