@@ -1,69 +1,47 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
 
+// スプレッドシートのID
 const DOC_ID = '1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg';
 
-// KV用のキー
-const SHEET_INFO = 'sheet_info';
+// 定数を上部にまとめる
+const GOOGLE_SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+const SHEET_NAME = 'test';
 
-// KV用のキャッシュの型
-type SheetInfo = {
-	// キャッシュした時間
-	time: number;
-	sheetInfo: string;
-};
+// スプレッドシートの情報を取得するためのシート
+// A1セルにスプレッドシートの説明が入っている
+const DESCRIPTION_SHEET_NAME = 'description';
 
-export const getSheetInfo = async function (sa: string, kv: KVNamespace): Promise<string> {
-	// キャッシュを取得
-	const cachedSheetInfo = await kv.get<SheetInfo>(SHEET_INFO);
-	if (cachedSheetInfo) {
-		// 5分以内のデータの場合はキャッシュを返す
-		if (Date.now() - cachedSheetInfo.time < 1000 * 60 * 5) {
-			return cachedSheetInfo.sheetInfo;
-		}
-	}
-
-	// キャッシュがない場合はスプレッドシートからデータを取得
-	const scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
-	const googleAuth: GoogleKey = JSON.parse(sa);
-
-	const oauth = new GoogleAuth(googleAuth, scopes);
+// スプレッドシートの情報を取得する関数
+// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
+// 戻り値: スプレッドシートの内容をCSV形式で返す
+export const getSheetInfo = async function (serviceAccountJson: string): Promise<string> {
+	const googleAuth: GoogleKey = JSON.parse(serviceAccountJson);
+	const oauth = new GoogleAuth(googleAuth, GOOGLE_SCOPES);
 	const token = await oauth.getGoogleAuthToken();
 	const doc = new GoogleSpreadsheet(DOC_ID, { token: token || '' });
 	await doc.loadInfo();
 
-	const sheet = doc.sheetsByTitle['2024改'];
+	const sheet = doc.sheetsByTitle[SHEET_NAME];
 	await sheet.loadHeaderRow(2);
 
-	const sss = await sheet.downloadAsCSV();
-	/// sssを文字列に変換してtttに代入
-	const ttt = new TextDecoder().decode(sss);
+	const csvBuffer = await sheet.downloadAsCSV();
+	const csvContent = new TextDecoder().decode(csvBuffer);
 
-	// キャッシュを保存
-	await kv.put(SHEET_INFO, JSON.stringify({ time: Date.now(), sheetInfo: ttt }));
+	return csvContent;
+};
 
-	return ttt;
-	// const rows = await sheet.getRows();
-
-	// let csvContent = '';
-
-	// rows.forEach((row, index) => {
-	// 	// 最初の行をスキップ
-	// 	// if (index === 0) return;
-
-	// 	const rowValues = Object.values(row).map((cell, i) => {
-	// 		if (index < 5) {
-	// 			console.log(`index: ${index}, i: ${i}, cell: ${cell}`);
-	// 		}
-
-	// 		// セル内にカンマが含まれる場合はダブルクォートで囲む
-	// 		cell.toString().includes(',') ? `"${cell}"` : cell;
-	// 	});
-
-	// 	csvContent += rowValues.slice(0, 33).join(',') + '\n'; // A列からAG列まで
-	// });
-
-	// console.log(csvContent);
-
-	// return csvContent;
+// スプレッドシートの情報を取得する関数
+// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
+// 戻り値: スプレッドシートの内容をCSV形式で返す
+export const getSheetDescription = async function (serviceAccountJson: string): Promise<string> {
+	const googleAuth: GoogleKey = JSON.parse(serviceAccountJson);
+	const oauth = new GoogleAuth(googleAuth, GOOGLE_SCOPES);
+	const token = await oauth.getGoogleAuthToken();
+	const doc = new GoogleSpreadsheet(DOC_ID, { token: token || '' });
+	await doc.loadInfo();
+	const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
+	await sheet.loadCells('A1');
+	const cell = sheet.getCellByA1('A1');
+	return cell.value?.toString() || '';
 };
