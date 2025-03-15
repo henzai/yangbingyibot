@@ -4,9 +4,12 @@ export class GeminiClient {
 	private llm: GoogleGenerativeAI;
 	private history: Content[];
 
-	constructor(apiKey: string) {
+	constructor(apiKey: string, initialHistory: { role: string; text: string }[] = []) {
 		this.llm = new GoogleGenerativeAI(apiKey);
-		this.history = [];
+		this.history = initialHistory.map((h) => ({
+			role: h.role,
+			parts: [{ text: h.text }],
+		}));
 	}
 
 	async ask(input: string, sheet: string, description: string) {
@@ -26,6 +29,7 @@ export class GeminiClient {
 						},
 					],
 				},
+				...this.history,
 			],
 		});
 
@@ -56,6 +60,10 @@ export class GeminiClient {
 		this.history = [];
 	}
 }
+
+export const createGeminiClient = (apiKey: string, initialHistory: { role: string; text: string }[] = []): GeminiClient => {
+	return new GeminiClient(apiKey, initialHistory);
+};
 
 const generationConfig = {
 	temperature: 1,

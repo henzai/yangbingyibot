@@ -1,4 +1,4 @@
-import { GeminiClient } from '../clients/gemini';
+import { createGeminiClient } from '../clients/gemini';
 import { getSheetDescription, getSheetInfo } from '../clients/spreadSheet';
 import { createKV } from '../clients/kv';
 import { Bindings } from '../types';
@@ -16,7 +16,8 @@ export async function answerQuestion(message: string, env: Bindings): Promise<st
 		await kv.saveSheetInfo(sheetInfo, description);
 	}
 
-	const llm = new GeminiClient(env.GEMINI_API_KEY);
+	const history = await kv.getHistory();
+	const llm = createGeminiClient(env.GEMINI_API_KEY, history);
 	const result = await llm.ask(message, sheetInfo, description);
 
 	// historyをKVに保存
