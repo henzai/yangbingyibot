@@ -20,8 +20,13 @@ export class GeminiClient {
 		const chatSession = model.startChat({
 			generationConfig,
 			safetySettings,
-			history: this.history,
-			systemInstruction: getPrompt(sheet, description),
+			history: [
+				{
+					role: 'user',
+					parts: [{ text: getPrompt(sheet, description) }],
+				},
+				...this.history,
+			],
 		});
 
 		const result = await chatSession.sendMessage(`質問: ${input}`);
