@@ -1,10 +1,15 @@
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Content } from '@google/generative-ai';
 
 export class GeminiClient {
 	private llm: GoogleGenerativeAI;
+	private history: Content[];
 
-	constructor(apiKey: string) {
+	constructor(apiKey: string, initialHistory: { role: string; text: string }[] = []) {
 		this.llm = new GoogleGenerativeAI(apiKey);
+		this.history = initialHistory.map((h) => ({
+			role: h.role,
+			parts: [{ text: h.text }],
+		}));
 	}
 
 	async ask(input: string, sheet: string, description: string) {
@@ -18,19 +23,43 @@ export class GeminiClient {
 			history: [
 				{
 					role: 'user',
-					parts: [
-						{
-							text: getPrompt(sheet, description),
-						},
-					],
+					parts: [{ text: getPrompt(sheet, description) }],
 				},
+				...this.history,
 			],
 		});
 
 		const result = await chatSession.sendMessage(`質問: ${input}`);
-		return result.response.text();
+		const response = result.response.text();
+
+		// Add the user's message and assistant's response to history
+		this.history.push({
+			role: 'user',
+			parts: [{ text: `質問: ${input}` }],
+		});
+		this.history.push({
+			role: 'model',
+			parts: [{ text: response }],
+		});
+
+		return response;
+	}
+
+	getHistory(): { role: string; text: string }[] {
+		return this.history.map((content) => ({
+			role: content.role,
+			text: content.parts[0].text || '',
+		}));
+	}
+
+	clearHistory() {
+		this.history = [];
 	}
 }
+
+export const createGeminiClient = (apiKey: string, initialHistory: { role: string; text: string }[] = []): GeminiClient => {
+	return new GeminiClient(apiKey, initialHistory);
+};
 
 const generationConfig = {
 	temperature: 1,

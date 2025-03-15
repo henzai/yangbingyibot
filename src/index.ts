@@ -50,6 +50,7 @@ async function handleDiscordResponse(message: string, token: string, env: Bindin
 				'Content-Type': 'application/json',
 			},
 		});
+		throw error;
 	}
 }
 
