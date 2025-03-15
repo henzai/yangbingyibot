@@ -17,7 +17,7 @@ export class GeminiClient {
 			safetySettings,
 			history: [
 				{
-					role: 'user',
+					role: 'system',
 					parts: [
 						{
 							text: getPrompt(sheet, description),
