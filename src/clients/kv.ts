@@ -57,7 +57,7 @@ export class KV {
 		return null;
 	}
 
-	async saveSheetInfo(sheetInfo: string, description: string): Promise<void> {
+	async saveCache(sheetInfo: string, description: string): Promise<void> {
 		const newCacheData: SheetInfo = {
 			time: Date.now(),
 			sheetInfo: sheetInfo,
