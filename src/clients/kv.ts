@@ -14,6 +14,12 @@ type SheetInfo = {
 	description: string;
 };
 
+type ChatHistory = {
+	timestamp: number;
+	role: string;
+	text: string;
+};
+
 export class KV {
 	private kv: KVNamespace;
 
@@ -22,36 +28,45 @@ export class KV {
 	}
 
 	async saveHistory(history: { role: string; text: string }[]) {
-		await this.kv.put(HISTORY_KEY, JSON.stringify(history));
+		const now = Date.now();
+		const newHistory: ChatHistory[] = history.map((h) => ({
+			...h,
+			timestamp: now,
+		}));
+		await this.kv.put(HISTORY_KEY, JSON.stringify(newHistory));
 	}
 
 	async getHistory(): Promise<{ role: string; text: string }[]> {
-		const history = await this.kv.get(HISTORY_KEY);
-		return history ? JSON.parse(history) : [];
+		const historyStr = await this.kv.get(HISTORY_KEY);
+		if (!historyStr) return [];
+
+		const parsedHistory = JSON.parse(historyStr) as ChatHistory[];
+		const fiveMinutesAgo = Date.now() - CACHE_DURATION_MS;
+
+		// 5分以内の履歴のみを返す
+		return parsedHistory.filter((h) => h.timestamp > fiveMinutesAgo).map(({ role, text }) => ({ role, text }));
+	}
+
+	async getCache(): Promise<Omit<SheetInfo, 'time'> | null> {
+		const cachedData = await this.kv.get<SheetInfo>(SHEET_INFO);
+		if (cachedData) {
+			if (Date.now() - cachedData.time < CACHE_DURATION_MS) {
+				return cachedData;
+			}
+		}
+		return null;
+	}
+
+	async saveSheetInfo(sheetInfo: string, description: string): Promise<void> {
+		const newCacheData: SheetInfo = {
+			time: Date.now(),
+			sheetInfo: sheetInfo,
+			description: description,
+		};
+		await this.kv.put(SHEET_INFO, JSON.stringify(newCacheData));
 	}
 }
 
 export const createKV = (kv: KVNamespace): KV => {
 	return new KV(kv);
-};
-
-// キャッシュを取得する関数
-export const getCache = async function (kv: KVNamespace): Promise<Omit<SheetInfo, 'time'> | null> {
-	const cachedData = await kv.get<SheetInfo>(SHEET_INFO);
-	if (cachedData) {
-		if (Date.now() - cachedData.time < CACHE_DURATION_MS) {
-			return cachedData;
-		}
-	}
-	return null;
-};
-
-// キャッシュを保存する関数
-export const saveSheetInfo = async function (sheetInfo: string, description: string, kv: KVNamespace): Promise<void> {
-	const newCacheData: SheetInfo = {
-		time: Date.now(),
-		sheetInfo: sheetInfo,
-		description: description,
-	};
-	await kv.put(SHEET_INFO, JSON.stringify(newCacheData));
 };
