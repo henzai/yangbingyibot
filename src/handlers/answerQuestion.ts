@@ -13,7 +13,7 @@ export async function answerQuestion(message: string, env: Bindings): Promise<st
 	};
 
 	if (!cache) {
-		await kv.saveSheetInfo(sheetInfo, description);
+		await kv.saveCache(sheetInfo, description);
 	}
 
 	const history = await kv.getHistory();
