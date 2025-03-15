@@ -45,6 +45,13 @@ export class GeminiClient {
 		return response;
 	}
 
+	getHistory(): { role: string; text: string }[] {
+		return this.history.map((content) => ({
+			role: content.role,
+			text: content.parts[0].text || '',
+		}));
+	}
+
 	clearHistory() {
 		this.history = [];
 	}
