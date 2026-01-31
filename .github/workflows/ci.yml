@@ -16,6 +16,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - run: npm test
       - run: npm run cf-typegen
       - name: Check generated types are committed
         run: git diff --exit-code
