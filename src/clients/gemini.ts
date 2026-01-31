@@ -1,55 +1,60 @@
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Content } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 export class GeminiClient {
-	private llm: GoogleGenerativeAI;
-	private history: Content[];
+	private client: GoogleGenAI;
+	private history: { role: string; text: string }[];
 
 	constructor(apiKey: string, initialHistory: { role: string; text: string }[] = []) {
-		this.llm = new GoogleGenerativeAI(apiKey);
-		this.history = initialHistory.map((h) => ({
-			role: h.role,
-			parts: [{ text: h.text }],
-		}));
+		this.client = new GoogleGenAI({ apiKey });
+		this.history = initialHistory;
 	}
 
 	async ask(input: string, sheet: string, description: string) {
-		const model = this.llm.getGenerativeModel({
-			model: 'gemini-2.0-pro',
+		// Create the full prompt with context and history
+		const systemPrompt = getPrompt(sheet, description);
+		const historyText = this.history.map((h) => `${h.role}: ${h.text}`).join('\n');
+
+		const fullPrompt = `${systemPrompt}
+
+${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
+
+		const result = await this.client.models.generateContent({
+			model: 'gemini-3-flash-preview',
+			contents: fullPrompt,
+			config: generationConfig,
 		});
 
-		const chatSession = model.startChat({
-			generationConfig,
-			safetySettings,
-			history: [
-				{
-					role: 'user',
-					parts: [{ text: getPrompt(sheet, description) }],
-				},
-				...this.history,
-			],
-		});
+		if (
+			!result.candidates ||
+			!result.candidates[0] ||
+			!result.candidates[0].content ||
+			!result.candidates[0].content.parts ||
+			!result.candidates[0].content.parts[0]
+		) {
+			throw new Error('Invalid response from Gemini API');
+		}
 
-		const result = await chatSession.sendMessage(`質問: ${input}`);
-		const response = result.response.text();
+		const response = result.candidates[0].content.parts[0].text;
+
+		if (!response) {
+			throw new Error('No text response from Gemini API');
+		}
 
 		// Add the user's message and assistant's response to history
 		this.history.push({
 			role: 'user',
-			parts: [{ text: `質問: ${input}` }],
+			text: `質問: ${input}`,
 		});
 		this.history.push({
 			role: 'model',
-			parts: [{ text: response }],
+			text: response,
 		});
 
 		return response;
 	}
 
 	getHistory(): { role: string; text: string }[] {
-		return this.history.map((content) => ({
-			role: content.role,
-			text: content.parts[0].text || '',
-		}));
+		return this.history;
 	}
 
 	clearHistory() {
@@ -68,25 +73,6 @@ const generationConfig = {
 	maxOutputTokens: 8192,
 	responseMimeType: 'text/plain',
 };
-
-const safetySettings = [
-	{
-		category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-		threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-	},
-	{
-		category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-		threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-	},
-	{
-		category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-		threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-	},
-	{
-		category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-		threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-	},
-];
 
 const getPrompt = (sheet: string, description: string) => {
 	return `
