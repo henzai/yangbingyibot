@@ -3,5 +3,11 @@
   "extends": [
     "config:recommended",
     ":automergeMinor"
+  ],
+  "packageRules": [
+    {
+      "groupName": "vitest",
+      "matchPackagePatterns": ["vitest", "@vitest/", "@cloudflare/vitest-pool-workers"]
+    }
   ]
 }
