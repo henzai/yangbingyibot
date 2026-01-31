@@ -6,7 +6,8 @@
     "deploy": "wrangler deploy --minify src/index.ts",
     "dev": "wrangler dev src/index.ts",
     "start": "wrangler dev",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "cf-typegen": "wrangler types",
     "register": "node scripts/register.js"
   },
