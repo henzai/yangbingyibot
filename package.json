@@ -22,7 +22,7 @@
   "dependencies": {
     "@google/genai": "^1.38.0",
     "cloudflare-workers-and-google-oauth": "^2.0.0",
-    "discord-api-types": "^0.37.85",
+    "discord-api-types": "^0.38.0",
     "discord-interactions": "^3.4.0",
     "google-spreadsheet": "^4.1.2",
     "hono": "^4.3.11"
