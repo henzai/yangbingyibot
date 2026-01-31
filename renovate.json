@@ -1,13 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":automergeMinor"
-  ],
+  "extends": ["config:recommended", ":automergeMinor"],
   "packageRules": [
     {
       "groupName": "vitest",
-      "matchPackagePatterns": ["vitest", "@vitest/", "@cloudflare/vitest-pool-workers"]
+      "matchPackageNames": [
+        "/vitest/",
+        "/@vitest//",
+        "/@cloudflare/vitest-pool-workers/"
+      ]
     }
   ]
 }
