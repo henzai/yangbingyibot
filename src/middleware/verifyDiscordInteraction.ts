@@ -17,7 +17,15 @@ export const verifyDiscordInteraction = createMiddleware(async (c, next) => {
 		return c.json({ message: 'invalid request signature' }, 401);
 	}
 
-	const body = JSON.parse(rawBody);
+	// Safe JSON parsing with error handling
+	let body;
+	try {
+		body = JSON.parse(rawBody);
+	} catch (error) {
+		console.error('Failed to parse Discord request body:', error);
+		return c.json({ message: 'invalid JSON in request body' }, 400);
+	}
+
 	if (body.type === InteractionResponseType.PONG) {
 		return c.json({ type: InteractionResponseType.PONG });
 	}
