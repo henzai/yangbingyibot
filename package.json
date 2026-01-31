@@ -19,7 +19,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.11.4",
+    "@google/genai": "^1.38.0",
     "cloudflare-workers-and-google-oauth": "^2.0.0",
     "discord-api-types": "^0.37.85",
     "discord-interactions": "^3.4.0",
