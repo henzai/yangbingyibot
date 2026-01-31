@@ -77,7 +77,7 @@ describe('GeminiClient', () => {
 
 			const client = new GeminiClient('test-api-key');
 
-			await expect(client.ask('q', 's', 'd')).rejects.toThrow('Invalid response from Gemini API');
+			await expect(client.ask('q', 's', 'd')).rejects.toThrow('AIからの応答形式が不正です。');
 		});
 
 		it('throws error when response has empty candidates array', async () => {
@@ -87,7 +87,7 @@ describe('GeminiClient', () => {
 
 			const client = new GeminiClient('test-api-key');
 
-			await expect(client.ask('q', 's', 'd')).rejects.toThrow('Invalid response from Gemini API');
+			await expect(client.ask('q', 's', 'd')).rejects.toThrow('AIからの応答形式が不正です。');
 		});
 
 		it('throws error when response has no text', async () => {
@@ -103,7 +103,7 @@ describe('GeminiClient', () => {
 
 			const client = new GeminiClient('test-api-key');
 
-			await expect(client.ask('q', 's', 'd')).rejects.toThrow('No text response from Gemini API');
+			await expect(client.ask('q', 's', 'd')).rejects.toThrow('AIから有効な応答が得られませんでした。');
 		});
 
 		it('includes conversation history in subsequent calls', async () => {
