@@ -33,6 +33,25 @@ class Logger {
 	debug(message: string, context?: LogContext) {
 		this.log(LogLevel.DEBUG, message, context);
 	}
+
+	// Performance timing wrapper
+	async trackTiming<T>(operation: string, fn: () => Promise<T>, metadata?: LogContext): Promise<T> {
+		const startTime = Date.now();
+		let success = false;
+
+		try {
+			const result = await fn();
+			success = true;
+			return result;
+		} finally {
+			const durationMs = Date.now() - startTime;
+			this.info(`Performance: ${operation}`, {
+				durationMs,
+				success,
+				...metadata,
+			});
+		}
+	}
 }
 
 export const logger = new Logger();

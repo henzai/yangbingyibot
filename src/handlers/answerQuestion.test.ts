@@ -24,12 +24,13 @@ vi.mock('../clients/gemini', () => ({
 vi.mock('../clients/spreadSheet', () => ({
 	getSheetInfo: vi.fn(),
 	getSheetDescription: vi.fn(),
+	getSheetData: vi.fn(),
 }));
 
 import { answerQuestion } from './answerQuestion';
 import { createKV } from '../clients/kv';
 import { createGeminiClient } from '../clients/gemini';
-import { getSheetInfo, getSheetDescription } from '../clients/spreadSheet';
+import { getSheetInfo, getSheetDescription, getSheetData } from '../clients/spreadSheet';
 
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: 'test-token',
@@ -59,25 +60,27 @@ describe('answerQuestion', () => {
 
 		await answerQuestion('test question', mockEnv);
 
-		expect(getSheetInfo).not.toHaveBeenCalled();
-		expect(getSheetDescription).not.toHaveBeenCalled();
+		expect(getSheetData).not.toHaveBeenCalled();
 	});
 
 	it('fetches sheet data when cache is empty', async () => {
 		mockKVInstance.getCache.mockResolvedValue(null);
-		vi.mocked(getSheetInfo).mockResolvedValue('new sheet');
-		vi.mocked(getSheetDescription).mockResolvedValue('new desc');
+		vi.mocked(getSheetData).mockResolvedValue({
+			sheetInfo: 'new sheet',
+			description: 'new desc',
+		});
 
 		await answerQuestion('test question', mockEnv);
 
-		expect(getSheetInfo).toHaveBeenCalledWith(mockEnv.GOOGLE_SERVICE_ACCOUNT);
-		expect(getSheetDescription).toHaveBeenCalledWith(mockEnv.GOOGLE_SERVICE_ACCOUNT);
+		expect(getSheetData).toHaveBeenCalledWith(mockEnv.GOOGLE_SERVICE_ACCOUNT);
 	});
 
 	it('saves cache when fetching fresh data', async () => {
 		mockKVInstance.getCache.mockResolvedValue(null);
-		vi.mocked(getSheetInfo).mockResolvedValue('fresh sheet');
-		vi.mocked(getSheetDescription).mockResolvedValue('fresh desc');
+		vi.mocked(getSheetData).mockResolvedValue({
+			sheetInfo: 'fresh sheet',
+			description: 'fresh desc',
+		});
 
 		await answerQuestion('test question', mockEnv);
 

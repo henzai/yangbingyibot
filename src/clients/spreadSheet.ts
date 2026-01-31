@@ -49,11 +49,57 @@ async function authenticateGoogle(serviceAccountJson: string): Promise<string> {
 	}
 }
 
-// スプレッドシートの情報を取得する関数
-// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
-// 戻り値: スプレッドシートの内容をCSV形式で返す
-export const getSheetInfo = async function (serviceAccountJson: string): Promise<string> {
+// Interface for combined sheet data
+export interface SheetData {
+	sheetInfo: string;
+	description: string;
+}
+
+// Helper to fetch sheet info from a loaded document
+async function fetchSheetInfo(doc: GoogleSpreadsheet): Promise<string> {
+	const sheet = doc.sheetsByTitle[SHEET_NAME];
+	if (!sheet) {
+		throw new Error(`Sheet "${SHEET_NAME}" not found in spreadsheet`);
+	}
+
 	try {
+		await sheet.loadHeaderRow(2);
+		const csvBuffer = await sheet.downloadAsCSV();
+		const csvContent = new TextDecoder().decode(csvBuffer);
+
+		if (!csvContent || csvContent.trim().length === 0) {
+			throw new Error('Sheet returned empty CSV data');
+		}
+
+		return csvContent;
+	} catch (error) {
+		console.error('Failed to download sheet as CSV:', error);
+		throw new Error('シートデータのダウンロードに失敗しました。');
+	}
+}
+
+// Helper to fetch description from a loaded document
+async function fetchSheetDescription(doc: GoogleSpreadsheet): Promise<string> {
+	const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
+	if (!sheet) {
+		console.warn(`Description sheet "${DESCRIPTION_SHEET_NAME}" not found, using empty description`);
+		return '';
+	}
+
+	try {
+		await sheet.loadCells('A1');
+		const cell = sheet.getCellByA1('A1');
+		return cell.value?.toString() || '';
+	} catch (error) {
+		console.error('Failed to load description cell:', error);
+		return '';
+	}
+}
+
+// Unified function to fetch both sheet info and description with single authentication
+export async function getSheetData(serviceAccountJson: string): Promise<SheetData> {
+	try {
+		// Authenticate once
 		const token = await authenticateGoogle(serviceAccountJson);
 		const doc = new GoogleSpreadsheet(DOC_ID, { token });
 
@@ -65,79 +111,35 @@ export const getSheetInfo = async function (serviceAccountJson: string): Promise
 			throw new Error('スプレッドシートへのアクセスに失敗しました。権限を確認してください。');
 		}
 
-		// Get sheet by name
-		const sheet = doc.sheetsByTitle[SHEET_NAME];
-		if (!sheet) {
-			throw new Error(`Sheet "${SHEET_NAME}" not found in spreadsheet`);
-		}
+		// Fetch both sheets in parallel using the same authenticated token
+		const [sheetInfo, description] = await Promise.all([fetchSheetInfo(doc), fetchSheetDescription(doc)]);
 
-		// Load header and download CSV
-		try {
-			await sheet.loadHeaderRow(2);
-			const csvBuffer = await sheet.downloadAsCSV();
-			const csvContent = new TextDecoder().decode(csvBuffer);
-
-			if (!csvContent || csvContent.trim().length === 0) {
-				throw new Error('Sheet returned empty CSV data');
-			}
-
-			return csvContent;
-		} catch (error) {
-			console.error('Failed to download sheet as CSV:', error);
-			throw new Error('シートデータのダウンロードに失敗しました。');
-		}
+		return { sheetInfo, description };
 	} catch (error) {
 		// Preserve user-friendly errors, wrap others
 		if (error instanceof Error && (error.message.includes('スプレッドシート') || error.message.includes('シート'))) {
 			throw error;
 		}
 
-		console.error('Unexpected error in getSheetInfo:', error);
+		console.error('Unexpected error in getSheetData:', error);
 		throw new Error('スプレッドシート情報の取得中にエラーが発生しました。');
 	}
+}
+
+// スプレッドシートの情報を取得する関数
+// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
+// 戻り値: スプレッドシートの内容をCSV形式で返す
+// Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
+export const getSheetInfo = async function (serviceAccountJson: string): Promise<string> {
+	const { sheetInfo } = await getSheetData(serviceAccountJson);
+	return sheetInfo;
 };
 
 // スプレッドシートのdescriptionを取得する関数
 // serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
 // 戻り値: スプレッドシートのdescriptionを返す
+// Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
 export const getSheetDescription = async function (serviceAccountJson: string): Promise<string> {
-	try {
-		const token = await authenticateGoogle(serviceAccountJson);
-		const doc = new GoogleSpreadsheet(DOC_ID, { token });
-
-		// Load document info
-		try {
-			await doc.loadInfo();
-		} catch (error) {
-			console.error('Failed to load spreadsheet info:', error);
-			throw new Error('スプレッドシートへのアクセスに失敗しました。権限を確認してください。');
-		}
-
-		// Get description sheet
-		const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
-		if (!sheet) {
-			console.warn(`Description sheet "${DESCRIPTION_SHEET_NAME}" not found, using empty description`);
-			return '';
-		}
-
-		// Load cell and get description
-		try {
-			await sheet.loadCells('A1');
-			const cell = sheet.getCellByA1('A1');
-			return cell.value?.toString() || '';
-		} catch (error) {
-			console.error('Failed to load description cell:', error);
-			// Non-fatal: return empty description
-			return '';
-		}
-	} catch (error) {
-		// Preserve user-friendly errors
-		if (error instanceof Error && error.message.includes('スプレッドシート')) {
-			throw error;
-		}
-
-		console.error('Unexpected error in getSheetDescription:', error);
-		// Description is optional, return empty on error
-		return '';
-	}
+	const { description } = await getSheetData(serviceAccountJson);
+	return description;
 };
