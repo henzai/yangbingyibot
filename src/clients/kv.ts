@@ -82,7 +82,7 @@ export class KV {
 
 	async getCache(): Promise<Omit<SheetInfo, 'time'> | null> {
 		try {
-			const cachedData = await this.kv.get<SheetInfo>(SHEET_INFO);
+			const cachedData = await this.kv.get<SheetInfo>(SHEET_INFO, "json");
 			if (!cachedData) return null;
 
 			// Validate cache structure
