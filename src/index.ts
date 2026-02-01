@@ -32,6 +32,8 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 	const body = await c.req.json();
 	try {
 		switch (body.type) {
+			case InteractionType.PING:
+				return c.json({ type: InteractionResponseType.PONG });
 			case InteractionType.APPLICATION_COMMAND:
 				// Validate payload structure
 				const { question } = validateDiscordCommand(body);
