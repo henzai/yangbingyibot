@@ -89,7 +89,7 @@ describe('verifyDiscordInteraction middleware', () => {
 		);
 	});
 
-	it('returns PONG response for PING request (type=1)', async () => {
+	it('calls next() for valid PING requests', async () => {
 		mockVerifyKey.mockReturnValue(true);
 
 		const req = new Request('http://localhost/', {
@@ -105,7 +105,7 @@ describe('verifyDiscordInteraction middleware', () => {
 		const res = await app.fetch(req, testEnv, mockExecutionCtx);
 
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ type: 1 });
+		expect(await res.json()).toEqual({ success: true });
 	});
 
 	it('calls next() for valid non-PING requests', async () => {
