@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { withRetry } from '../utils/retry';
 
 export class GeminiClient {
 	private client: GoogleGenAI;
@@ -21,11 +22,34 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 
 			let result;
 			try {
-				result = await this.client.models.generateContent({
-					model: 'gemini-3-flash-preview',
-					contents: fullPrompt,
-					config: generationConfig,
-				});
+				// Add retry logic with exponential backoff
+				result = await withRetry(
+					async () => {
+						return await this.client.models.generateContent({
+							model: 'gemini-3-flash-preview',
+							contents: fullPrompt,
+							config: generationConfig,
+						});
+					},
+					{
+						maxAttempts: 3,
+						initialDelayMs: 1000,
+						maxDelayMs: 8000,
+					},
+					// Only retry on transient errors
+					(error) => {
+						const msg = error.message.toLowerCase();
+						// Retry rate limits, network errors, and server errors
+						return (
+							msg.includes('quota') ||
+							msg.includes('rate limit') ||
+							msg.includes('network') ||
+							msg.includes('timeout') ||
+							msg.includes('500') ||
+							msg.includes('503')
+						);
+					}
+				);
 			} catch (error) {
 				console.error('Gemini API request failed:', error);
 
