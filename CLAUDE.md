@@ -47,3 +47,23 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 - `GOOGLE_CLIENT_EMAIL`, `GOOGLE_PRIVATE_KEY` - Google Service Account for Sheets
 
 KV namespace `sushanshan_bot` must be bound in wrangler.toml.
+
+## Critical Components
+
+### Discord PING/PONG Endpoint (src/index.ts)
+
+**⚠️ DO NOT REMOVE OR MODIFY WITHOUT CAREFUL CONSIDERATION**
+
+The `InteractionType.PING` handler in `src/index.ts` is **MANDATORY** per Discord's specification.
+
+**Why it's critical:**
+- Discord sends PING (type=1) requests to verify endpoint availability during initial setup and periodic health checks
+- The endpoint must respond with PONG (type=1) for Discord to accept the interactions endpoint URL
+- Removing or modifying this handler will cause Discord to reject the endpoint and disable all bot interactions
+
+**Protection measures:**
+- Unit tests in `src/index.test.ts` verify PING/PONG functionality
+- Detailed comments in the code explain its purpose
+- Any changes that break this handler will fail CI/CD tests
+
+**Reference:** [Discord Interactions Documentation](https://discord.com/developers/docs/interactions/receiving-and-responding#receiving-an-interaction)
