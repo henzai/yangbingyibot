@@ -32,6 +32,13 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 	const body = await c.req.json();
 	try {
 		switch (body.type) {
+			// CRITICAL: Discord Interactions Endpoint Requirement
+			// DO NOT REMOVE: Discord sends PING (type=1) requests to verify endpoint availability
+			// and requires PONG (type=1) response for successful verification.
+			// Removing this will cause Discord to reject the interactions endpoint.
+			// Reference: https://discord.com/developers/docs/interactions/receiving-and-responding#receiving-an-interaction
+			case InteractionType.PING:
+				return c.json({ type: InteractionResponseType.PONG });
 			case InteractionType.APPLICATION_COMMAND:
 				// Validate payload structure
 				const { question } = validateDiscordCommand(body);
