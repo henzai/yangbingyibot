@@ -12,7 +12,8 @@ on:
 
 jobs:
   claude-review:
-    if: github.event.pull_request.user.login == 'henzai'
+    if: false # Temporarily disabled
+    # if: github.event.pull_request.user.login == 'henzai'
     runs-on: ubuntu-latest
     permissions:
       contents: read
