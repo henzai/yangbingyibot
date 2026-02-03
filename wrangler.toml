@@ -1,7 +1,7 @@
 #:schema node_modules/wrangler/config-schema.json
 name = "yangbingyibot"
 main = "src/index.ts"
-compatibility_date = "2024-05-24"
+compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
 # Automatically place your workloads in an optimal location to minimize latency.
@@ -110,3 +110,8 @@ id = "1c01e49d7b7948e4ae5d6a3baa1c117f"
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
+
+[[workflows]]
+name = "answer-question-workflow"
+binding = "ANSWER_QUESTION_WORKFLOW"
+class_name = "AnswerQuestionWorkflow"

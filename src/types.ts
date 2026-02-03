@@ -1,3 +1,5 @@
+import type { WorkflowParams } from './workflows/types';
+
 export type Bindings = {
 	DISCORD_TOKEN: string;
 	DISCORD_PUBLIC_KEY: string;
@@ -8,4 +10,5 @@ export type Bindings = {
 	GOOGLE_PRIVATE_KEY: string;
 	GOOGLE_SERVICE_ACCOUNT: string;
 	sushanshan_bot: KVNamespace;
+	ANSWER_QUESTION_WORKFLOW: Workflow<WorkflowParams>;
 };
