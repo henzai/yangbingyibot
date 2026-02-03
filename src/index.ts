@@ -3,8 +3,10 @@ import { verifyDiscordInteraction } from './middleware/verifyDiscordInteraction'
 import { InteractionType, InteractionResponseType } from 'discord-interactions';
 import { errorResponse } from './responses/errorResponse';
 import { Bindings } from './types';
-import { answerQuestion } from './handlers/answerQuestion';
 import { logger } from './utils/logger';
+
+// Re-export the Workflow class for Cloudflare to discover
+export { AnswerQuestionWorkflow } from './workflows/answerQuestionWorkflow';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -43,13 +45,22 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 				// Validate payload structure
 				const { question } = validateDiscordCommand(body);
 
-				// Schedule async processing with proper error isolation
-				c.executionCtx.waitUntil(
-					handleDiscordResponse(question, body.token, c.env).catch((error) => {
-						// Log error but don't throw - waitUntil failures are silent
-						console.error('Fatal error in async processing:', error);
-					})
-				);
+				// Start the workflow
+				logger.info('Starting AnswerQuestionWorkflow', { messageLength: question.length });
+
+				try {
+					await c.env.ANSWER_QUESTION_WORKFLOW.create({
+						params: {
+							token: body.token,
+							message: question,
+						},
+					});
+				} catch (workflowError) {
+					logger.error('Failed to create workflow', {
+						error: workflowError instanceof Error ? workflowError.message : 'Unknown error',
+					});
+					throw new Error('Failed to start processing');
+				}
 
 				return c.json({
 					type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
@@ -62,68 +73,5 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 		return c.json(errorResponse(e instanceof Error ? e.message : 'Unknown error'));
 	}
 });
-
-async function handleDiscordResponse(message: string, token: string, env: Bindings) {
-	const endpoint = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${token}`;
-
-	logger.info('Processing Discord interaction', { messageLength: message.length });
-
-	// Helper to send webhook with retry
-	async function sendWebhook(content: string, retries = 2): Promise<void> {
-		for (let attempt = 0; attempt <= retries; attempt++) {
-			try {
-				const response = await fetch(endpoint, {
-					method: 'POST',
-					body: JSON.stringify({ content }),
-					headers: { 'Content-Type': 'application/json' },
-				});
-
-				if (!response.ok) {
-					const errorText = await response.text();
-					throw new Error(`Discord webhook failed (${response.status}): ${errorText}`);
-				}
-
-				return; // Success
-			} catch (error) {
-				if (attempt === retries) {
-					// Last attempt failed
-					console.error('All webhook retry attempts failed:', error);
-					throw error;
-				}
-				// Wait before retry (exponential backoff)
-				await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
-			}
-		}
-	}
-
-	try {
-		const result = await answerQuestion(message, env);
-		await sendWebhook(`> ${message}\n${result}`);
-		logger.info('Successfully processed interaction', {
-			messageLength: message.length,
-			resultLength: result.length,
-		});
-	} catch (error) {
-		// Try to send error message to user
-		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-
-		logger.error('Failed to process interaction', {
-			error: errorMessage,
-			messageLength: message.length,
-		});
-
-		try {
-			await sendWebhook(`> ${message}\n🚨 エラーが発生しました: ${errorMessage}`);
-		} catch (webhookError) {
-			// Even error reporting failed - log and give up
-			logger.error('Failed to report error to user via webhook', {
-				webhookError: webhookError instanceof Error ? webhookError.message : 'Unknown',
-				originalError: errorMessage,
-			});
-		}
-
-		// Don't re-throw - we're in waitUntil, throwing does nothing
-	}
-}
 
 export default app;
