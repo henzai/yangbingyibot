@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 
 // Constants
 const SHEETS_TIMEOUT_MS = 10000; // 10 seconds
-const GEMINI_TIMEOUT_MS = 30000; // 30 seconds (Gemini can be slow)
+const GEMINI_TIMEOUT_MS = 25000; // 25 seconds - leave margin for other operations within waitUntil() 30s limit
 
 export async function answerQuestion(message: string, env: Bindings): Promise<string> {
 	return await logger.trackTiming(

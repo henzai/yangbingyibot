@@ -23,6 +23,8 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 			let result;
 			try {
 				// Add retry logic with exponential backoff
+				console.log(`[INFO] Gemini API request starting`);
+				const startTime = Date.now();
 				result = await withRetry(
 					async () => {
 						return await this.client.models.generateContent({
@@ -32,9 +34,9 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 						});
 					},
 					{
-						maxAttempts: 3,
-						initialDelayMs: 1000,
-						maxDelayMs: 8000,
+						maxAttempts: 2,
+						initialDelayMs: 500,
+						maxDelayMs: 2000,
 					},
 					// Only retry on transient errors
 					(error) => {
@@ -50,6 +52,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 						);
 					}
 				);
+				console.log(`[INFO] Gemini API completed in ${Date.now() - startTime}ms`);
 			} catch (error) {
 				console.error('Gemini API request failed:', error);
 
