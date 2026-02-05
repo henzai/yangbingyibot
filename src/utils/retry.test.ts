@@ -56,7 +56,7 @@ describe('withRetry', () => {
 				.mockRejectedValueOnce(new Error('error 2'))
 				.mockResolvedValueOnce('success');
 
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
 			const promise = withRetry(mockFn, {
 				initialDelayMs: 1000,
@@ -67,9 +67,10 @@ describe('withRetry', () => {
 			await vi.runAllTimersAsync();
 			await promise;
 
-			// Verify delays: 1000ms, 2000ms
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('1000ms'), expect.any(Object));
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('2000ms'), expect.any(Object));
+			// Verify delays: 1000ms, 2000ms (logged as JSON)
+			const calls = consoleSpy.mock.calls.map((call) => call[0]);
+			expect(calls.some((c) => c.includes('"delayMs":1000'))).toBe(true);
+			expect(calls.some((c) => c.includes('"delayMs":2000'))).toBe(true);
 
 			consoleSpy.mockRestore();
 		});
@@ -81,7 +82,7 @@ describe('withRetry', () => {
 				.mockRejectedValueOnce(new Error('error 2'))
 				.mockResolvedValueOnce('success');
 
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
 			const promise = withRetry(mockFn, {
 				initialDelayMs: 5000,
@@ -92,9 +93,10 @@ describe('withRetry', () => {
 			await vi.runAllTimersAsync();
 			await promise;
 
-			// First retry: 5000ms, second retry: min(15000, 8000) = 8000ms
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('5000ms'), expect.any(Object));
-			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('8000ms'), expect.any(Object));
+			// First retry: 5000ms, second retry: min(15000, 8000) = 8000ms (logged as JSON)
+			const calls = consoleSpy.mock.calls.map((call) => call[0]);
+			expect(calls.some((c) => c.includes('"delayMs":5000'))).toBe(true);
+			expect(calls.some((c) => c.includes('"delayMs":8000'))).toBe(true);
 
 			consoleSpy.mockRestore();
 		});
@@ -235,16 +237,15 @@ describe('withRetry', () => {
 				.mockRejectedValueOnce(new Error('temporary error'))
 				.mockResolvedValueOnce('success');
 
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
 			const promise = withRetry(mockFn);
 			await vi.runAllTimersAsync();
 			await promise;
 
-			expect(consoleSpy).toHaveBeenCalledWith(
-				expect.stringContaining('Retry attempt'),
-				expect.objectContaining({ error: 'temporary error' })
-			);
+			// Logs are now JSON formatted
+			const calls = consoleSpy.mock.calls.map((call) => call[0]);
+			expect(calls.some((c) => c.includes('Retry attempt') && c.includes('temporary error'))).toBe(true);
 
 			consoleSpy.mockRestore();
 		});

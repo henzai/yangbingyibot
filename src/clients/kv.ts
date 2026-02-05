@@ -1,3 +1,5 @@
+import { Logger, logger as defaultLogger } from '../utils/logger';
+
 // KV用のキー
 const SHEET_INFO = 'sheet_info';
 const HISTORY_KEY = 'chat_history';
@@ -22,9 +24,11 @@ type ChatHistory = {
 
 export class KV {
 	private kv: KVNamespace;
+	private log: Logger;
 
-	constructor(kv: KVNamespace) {
+	constructor(kv: KVNamespace, log?: Logger) {
 		this.kv = kv;
+		this.log = log ?? defaultLogger;
 	}
 
 	async saveHistory(history: { role: string; text: string }[]): Promise<void> {
@@ -37,7 +41,9 @@ export class KV {
 
 			await this.kv.put(HISTORY_KEY, JSON.stringify(newHistory));
 		} catch (error) {
-			console.error('Failed to save history to KV:', error);
+			this.log.error('Failed to save history to KV', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			throw new Error('Failed to save conversation history');
 		}
 	}
@@ -51,13 +57,15 @@ export class KV {
 			try {
 				parsedHistory = JSON.parse(historyStr);
 			} catch (parseError) {
-				console.error('Failed to parse history JSON, returning empty array:', parseError);
+				this.log.warn('Failed to parse history JSON, returning empty array', {
+					error: parseError instanceof Error ? parseError.message : 'Unknown error',
+				});
 				return [];
 			}
 
 			// Validate array structure
 			if (!Array.isArray(parsedHistory)) {
-				console.error('History data is not an array, returning empty array');
+				this.log.warn('History data is not an array, returning empty array');
 				return [];
 			}
 
@@ -74,7 +82,9 @@ export class KV {
 				})
 				.map(({ role, text }) => ({ role, text }));
 		} catch (error) {
-			console.error('Failed to get history from KV:', error);
+			this.log.error('Failed to get history from KV', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			// Return empty array on error - don't fail the request
 			return [];
 		}
@@ -92,7 +102,7 @@ export class KV {
 				typeof cachedData.sheetInfo !== 'string' ||
 				typeof cachedData.description !== 'string'
 			) {
-				console.error('Invalid cache data structure, ignoring cache');
+				this.log.warn('Invalid cache data structure, ignoring cache');
 				return null;
 			}
 
@@ -102,7 +112,9 @@ export class KV {
 
 			return null;
 		} catch (error) {
-			console.error('Failed to get cache from KV:', error);
+			this.log.error('Failed to get cache from KV', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			// Return null on error - will fetch fresh data
 			return null;
 		}
@@ -118,12 +130,14 @@ export class KV {
 
 			await this.kv.put(SHEET_INFO, JSON.stringify(newCacheData));
 		} catch (error) {
-			console.error('Failed to save cache to KV:', error);
+			this.log.error('Failed to save cache to KV', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			throw new Error('Failed to save cache data');
 		}
 	}
 }
 
-export const createKV = (kv: KVNamespace): KV => {
-	return new KV(kv);
+export const createKV = (kv: KVNamespace, log?: Logger): KV => {
+	return new KV(kv, log);
 };

@@ -5,17 +5,50 @@ export enum LogLevel {
 	DEBUG = 'DEBUG',
 }
 
-interface LogContext {
-	[key: string]: any;
+export interface LogContext {
+	requestId?: string;
+	workflowId?: string;
+	step?: string;
+	durationMs?: number;
+	[key: string]: unknown;
 }
 
-class Logger {
-	private includeTimestamp = true;
+interface StructuredLog {
+	timestamp: string;
+	level: LogLevel;
+	message: string;
+	requestId?: string;
+	context?: LogContext;
+}
+
+export class Logger {
+	private baseContext: LogContext;
+
+	constructor(baseContext: LogContext = {}) {
+		this.baseContext = baseContext;
+	}
+
+	/**
+	 * Creates a new Logger instance with additional context
+	 * Useful for adding request-scoped context like requestId
+	 */
+	withContext(context: LogContext): Logger {
+		return new Logger({ ...this.baseContext, ...context });
+	}
 
 	private log(level: LogLevel, message: string, context?: LogContext) {
-		const timestamp = this.includeTimestamp ? new Date().toISOString() : '';
-		const contextStr = context ? ` | ${JSON.stringify(context)}` : '';
-		console.log(`${timestamp} [${level}] ${message}${contextStr}`);
+		const mergedContext = { ...this.baseContext, ...context };
+		const { requestId, ...restContext } = mergedContext;
+
+		const structuredLog: StructuredLog = {
+			timestamp: new Date().toISOString(),
+			level,
+			message,
+			...(requestId && { requestId }),
+			...(Object.keys(restContext).length > 0 && { context: restContext }),
+		};
+
+		console.log(JSON.stringify(structuredLog));
 	}
 
 	error(message: string, context?: LogContext) {
@@ -34,7 +67,9 @@ class Logger {
 		this.log(LogLevel.DEBUG, message, context);
 	}
 
-	// Performance timing wrapper
+	/**
+	 * Performance timing wrapper that logs operation duration
+	 */
 	async trackTiming<T>(operation: string, fn: () => Promise<T>, metadata?: LogContext): Promise<T> {
 		const startTime = Date.now();
 		let success = false;
