@@ -4,6 +4,8 @@ export interface WorkflowParams {
 	token: string;
 	// User's question message
 	message: string;
+	// Request ID for distributed tracing
+	requestId: string;
 }
 
 // Step outputs (must be JSON serializable)
