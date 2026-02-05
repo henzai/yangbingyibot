@@ -4,6 +4,7 @@ import { InteractionType, InteractionResponseType } from 'discord-interactions';
 import { errorResponse } from './responses/errorResponse';
 import { Bindings } from './types';
 import { logger } from './utils/logger';
+import { generateRequestId } from './utils/requestId';
 
 // Re-export the Workflow class for Cloudflare to discover
 export { AnswerQuestionWorkflow } from './workflows/answerQuestionWorkflow';
@@ -32,6 +33,9 @@ app.get('/', (c) => c.text('Hello Cloudflare Workers!'));
 
 app.post('/', verifyDiscordInteraction, async (c) => {
 	const body = await c.req.json();
+	const requestId = generateRequestId();
+	const log = logger.withContext({ requestId });
+
 	try {
 		switch (body.type) {
 			// CRITICAL: Discord Interactions Endpoint Requirement
@@ -46,17 +50,18 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 				const { question } = validateDiscordCommand(body);
 
 				// Start the workflow
-				logger.info('Starting AnswerQuestionWorkflow', { messageLength: question.length });
+				log.info('Starting AnswerQuestionWorkflow', { messageLength: question.length });
 
 				try {
 					await c.env.ANSWER_QUESTION_WORKFLOW.create({
 						params: {
 							token: body.token,
 							message: question,
+							requestId,
 						},
 					});
 				} catch (workflowError) {
-					logger.error('Failed to create workflow', {
+					log.error('Failed to create workflow', {
 						error: workflowError instanceof Error ? workflowError.message : 'Unknown error',
 					});
 					throw new Error('Failed to start processing');
@@ -70,6 +75,7 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 		}
 	} catch (e) {
 		// This catch only handles synchronous errors before deferred response
+		log.error('Request failed', { error: e instanceof Error ? e.message : 'Unknown error' });
 		return c.json(errorResponse(e instanceof Error ? e.message : 'Unknown error'));
 	}
 });

@@ -1,6 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { WorkflowParams, SheetDataOutput, HistoryOutput, GeminiOutput } from './types';
 import { Bindings } from '../types';
+import { Logger } from '../utils/logger';
+
+// Mock logger
+const mockLogger: Logger = {
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	debug: vi.fn(),
+	trackTiming: vi.fn(),
+	withContext: vi.fn(() => mockLogger),
+} as unknown as Logger;
 
 // Mock the clients
 const mockKVInstance = {
@@ -66,7 +77,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				description: 'cached desc',
 			});
 
-			const result = await getSheetDataStep(mockEnv);
+			const result = await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(result).toEqual({
 				sheetInfo: 'cached sheet',
@@ -83,14 +94,14 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				description: 'fresh desc',
 			});
 
-			const result = await getSheetDataStep(mockEnv);
+			const result = await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(result).toEqual({
 				sheetInfo: 'fresh sheet',
 				description: 'fresh desc',
 				fromCache: false,
 			});
-			expect(getSheetData).toHaveBeenCalledWith(mockEnv.GOOGLE_SERVICE_ACCOUNT);
+			expect(getSheetData).toHaveBeenCalledWith(mockEnv.GOOGLE_SERVICE_ACCOUNT, mockLogger);
 		});
 
 		it('saves cache after fetching fresh data', async () => {
@@ -100,7 +111,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				description: 'fresh desc',
 			});
 
-			await getSheetDataStep(mockEnv);
+			await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(mockKVInstance.saveCache).toHaveBeenCalledWith('fresh sheet', 'fresh desc');
 		});
@@ -111,7 +122,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				description: 'cached desc',
 			});
 
-			await getSheetDataStep(mockEnv);
+			await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(mockKVInstance.saveCache).not.toHaveBeenCalled();
 		});
@@ -125,7 +136,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			];
 			mockKVInstance.getHistory.mockResolvedValue(existingHistory);
 
-			const result = await getHistoryStep(mockEnv);
+			const result = await getHistoryStep(mockEnv, mockLogger);
 
 			expect(result).toEqual({ history: existingHistory });
 		});
@@ -133,7 +144,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 		it('returns empty array when no history exists', async () => {
 			mockKVInstance.getHistory.mockResolvedValue([]);
 
-			const result = await getHistoryStep(mockEnv);
+			const result = await getHistoryStep(mockEnv, mockLogger);
 
 			expect(result).toEqual({ history: [] });
 		});
@@ -153,9 +164,9 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				{ role: 'model', text: 'AI response' },
 			]);
 
-			const result = await callGeminiStep(mockEnv, 'test message', sheetData, history);
+			const result = await callGeminiStep(mockEnv, 'test message', sheetData, history, mockLogger);
 
-			expect(createGeminiClient).toHaveBeenCalledWith(mockEnv.GEMINI_API_KEY, []);
+			expect(createGeminiClient).toHaveBeenCalledWith(mockEnv.GEMINI_API_KEY, [], mockLogger);
 			expect(mockGeminiInstance.ask).toHaveBeenCalledWith('test message', 'sheet data', 'sheet description');
 			expect(result.response).toBe('AI response');
 			expect(result.updatedHistory).toHaveLength(2);
@@ -172,9 +183,9 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			mockGeminiInstance.ask.mockResolvedValue('response');
 			mockGeminiInstance.getHistory.mockReturnValue([]);
 
-			await callGeminiStep(mockEnv, 'new message', sheetData, history);
+			await callGeminiStep(mockEnv, 'new message', sheetData, history, mockLogger);
 
-			expect(createGeminiClient).toHaveBeenCalledWith(mockEnv.GEMINI_API_KEY, existingHistory);
+			expect(createGeminiClient).toHaveBeenCalledWith(mockEnv.GEMINI_API_KEY, existingHistory, mockLogger);
 		});
 	});
 
@@ -185,7 +196,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				{ role: 'model', text: 'answer' },
 			];
 
-			const result = await saveHistoryStep(mockEnv, updatedHistory);
+			const result = await saveHistoryStep(mockEnv, updatedHistory, mockLogger);
 
 			expect(mockKVInstance.saveHistory).toHaveBeenCalledWith(updatedHistory);
 			expect(result).toEqual({ success: true });
@@ -194,7 +205,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 		it('returns success false on error', async () => {
 			mockKVInstance.saveHistory.mockRejectedValue(new Error('KV error'));
 
-			const result = await saveHistoryStep(mockEnv, []);
+			const result = await saveHistoryStep(mockEnv, [], mockLogger);
 
 			expect(result).toEqual({ success: false });
 		});
@@ -208,7 +219,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			});
 			globalThis.fetch = mockFetch;
 
-			const result = await sendDiscordResponseStep(mockEnv, 'test-token-123', 'user question', 'AI answer');
+			const result = await sendDiscordResponseStep(mockEnv, 'test-token-123', 'user question', 'AI answer', mockLogger);
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				`https://discord.com/api/v10/webhooks/${mockEnv.DISCORD_APPLICATION_ID}/test-token-123`,
@@ -228,7 +239,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			});
 			globalThis.fetch = mockFetch;
 
-			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', null, 'Some error occurred');
+			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', null, mockLogger, 'Some error occurred');
 
 			expect(mockFetch).toHaveBeenCalledWith(expect.any(String), {
 				method: 'POST',
@@ -245,7 +256,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				.mockResolvedValueOnce({ ok: true, status: 200 });
 			globalThis.fetch = mockFetch;
 
-			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer');
+			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer', mockLogger);
 
 			expect(mockFetch).toHaveBeenCalledTimes(2);
 			expect(result).toEqual({ success: true, statusCode: 200 });
@@ -259,7 +270,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			});
 			globalThis.fetch = mockFetch;
 
-			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer');
+			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer', mockLogger);
 
 			expect(mockFetch).toHaveBeenCalledTimes(3); // Initial + 2 retries
 			expect(result).toEqual({ success: false, statusCode: 500 });

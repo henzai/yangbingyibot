@@ -1,5 +1,6 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
+import { Logger, logger as defaultLogger } from '../utils/logger';
 
 // スプレッドシートのID
 const DOC_ID = '1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg';
@@ -32,7 +33,7 @@ function parseServiceAccount(serviceAccountJson: string): GoogleKey {
 }
 
 // Helper to authenticate with Google
-async function authenticateGoogle(serviceAccountJson: string): Promise<string> {
+async function authenticateGoogle(serviceAccountJson: string, log: Logger): Promise<string> {
 	try {
 		const googleAuth = parseServiceAccount(serviceAccountJson);
 		const oauth = new GoogleAuth(googleAuth, GOOGLE_SCOPES);
@@ -44,7 +45,9 @@ async function authenticateGoogle(serviceAccountJson: string): Promise<string> {
 
 		return token;
 	} catch (error) {
-		console.error('Google authentication error:', error);
+		log.error('Google authentication error', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+		});
 		throw new Error(`Google authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
 	}
 }
@@ -56,7 +59,7 @@ export interface SheetData {
 }
 
 // Helper to fetch sheet info from a loaded document
-async function fetchSheetInfo(doc: GoogleSpreadsheet): Promise<string> {
+async function fetchSheetInfo(doc: GoogleSpreadsheet, log: Logger): Promise<string> {
 	const sheet = doc.sheetsByTitle[SHEET_NAME];
 	if (!sheet) {
 		throw new Error(`Sheet "${SHEET_NAME}" not found in spreadsheet`);
@@ -73,16 +76,18 @@ async function fetchSheetInfo(doc: GoogleSpreadsheet): Promise<string> {
 
 		return csvContent;
 	} catch (error) {
-		console.error('Failed to download sheet as CSV:', error);
+		log.error('Failed to download sheet as CSV', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+		});
 		throw new Error('シートデータのダウンロードに失敗しました。');
 	}
 }
 
 // Helper to fetch description from a loaded document
-async function fetchSheetDescription(doc: GoogleSpreadsheet): Promise<string> {
+async function fetchSheetDescription(doc: GoogleSpreadsheet, log: Logger): Promise<string> {
 	const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
 	if (!sheet) {
-		console.warn(`Description sheet "${DESCRIPTION_SHEET_NAME}" not found, using empty description`);
+		log.warn(`Description sheet "${DESCRIPTION_SHEET_NAME}" not found, using empty description`);
 		return '';
 	}
 
@@ -91,28 +96,36 @@ async function fetchSheetDescription(doc: GoogleSpreadsheet): Promise<string> {
 		const cell = sheet.getCellByA1('A1');
 		return cell.value?.toString() || '';
 	} catch (error) {
-		console.error('Failed to load description cell:', error);
+		log.warn('Failed to load description cell', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+		});
 		return '';
 	}
 }
 
 // Unified function to fetch both sheet info and description with single authentication
-export async function getSheetData(serviceAccountJson: string): Promise<SheetData> {
+export async function getSheetData(serviceAccountJson: string, log?: Logger): Promise<SheetData> {
+	const logger = log ?? defaultLogger;
 	try {
 		// Authenticate once
-		const token = await authenticateGoogle(serviceAccountJson);
+		const token = await authenticateGoogle(serviceAccountJson, logger);
 		const doc = new GoogleSpreadsheet(DOC_ID, { token });
 
 		// Load document info
 		try {
 			await doc.loadInfo();
 		} catch (error) {
-			console.error('Failed to load spreadsheet info:', error);
+			logger.error('Failed to load spreadsheet info', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			throw new Error('スプレッドシートへのアクセスに失敗しました。権限を確認してください。');
 		}
 
 		// Fetch both sheets in parallel using the same authenticated token
-		const [sheetInfo, description] = await Promise.all([fetchSheetInfo(doc), fetchSheetDescription(doc)]);
+		const [sheetInfo, description] = await Promise.all([
+			fetchSheetInfo(doc, logger),
+			fetchSheetDescription(doc, logger),
+		]);
 
 		return { sheetInfo, description };
 	} catch (error) {
@@ -121,7 +134,9 @@ export async function getSheetData(serviceAccountJson: string): Promise<SheetDat
 			throw error;
 		}
 
-		console.error('Unexpected error in getSheetData:', error);
+		logger.error('Unexpected error in getSheetData', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+		});
 		throw new Error('スプレッドシート情報の取得中にエラーが発生しました。');
 	}
 }

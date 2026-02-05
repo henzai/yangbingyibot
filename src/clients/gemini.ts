@@ -1,13 +1,16 @@
 import { GoogleGenAI } from '@google/genai';
 import { withRetry } from '../utils/retry';
+import { Logger, logger as defaultLogger } from '../utils/logger';
 
 export class GeminiClient {
 	private client: GoogleGenAI;
 	private history: { role: string; text: string }[];
+	private log: Logger;
 
-	constructor(apiKey: string, initialHistory: { role: string; text: string }[] = []) {
+	constructor(apiKey: string, initialHistory: { role: string; text: string }[] = [], log?: Logger) {
 		this.client = new GoogleGenAI({ apiKey });
 		this.history = initialHistory;
+		this.log = log ?? defaultLogger;
 	}
 
 	async ask(input: string, sheet: string, description: string): Promise<string> {
@@ -23,7 +26,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 			let result;
 			try {
 				// Add retry logic with exponential backoff
-				console.log(`[INFO] Gemini API request starting`);
+				this.log.info('Gemini API request starting');
 				const startTime = Date.now();
 				result = await withRetry(
 					async () => {
@@ -50,11 +53,14 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 							msg.includes('500') ||
 							msg.includes('503')
 						);
-					}
+					},
+					this.log
 				);
-				console.log(`[INFO] Gemini API completed in ${Date.now() - startTime}ms`);
+				this.log.info('Gemini API completed', { durationMs: Date.now() - startTime });
 			} catch (error) {
-				console.error('Gemini API request failed:', error);
+				this.log.error('Gemini API request failed', {
+					error: error instanceof Error ? error.message : 'Unknown error',
+				});
 
 				// Check for specific error types
 				if (error instanceof Error) {
@@ -77,14 +83,16 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 				!result.candidates[0].content.parts ||
 				!result.candidates[0].content.parts[0]
 			) {
-				console.error('Invalid Gemini response structure:', JSON.stringify(result));
+				this.log.error('Invalid Gemini response structure', {
+					result: JSON.stringify(result),
+				});
 				throw new Error('AIからの応答形式が不正です。');
 			}
 
 			const response = result.candidates[0].content.parts[0].text;
 
 			if (!response || typeof response !== 'string' || !response.trim()) {
-				console.error('Empty or invalid text in Gemini response');
+				this.log.error('Empty or invalid text in Gemini response');
 				throw new Error('AIから有効な応答が得られませんでした。');
 			}
 
@@ -105,7 +113,9 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 				throw error;
 			}
 
-			console.error('Unexpected error in Gemini client:', error);
+			this.log.error('Unexpected error in Gemini client', {
+				error: error instanceof Error ? error.message : 'Unknown error',
+			});
 			throw new Error('AI処理中に予期しないエラーが発生しました。');
 		}
 	}
@@ -119,8 +129,12 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 	}
 }
 
-export const createGeminiClient = (apiKey: string, initialHistory: { role: string; text: string }[] = []): GeminiClient => {
-	return new GeminiClient(apiKey, initialHistory);
+export const createGeminiClient = (
+	apiKey: string,
+	initialHistory: { role: string; text: string }[] = [],
+	log?: Logger
+): GeminiClient => {
+	return new GeminiClient(apiKey, initialHistory, log);
 };
 
 const generationConfig = {
