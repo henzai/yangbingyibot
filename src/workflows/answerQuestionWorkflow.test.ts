@@ -50,6 +50,11 @@ import {
 	sendDiscordResponseStep,
 } from './answerQuestionWorkflow';
 
+// Mock Analytics Engine Dataset
+const mockAnalyticsDataset = {
+	writeDataPoint: vi.fn(),
+};
+
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: 'test-token',
 	DISCORD_PUBLIC_KEY: 'test-public-key',
@@ -61,6 +66,7 @@ const mockEnv: Bindings = {
 	GOOGLE_SERVICE_ACCOUNT: '{"type":"service_account"}',
 	sushanshan_bot: {} as KVNamespace,
 	ANSWER_QUESTION_WORKFLOW: {} as Workflow<any>,
+	METRICS: mockAnalyticsDataset as unknown as AnalyticsEngineDataset,
 };
 
 describe('AnswerQuestionWorkflow Steps', () => {
