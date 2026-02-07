@@ -11,4 +11,5 @@ export type Bindings = {
 	GOOGLE_SERVICE_ACCOUNT: string;
 	sushanshan_bot: KVNamespace;
 	ANSWER_QUESTION_WORKFLOW: Workflow<WorkflowParams>;
+	METRICS?: AnalyticsEngineDataset;
 };

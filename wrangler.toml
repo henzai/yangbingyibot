@@ -72,6 +72,11 @@ compatibility_flags = ["nodejs_compat"]
 binding = "sushanshan_bot"
 id = "1c01e49d7b7948e4ae5d6a3baa1c117f"
 
+# Bind an Analytics Engine dataset for metrics collection.
+[[analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "yangbingyibot_metrics"
+
 # Bind an mTLS certificate. Use to present a client certificate when communicating with another service.
 # Docs: https://developers.cloudflare.com/workers/wrangler/configuration/#mtls-certificates
 # [[mtls_certificates]]

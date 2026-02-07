@@ -31,4 +31,5 @@ export interface SaveHistoryOutput {
 export interface DiscordResponseOutput {
 	success: boolean;
 	statusCode?: number;
+	retryCount: number;
 }

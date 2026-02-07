@@ -2,6 +2,7 @@ import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:work
 import { createKV } from '../clients/kv';
 import { createGeminiClient } from '../clients/gemini';
 import { getSheetData } from '../clients/spreadSheet';
+import { createMetricsClient, NoOpMetricsClient, type IMetricsClient } from '../clients/metrics';
 import { Bindings } from '../types';
 import { Logger, logger } from '../utils/logger';
 import type {
@@ -12,6 +13,16 @@ import type {
 	SaveHistoryOutput,
 	DiscordResponseOutput,
 } from './types';
+
+/**
+ * Get MetricsClient from env, falling back to NoOp if binding is unavailable
+ */
+function getMetricsClient(env: Bindings, log: Logger): IMetricsClient {
+	if (env.METRICS) {
+		return createMetricsClient(env.METRICS, log);
+	}
+	return new NoOpMetricsClient();
+}
 
 // Step 1: Get sheet data from KV cache or Google Sheets
 export async function getSheetDataStep(env: Bindings, log: Logger): Promise<SheetDataOutput> {
@@ -121,12 +132,12 @@ export async function sendDiscordResponseStep(
 
 			if (res.ok) {
 				log.info('Discord webhook sent successfully', { statusCode: res.status, attempt });
-				return { success: true, statusCode: res.status };
+				return { success: true, statusCode: res.status, retryCount: attempt };
 			}
 
 			if (attempt === maxRetries) {
 				log.error('Discord webhook failed', { statusCode: res.status, attempt });
-				return { success: false, statusCode: res.status };
+				return { success: false, statusCode: res.status, retryCount: attempt };
 			}
 
 			log.warn('Discord webhook retry', { statusCode: res.status, attempt });
@@ -138,7 +149,7 @@ export async function sendDiscordResponseStep(
 					error: error instanceof Error ? error.message : 'Unknown error',
 					attempt,
 				});
-				return { success: false };
+				return { success: false, retryCount: attempt };
 			}
 			log.warn('Discord webhook error, retrying', {
 				error: error instanceof Error ? error.message : 'Unknown error',
@@ -148,7 +159,7 @@ export async function sendDiscordResponseStep(
 		}
 	}
 
-	return { success: false };
+	return { success: false, retryCount: maxRetries };
 }
 
 // Workflow class
@@ -156,42 +167,82 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 	async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep) {
 		const { token, message, requestId } = event.payload;
 		const log = logger.withContext({ requestId, workflowId: event.instanceId });
+		const metrics = getMetricsClient(this.env, log);
 
 		log.info('Workflow started', { messageLength: message.length });
-		const startTime = Date.now();
+		const workflowStartTime = Date.now();
+		let stepCount = 0;
+		let fromCache = false;
 
 		try {
 			// Step 1: Get sheet data
+			const sheetDataStartTime = Date.now();
 			const sheetData = await step.do('getSheetData', async () => {
 				return getSheetDataStep(this.env, log.withContext({ step: 'getSheetData' }));
 			});
+			stepCount++;
+			fromCache = sheetData.fromCache;
+
+			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
+
+			// Record cache access metric
+			metrics.recordKVCacheAccess({
+				requestId,
+				success: true,
+				durationMs: sheetDataDurationMs,
+				cacheHit: sheetData.fromCache,
+				operation: 'get',
+			});
+
+			// Record sheets API metric if cache was missed
+			if (!sheetData.fromCache) {
+				metrics.recordSheetsApiCall({
+					requestId,
+					success: true,
+					durationMs: sheetDataDurationMs,
+				});
+			}
 
 			// Step 2: Get conversation history
 			const historyOutput = await step.do('getHistory', async () => {
 				return getHistoryStep(this.env, log.withContext({ step: 'getHistory' }));
 			});
+			stepCount++;
 
 			// Step 3: Call Gemini AI
-			const geminiResult = await step.do(
-				'callGemini',
-				{
-					retries: {
-						limit: 2,
-						delay: '1 second',
-						backoff: 'exponential',
+			const geminiStartTime = Date.now();
+			let geminiSuccess = false;
+			let geminiResult: GeminiOutput;
+			try {
+				geminiResult = await step.do(
+					'callGemini',
+					{
+						retries: {
+							limit: 2,
+							delay: '1 second',
+							backoff: 'exponential',
+						},
+						timeout: '60 seconds',
 					},
-					timeout: '60 seconds',
-				},
-				async () => {
-					return callGeminiStep(
-						this.env,
-						message,
-						sheetData,
-						historyOutput,
-						log.withContext({ step: 'callGemini' })
-					);
-				}
-			);
+					async () => {
+						return callGeminiStep(
+							this.env,
+							message,
+							sheetData,
+							historyOutput,
+							log.withContext({ step: 'callGemini' })
+						);
+					}
+				);
+				geminiSuccess = true;
+				stepCount++;
+			} finally {
+				metrics.recordGeminiCall({
+					requestId,
+					success: geminiSuccess,
+					durationMs: Date.now() - geminiStartTime,
+				});
+			}
 
 			// Step 4: Save history
 			await step.do('saveHistory', async () => {
@@ -201,9 +252,11 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 					log.withContext({ step: 'saveHistory' })
 				);
 			});
+			stepCount++;
 
 			// Step 5: Send Discord response
-			await step.do('sendDiscordResponse', async () => {
+			const discordStartTime = Date.now();
+			const discordResult = await step.do('sendDiscordResponse', async () => {
 				return sendDiscordResponseStep(
 					this.env,
 					token,
@@ -212,17 +265,48 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 					log.withContext({ step: 'sendDiscordResponse' })
 				);
 			});
+			stepCount++;
 
-			log.info('Workflow completed successfully', { durationMs: Date.now() - startTime });
+			metrics.recordDiscordWebhook({
+				requestId,
+				success: discordResult.success,
+				durationMs: Date.now() - discordStartTime,
+				retryCount: discordResult.retryCount,
+				statusCode: discordResult.statusCode,
+			});
+
+			// Record workflow completion (success)
+			metrics.recordWorkflowComplete({
+				requestId,
+				workflowId: event.instanceId,
+				success: true,
+				durationMs: Date.now() - workflowStartTime,
+				stepCount,
+				fromCache,
+			});
+
+			log.info('Workflow completed successfully', { durationMs: Date.now() - workflowStartTime });
 		} catch (error) {
 			// Send error response to Discord
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+			const failureDurationMs = Date.now() - workflowStartTime;
 			log.error('Workflow error', {
 				error: errorMessage,
-				durationMs: Date.now() - startTime,
+				durationMs: failureDurationMs,
 			});
 
-			await step.do('sendErrorResponse', async () => {
+			// Record workflow completion (failure)
+			metrics.recordWorkflowComplete({
+				requestId,
+				workflowId: event.instanceId,
+				success: false,
+				durationMs: failureDurationMs,
+				stepCount,
+				fromCache,
+			});
+
+			const discordErrorStartTime = Date.now();
+			const discordErrorResult = await step.do('sendErrorResponse', async () => {
 				return sendDiscordResponseStep(
 					this.env,
 					token,
@@ -231,6 +315,14 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 					log.withContext({ step: 'sendErrorResponse' }),
 					errorMessage
 				);
+			});
+
+			metrics.recordDiscordWebhook({
+				requestId,
+				success: discordErrorResult.success,
+				durationMs: Date.now() - discordErrorStartTime,
+				retryCount: discordErrorResult.retryCount,
+				statusCode: discordErrorResult.statusCode,
 			});
 		}
 	}
