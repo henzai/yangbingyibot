@@ -48,6 +48,11 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 
 KV namespace `sushanshan_bot` must be bound in wrangler.toml.
 
+## Git Workflow
+
+- 新しいブランチは、明確に既存ブランチの作業を引き継ぐ場合を除き、必ず `main` から作成すること
+- PRを作成する際は、対象の変更に関係ないコミットが含まれていないことを確認すること
+
 ## Critical Components
 
 ### Discord PING/PONG Endpoint (src/index.ts)
