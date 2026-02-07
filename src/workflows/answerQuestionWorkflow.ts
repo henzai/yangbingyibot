@@ -132,12 +132,12 @@ export async function sendDiscordResponseStep(
 
 			if (res.ok) {
 				log.info('Discord webhook sent successfully', { statusCode: res.status, attempt });
-				return { success: true, statusCode: res.status };
+				return { success: true, statusCode: res.status, retryCount: attempt };
 			}
 
 			if (attempt === maxRetries) {
 				log.error('Discord webhook failed', { statusCode: res.status, attempt });
-				return { success: false, statusCode: res.status };
+				return { success: false, statusCode: res.status, retryCount: attempt };
 			}
 
 			log.warn('Discord webhook retry', { statusCode: res.status, attempt });
@@ -149,7 +149,7 @@ export async function sendDiscordResponseStep(
 					error: error instanceof Error ? error.message : 'Unknown error',
 					attempt,
 				});
-				return { success: false };
+				return { success: false, retryCount: attempt };
 			}
 			log.warn('Discord webhook error, retrying', {
 				error: error instanceof Error ? error.message : 'Unknown error',
@@ -159,7 +159,7 @@ export async function sendDiscordResponseStep(
 		}
 	}
 
-	return { success: false };
+	return { success: false, retryCount: maxRetries };
 }
 
 // Workflow class
@@ -183,11 +183,13 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 			stepCount++;
 			fromCache = sheetData.fromCache;
 
+			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
+
 			// Record cache access metric
 			metrics.recordKVCacheAccess({
 				requestId,
 				success: true,
-				durationMs: Date.now() - sheetDataStartTime,
+				durationMs: sheetDataDurationMs,
 				cacheHit: sheetData.fromCache,
 				operation: 'get',
 			});
@@ -197,7 +199,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 				metrics.recordSheetsApiCall({
 					requestId,
 					success: true,
-					durationMs: Date.now() - sheetDataStartTime,
+					durationMs: sheetDataDurationMs,
 				});
 			}
 
@@ -269,7 +271,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 				requestId,
 				success: discordResult.success,
 				durationMs: Date.now() - discordStartTime,
-				retryCount: 0, // Retry count is handled internally
+				retryCount: discordResult.retryCount,
 				statusCode: discordResult.statusCode,
 			});
 
@@ -287,9 +289,10 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 		} catch (error) {
 			// Send error response to Discord
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+			const failureDurationMs = Date.now() - workflowStartTime;
 			log.error('Workflow error', {
 				error: errorMessage,
-				durationMs: Date.now() - workflowStartTime,
+				durationMs: failureDurationMs,
 			});
 
 			// Record workflow completion (failure)
@@ -297,7 +300,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 				requestId,
 				workflowId: event.instanceId,
 				success: false,
-				durationMs: Date.now() - workflowStartTime,
+				durationMs: failureDurationMs,
 				stepCount,
 				fromCache,
 			});
@@ -318,7 +321,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<Bindings, Workflo
 				requestId,
 				success: discordErrorResult.success,
 				durationMs: Date.now() - discordErrorStartTime,
-				retryCount: 0,
+				retryCount: discordErrorResult.retryCount,
 				statusCode: discordErrorResult.statusCode,
 			});
 		}

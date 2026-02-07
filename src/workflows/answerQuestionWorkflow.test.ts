@@ -235,7 +235,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 					headers: { 'Content-Type': 'application/json' },
 				}
 			);
-			expect(result).toEqual({ success: true, statusCode: 200 });
+			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
 		});
 
 		it('sends error response when AI fails', async () => {
@@ -252,7 +252,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 				body: JSON.stringify({ content: '> question\n:rotating_light: エラーが発生しました: Some error occurred' }),
 				headers: { 'Content-Type': 'application/json' },
 			});
-			expect(result).toEqual({ success: true, statusCode: 200 });
+			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
 		});
 
 		it('retries on failure', async () => {
@@ -265,7 +265,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer', mockLogger);
 
 			expect(mockFetch).toHaveBeenCalledTimes(2);
-			expect(result).toEqual({ success: true, statusCode: 200 });
+			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 1 });
 		});
 
 		it('returns failure after all retries exhausted', async () => {
@@ -279,7 +279,7 @@ describe('AnswerQuestionWorkflow Steps', () => {
 			const result = await sendDiscordResponseStep(mockEnv, 'token', 'question', 'answer', mockLogger);
 
 			expect(mockFetch).toHaveBeenCalledTimes(3); // Initial + 2 retries
-			expect(result).toEqual({ success: false, statusCode: 500 });
+			expect(result).toEqual({ success: false, statusCode: 500, retryCount: 2 });
 		});
 	});
 });
