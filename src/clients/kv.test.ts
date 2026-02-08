@@ -21,14 +21,26 @@ describe('KV class', () => {
 	});
 
 	describe('saveHistory', () => {
-		it('saves history with current timestamp', async () => {
+		it('saves history with expirationTtl', async () => {
 			const history = [{ role: 'user', text: 'hello' }];
 
 			await kv.saveHistory(history);
 
-			expect(mockKV.put).toHaveBeenCalledWith('chat_history', expect.stringContaining('"role":"user"'));
-			expect(mockKV.put).toHaveBeenCalledWith('chat_history', expect.stringContaining('"text":"hello"'));
-			expect(mockKV.put).toHaveBeenCalledWith('chat_history', expect.stringContaining('"timestamp":'));
+			expect(mockKV.put).toHaveBeenCalledWith(
+				'chat_history',
+				JSON.stringify([{ role: 'user', text: 'hello' }]),
+				{ expirationTtl: 300 }
+			);
+		});
+
+		it('strips extra fields from history entries', async () => {
+			const history = [{ role: 'user', text: 'hello', extra: 'field' }] as any;
+
+			await kv.saveHistory(history);
+
+			const savedData = JSON.parse((mockKV.put as Mock).mock.calls[0][1]);
+			expect(savedData[0]).toEqual({ role: 'user', text: 'hello' });
+			expect(savedData[0]).not.toHaveProperty('extra');
 		});
 	});
 
@@ -41,34 +53,47 @@ describe('KV class', () => {
 			expect(result).toEqual([]);
 		});
 
-		it('filters out history older than 5 minutes', async () => {
-			const oldTimestamp = Date.now() - 6 * 60 * 1000; // 6 minutes ago
-			const recentTimestamp = Date.now() - 2 * 60 * 1000; // 2 minutes ago
-
-			(mockKV.get as Mock).mockResolvedValue(
-				JSON.stringify([
-					{ role: 'user', text: 'old', timestamp: oldTimestamp },
-					{ role: 'user', text: 'recent', timestamp: recentTimestamp },
-				])
-			);
+		it('returns all history entries (TTL handled by KV)', async () => {
+			(mockKV.get as Mock).mockResolvedValue([
+				{ role: 'user', text: 'first' },
+				{ role: 'model', text: 'response' },
+			]);
 
 			const result = await kv.getHistory();
 
-			expect(result).toHaveLength(1);
-			expect(result[0].text).toBe('recent');
+			expect(result).toHaveLength(2);
+			expect(result[0]).toEqual({ role: 'user', text: 'first' });
+			expect(result[1]).toEqual({ role: 'model', text: 'response' });
 		});
 
-		it('returns history within 5-minute window', async () => {
-			const recentTimestamp = Date.now() - 2 * 60 * 1000; // 2 minutes ago
-
-			(mockKV.get as Mock).mockResolvedValue(
-				JSON.stringify([{ role: 'model', text: 'response', timestamp: recentTimestamp }])
-			);
+		it('filters out invalid entries', async () => {
+			(mockKV.get as Mock).mockResolvedValue([
+				{ role: 'user', text: 'valid' },
+				null,
+				{ role: 123, text: 'invalid role' },
+				{ role: 'user' },
+			]);
 
 			const result = await kv.getHistory();
 
 			expect(result).toHaveLength(1);
-			expect(result[0]).toEqual({ role: 'model', text: 'response' });
+			expect(result[0].text).toBe('valid');
+		});
+
+		it('returns empty array when data is not an array', async () => {
+			(mockKV.get as Mock).mockResolvedValue({ role: 'user', text: 'not array' });
+
+			const result = await kv.getHistory();
+
+			expect(result).toEqual([]);
+		});
+
+		it('returns empty array on KV error', async () => {
+			(mockKV.get as Mock).mockRejectedValue(new Error('KV error'));
+
+			const result = await kv.getHistory();
+
+			expect(result).toEqual([]);
 		});
 	});
 
@@ -81,22 +106,8 @@ describe('KV class', () => {
 			expect(result).toBeNull();
 		});
 
-		it('returns null when cache is expired (older than 5 minutes)', async () => {
-			const expiredCache = {
-				time: Date.now() - 6 * 60 * 1000,
-				sheetInfo: 'data',
-				description: 'desc',
-			};
-			(mockKV.get as Mock).mockResolvedValue(expiredCache);
-
-			const result = await kv.getCache();
-
-			expect(result).toBeNull();
-		});
-
-		it('returns cached data when within 5 minutes', async () => {
+		it('returns cached data (TTL handled by KV)', async () => {
 			const validCache = {
-				time: Date.now() - 2 * 60 * 1000,
 				sheetInfo: 'sheet data',
 				description: 'description',
 			};
@@ -107,18 +118,35 @@ describe('KV class', () => {
 			expect(result).toEqual({
 				sheetInfo: 'sheet data',
 				description: 'description',
-				time: validCache.time,
 			});
+		});
+
+		it('returns null for invalid cache structure', async () => {
+			(mockKV.get as Mock).mockResolvedValue({ sheetInfo: 123 });
+
+			const result = await kv.getCache();
+
+			expect(result).toBeNull();
+		});
+
+		it('returns null on KV error', async () => {
+			(mockKV.get as Mock).mockRejectedValue(new Error('KV error'));
+
+			const result = await kv.getCache();
+
+			expect(result).toBeNull();
 		});
 	});
 
 	describe('saveCache', () => {
-		it('saves cache with current timestamp', async () => {
+		it('saves cache with expirationTtl', async () => {
 			await kv.saveCache('sheet info', 'description');
 
-			expect(mockKV.put).toHaveBeenCalledWith('sheet_info', expect.stringContaining('"sheetInfo":"sheet info"'));
-			expect(mockKV.put).toHaveBeenCalledWith('sheet_info', expect.stringContaining('"description":"description"'));
-			expect(mockKV.put).toHaveBeenCalledWith('sheet_info', expect.stringContaining('"time":'));
+			expect(mockKV.put).toHaveBeenCalledWith(
+				'sheet_info',
+				JSON.stringify({ sheetInfo: 'sheet info', description: 'description' }),
+				{ expirationTtl: 300 }
+			);
 		});
 	});
 
