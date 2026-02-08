@@ -1,6 +1,6 @@
-import { GoogleGenAI } from '@google/genai';
+import { type GenerateContentResponse, GoogleGenAI } from '@google/genai';
+import { logger as defaultLogger, type Logger } from '../utils/logger';
 import { withRetry } from '../utils/retry';
-import { Logger, logger as defaultLogger } from '../utils/logger';
 
 export class GeminiClient {
 	private client: GoogleGenAI;
@@ -23,7 +23,7 @@ export class GeminiClient {
 
 ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 
-			let result;
+			let result: GenerateContentResponse;
 			try {
 				// Add retry logic with exponential backoff
 				this.log.info('Gemini API request starting');
@@ -54,7 +54,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 							msg.includes('503')
 						);
 					},
-					this.log
+					this.log,
 				);
 				this.log.info('Gemini API completed', { durationMs: Date.now() - startTime });
 			} catch (error) {
@@ -129,11 +129,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ''}質問: ${input}`;
 	}
 }
 
-export const createGeminiClient = (
-	apiKey: string,
-	initialHistory: { role: string; text: string }[] = [],
-	log?: Logger
-): GeminiClient => {
+export const createGeminiClient = (apiKey: string, initialHistory: { role: string; text: string }[] = [], log?: Logger): GeminiClient => {
 	return new GeminiClient(apiKey, initialHistory, log);
 };
 

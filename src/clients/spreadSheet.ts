@@ -1,6 +1,6 @@
+import GoogleAuth, { type GoogleKey } from 'cloudflare-workers-and-google-oauth';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
-import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
-import { Logger, logger as defaultLogger } from '../utils/logger';
+import { logger as defaultLogger, type Logger } from '../utils/logger';
 
 // スプレッドシートのID
 const DOC_ID = '1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg';
@@ -122,10 +122,7 @@ export async function getSheetData(serviceAccountJson: string, log?: Logger): Pr
 		}
 
 		// Fetch both sheets in parallel using the same authenticated token
-		const [sheetInfo, description] = await Promise.all([
-			fetchSheetInfo(doc, logger),
-			fetchSheetDescription(doc, logger),
-		]);
+		const [sheetInfo, description] = await Promise.all([fetchSheetInfo(doc, logger), fetchSheetDescription(doc, logger)]);
 
 		return { sheetInfo, description };
 	} catch (error) {
@@ -145,7 +142,7 @@ export async function getSheetData(serviceAccountJson: string, log?: Logger): Pr
 // serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
 // 戻り値: スプレッドシートの内容をCSV形式で返す
 // Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
-export const getSheetInfo = async function (serviceAccountJson: string): Promise<string> {
+export const getSheetInfo = async (serviceAccountJson: string): Promise<string> => {
 	const { sheetInfo } = await getSheetData(serviceAccountJson);
 	return sheetInfo;
 };
@@ -154,7 +151,7 @@ export const getSheetInfo = async function (serviceAccountJson: string): Promise
 // serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
 // 戻り値: スプレッドシートのdescriptionを返す
 // Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
-export const getSheetDescription = async function (serviceAccountJson: string): Promise<string> {
+export const getSheetDescription = async (serviceAccountJson: string): Promise<string> => {
 	const { description } = await getSheetData(serviceAccountJson);
 	return description;
 };

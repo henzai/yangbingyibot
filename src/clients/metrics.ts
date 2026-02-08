@@ -1,14 +1,9 @@
-import { Logger, logger as defaultLogger } from '../utils/logger';
+import { logger as defaultLogger, type Logger } from '../utils/logger';
 
 /**
  * Metric event types for categorizing data points
  */
-export type MetricEventType =
-	| 'gemini_api_call'
-	| 'workflow_complete'
-	| 'kv_cache_access'
-	| 'discord_webhook'
-	| 'sheets_api_call';
+export type MetricEventType = 'gemini_api_call' | 'workflow_complete' | 'kv_cache_access' | 'discord_webhook' | 'sheets_api_call';
 
 /**
  * Base interface for all metric data
@@ -144,10 +139,7 @@ export class MetricsClient implements IMetricsClient {
 	 * Prepends eventType to blobs for filtering in SQL queries
 	 * Non-blocking - errors are logged but don't affect main flow
 	 */
-	private writeDataPoint(
-		eventType: MetricEventType,
-		dataPoint: { indexes?: string[]; blobs?: string[]; doubles?: number[] }
-	): void {
+	private writeDataPoint(eventType: MetricEventType, dataPoint: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void {
 		try {
 			const blobsWithType = [eventType, ...(dataPoint.blobs ?? [])];
 

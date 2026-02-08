@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyDiscordInteraction } from './verifyDiscordInteraction';
 
 vi.mock('discord-interactions', () => ({
@@ -10,6 +10,7 @@ vi.mock('discord-interactions', () => ({
 }));
 
 import { verifyKey } from 'discord-interactions';
+
 const mockVerifyKey = vi.mocked(verifyKey);
 
 type Bindings = { DISCORD_PUBLIC_KEY: string };
@@ -81,12 +82,7 @@ describe('verifyDiscordInteraction middleware', () => {
 
 		expect(res.status).toBe(401);
 		expect(await res.json()).toEqual({ message: 'invalid request signature' });
-		expect(mockVerifyKey).toHaveBeenCalledWith(
-			JSON.stringify({ type: 2 }),
-			'invalid-sig',
-			'1234567890',
-			'test-key'
-		);
+		expect(mockVerifyKey).toHaveBeenCalledWith(JSON.stringify({ type: 2 }), 'invalid-sig', '1234567890', 'test-key');
 	});
 
 	it('calls next() for valid PING requests', async () => {

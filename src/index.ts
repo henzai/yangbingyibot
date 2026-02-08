@@ -1,8 +1,8 @@
+import { InteractionResponseType, InteractionType } from 'discord-interactions';
 import { Hono } from 'hono';
 import { verifyDiscordInteraction } from './middleware/verifyDiscordInteraction';
-import { InteractionType, InteractionResponseType } from 'discord-interactions';
 import { errorResponse } from './responses/errorResponse';
-import { Bindings } from './types';
+import type { Bindings } from './types';
 import { logger } from './utils/logger';
 import { generateRequestId } from './utils/requestId';
 
@@ -12,6 +12,7 @@ export { AnswerQuestionWorkflow } from './workflows/answerQuestionWorkflow';
 const app = new Hono<{ Bindings: Bindings }>();
 
 // Validate Discord command payload structure
+// biome-ignore lint/suspicious/noExplicitAny: Discord interaction body is dynamically typed and validated at runtime
 function validateDiscordCommand(body: any): { question: string } {
 	if (!body?.data) {
 		throw new Error('Invalid Discord interaction: missing data');
@@ -45,7 +46,7 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 			// Reference: https://discord.com/developers/docs/interactions/receiving-and-responding#receiving-an-interaction
 			case InteractionType.PING:
 				return c.json({ type: InteractionResponseType.PONG });
-			case InteractionType.APPLICATION_COMMAND:
+			case InteractionType.APPLICATION_COMMAND: {
 				// Validate payload structure
 				const { question } = validateDiscordCommand(body);
 
@@ -70,6 +71,7 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 				return c.json({
 					type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
 				});
+			}
 			default:
 				throw new Error('Invalid interaction type');
 		}

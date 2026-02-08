@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { KV, createKV } from './kv';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { createKV, KV } from './kv';
 
 const createMockKVNamespace = () =>
 	({
@@ -26,14 +26,11 @@ describe('KV class', () => {
 
 			await kv.saveHistory(history);
 
-			expect(mockKV.put).toHaveBeenCalledWith(
-				'chat_history',
-				JSON.stringify([{ role: 'user', text: 'hello' }]),
-				{ expirationTtl: 300 }
-			);
+			expect(mockKV.put).toHaveBeenCalledWith('chat_history', JSON.stringify([{ role: 'user', text: 'hello' }]), { expirationTtl: 300 });
 		});
 
 		it('strips extra fields from history entries', async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: intentionally passing extra fields to test stripping behavior
 			const history = [{ role: 'user', text: 'hello', extra: 'field' }] as any;
 
 			await kv.saveHistory(history);
@@ -142,11 +139,9 @@ describe('KV class', () => {
 		it('saves cache with expirationTtl', async () => {
 			await kv.saveCache('sheet info', 'description');
 
-			expect(mockKV.put).toHaveBeenCalledWith(
-				'sheet_info',
-				JSON.stringify({ sheetInfo: 'sheet info', description: 'description' }),
-				{ expirationTtl: 300 }
-			);
+			expect(mockKV.put).toHaveBeenCalledWith('sheet_info', JSON.stringify({ sheetInfo: 'sheet info', description: 'description' }), {
+				expirationTtl: 300,
+			});
 		});
 	});
 

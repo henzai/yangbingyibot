@@ -1,4 +1,4 @@
-import { Logger, logger as defaultLogger } from './logger';
+import { logger as defaultLogger, type Logger } from './logger';
 
 export interface RetryConfig {
 	maxAttempts: number;
@@ -25,7 +25,7 @@ export async function withRetry<T>(
 	fn: () => Promise<T>,
 	config: Partial<RetryConfig> = {},
 	shouldRetry: (error: Error) => boolean = () => true,
-	log?: Logger
+	log?: Logger,
 ): Promise<T> {
 	const logger = log ?? defaultLogger;
 	const { maxAttempts, initialDelayMs, maxDelayMs, backoffMultiplier } = {
@@ -33,7 +33,7 @@ export async function withRetry<T>(
 		...config,
 	};
 
-	let lastError: Error;
+	let lastError: Error = new Error('Retry failed');
 
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		try {
@@ -47,7 +47,7 @@ export async function withRetry<T>(
 			}
 
 			// Calculate delay with exponential backoff
-			const delay = Math.min(initialDelayMs * Math.pow(backoffMultiplier, attempt), maxDelayMs);
+			const delay = Math.min(initialDelayMs * backoffMultiplier ** attempt, maxDelayMs);
 
 			logger.warn(`Retry attempt ${attempt + 1}/${maxAttempts}`, {
 				delayMs: delay,
@@ -58,5 +58,5 @@ export async function withRetry<T>(
 		}
 	}
 
-	throw lastError!;
+	throw lastError;
 }
