@@ -1,4 +1,4 @@
-import { APIInteractionResponseChannelMessageWithSource, InteractionResponseType } from 'discord-api-types/v10';
+import { type APIInteractionResponseChannelMessageWithSource, InteractionResponseType } from 'discord-api-types/v10';
 
 export const errorResponse = (errorMessage: string): APIInteractionResponseChannelMessageWithSource => {
 	return {

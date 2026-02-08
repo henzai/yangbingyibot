@@ -5,7 +5,7 @@
  * @param errorMessage Error message to use if timeout occurs
  */
 export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
-	let timeoutId: ReturnType<typeof setTimeout>;
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
 	const timeoutPromise = new Promise<never>((_, reject) => {
 		timeoutId = setTimeout(() => {
@@ -16,6 +16,8 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, err
 	try {
 		return await Promise.race([promise, timeoutPromise]);
 	} finally {
-		clearTimeout(timeoutId!);
+		if (timeoutId !== undefined) {
+			clearTimeout(timeoutId);
+		}
 	}
 }

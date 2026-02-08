@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withRetry, RetryableError, RetryConfig } from './retry';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withRetry } from './retry';
 
 describe('withRetry', () => {
 	beforeEach(() => {
@@ -24,10 +24,7 @@ describe('withRetry', () => {
 		});
 
 		it('returns result after retry', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('temporary error'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('temporary error')).mockResolvedValueOnce('success');
 
 			const promise = withRetry(mockFn);
 			await vi.runAllTimersAsync();
@@ -118,10 +115,7 @@ describe('withRetry', () => {
 		});
 
 		it('continues retrying for retryable errors', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('retryable error'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('retryable error')).mockResolvedValueOnce('success');
 
 			const shouldRetry = (error: Error) => {
 				return error.message.includes('retryable');
@@ -136,10 +130,7 @@ describe('withRetry', () => {
 		});
 
 		it('classifies rate limit errors as retryable', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('rate limit exceeded'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('rate limit exceeded')).mockResolvedValueOnce('success');
 
 			const shouldRetry = (error: Error) => {
 				const msg = error.message.toLowerCase();
@@ -155,10 +146,7 @@ describe('withRetry', () => {
 		});
 
 		it('classifies network errors as retryable', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('network timeout'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('network timeout')).mockResolvedValueOnce('success');
 
 			const shouldRetry = (error: Error) => {
 				const msg = error.message.toLowerCase();
@@ -180,11 +168,7 @@ describe('withRetry', () => {
 			const error2 = new Error('error 2');
 			const error3 = new Error('final error');
 
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(error1)
-				.mockRejectedValueOnce(error2)
-				.mockRejectedValueOnce(error3);
+			const mockFn = vi.fn().mockRejectedValueOnce(error1).mockRejectedValueOnce(error2).mockRejectedValueOnce(error3);
 
 			const promise = withRetry(mockFn, { maxAttempts: 3 });
 			await vi.runAllTimersAsync();
@@ -204,10 +188,7 @@ describe('withRetry', () => {
 
 	describe('configuration', () => {
 		it('uses default configuration when not provided', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('error'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('error')).mockResolvedValueOnce('success');
 
 			const promise = withRetry(mockFn);
 			await vi.runAllTimersAsync();
@@ -217,10 +198,7 @@ describe('withRetry', () => {
 		});
 
 		it('merges partial config with defaults', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('error'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('error')).mockResolvedValueOnce('success');
 
 			const promise = withRetry(mockFn, { maxAttempts: 2 });
 			await vi.runAllTimersAsync();
@@ -232,10 +210,7 @@ describe('withRetry', () => {
 
 	describe('logging', () => {
 		it('logs retry attempts', async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error('temporary error'))
-				.mockResolvedValueOnce('success');
+			const mockFn = vi.fn().mockRejectedValueOnce(new Error('temporary error')).mockResolvedValueOnce('success');
 
 			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 

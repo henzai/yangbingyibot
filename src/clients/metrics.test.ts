@@ -1,15 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Logger } from '../utils/logger';
 import {
+	createMetricsClient,
+	type DiscordWebhookMetricData,
+	type GeminiMetricData,
+	type KVCacheMetricData,
+	type MetricData,
 	MetricsClient,
 	NoOpMetricsClient,
-	createMetricsClient,
-	type GeminiMetricData,
 	type WorkflowMetricData,
-	type KVCacheMetricData,
-	type DiscordWebhookMetricData,
-	type MetricData,
 } from './metrics';
-import { Logger } from '../utils/logger';
 
 // Mock logger
 const mockLogger: Logger = {
@@ -88,7 +88,7 @@ describe('MetricsClient', () => {
 		});
 
 		it('truncates long requestId in index to 96 bytes', () => {
-			const longRequestId = 'req_' + 'a'.repeat(100);
+			const longRequestId = `req_${'a'.repeat(100)}`;
 			const data: GeminiMetricData = {
 				requestId: longRequestId,
 				success: true,

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGenerateContent = vi.fn();
 
@@ -10,7 +10,7 @@ vi.mock('@google/genai', () => ({
 	})),
 }));
 
-import { GeminiClient, createGeminiClient } from './gemini';
+import { createGeminiClient, GeminiClient } from './gemini';
 
 describe('GeminiClient', () => {
 	beforeEach(() => {
@@ -125,7 +125,7 @@ describe('GeminiClient', () => {
 			expect(mockGenerateContent).toHaveBeenCalledWith(
 				expect.objectContaining({
 					contents: expect.stringContaining('previous'),
-				})
+				}),
 			);
 		});
 	});

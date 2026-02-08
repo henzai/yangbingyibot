@@ -1,14 +1,10 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":automergeMinor"],
-  "packageRules": [
-    {
-      "groupName": "vitest",
-      "matchPackageNames": [
-        "/vitest/",
-        "/@vitest//",
-        "/@cloudflare/vitest-pool-workers/"
-      ]
-    }
-  ]
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended", ":automergeMinor"],
+	"packageRules": [
+		{
+			"groupName": "vitest",
+			"matchPackageNames": ["/vitest/", "/@vitest//", "/@cloudflare/vitest-pool-workers/"]
+		}
+	]
 }

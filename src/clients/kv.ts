@@ -1,4 +1,4 @@
-import { Logger, logger as defaultLogger } from '../utils/logger';
+import { logger as defaultLogger, type Logger } from '../utils/logger';
 
 // KV用のキー
 const SHEET_INFO = 'sheet_info';
@@ -48,7 +48,7 @@ export class KV {
 	async getHistory(): Promise<{ role: string; text: string }[]> {
 		try {
 			// KVネイティブTTLにより期限切れデータは自動的にnullになる
-			const parsedHistory = await this.kv.get<ChatHistory[]>(HISTORY_KEY, "json");
+			const parsedHistory = await this.kv.get<ChatHistory[]>(HISTORY_KEY, 'json');
 			if (!parsedHistory) return [];
 
 			if (!Array.isArray(parsedHistory)) {
@@ -57,10 +57,7 @@ export class KV {
 			}
 
 			return parsedHistory
-				.filter(
-					(h): h is ChatHistory =>
-						!!h && typeof h === 'object' && typeof h.role === 'string' && typeof h.text === 'string'
-				)
+				.filter((h): h is ChatHistory => !!h && typeof h === 'object' && typeof h.role === 'string' && typeof h.text === 'string')
 				.map(({ role, text }) => ({ role, text }));
 		} catch (error) {
 			this.log.error('Failed to get history from KV', {
@@ -73,14 +70,10 @@ export class KV {
 	async getCache(): Promise<SheetInfo | null> {
 		try {
 			// KVネイティブTTLにより期限切れデータは自動的にnullになる
-			const cachedData = await this.kv.get<SheetInfo>(SHEET_INFO, "json");
+			const cachedData = await this.kv.get<SheetInfo>(SHEET_INFO, 'json');
 			if (!cachedData) return null;
 
-			if (
-				typeof cachedData !== 'object' ||
-				typeof cachedData.sheetInfo !== 'string' ||
-				typeof cachedData.description !== 'string'
-			) {
+			if (typeof cachedData !== 'object' || typeof cachedData.sheetInfo !== 'string' || typeof cachedData.description !== 'string') {
 				this.log.warn('Invalid cache data structure, ignoring cache');
 				return null;
 			}

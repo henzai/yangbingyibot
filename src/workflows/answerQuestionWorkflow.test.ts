@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { WorkflowParams, SheetDataOutput, HistoryOutput, GeminiOutput } from './types';
-import { Bindings } from '../types';
-import { Logger } from '../utils/logger';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Bindings } from '../types';
+import type { Logger } from '../utils/logger';
+import type { HistoryOutput, SheetDataOutput } from './types';
 
 // Mock logger
 const mockLogger: Logger = {
@@ -38,17 +38,9 @@ vi.mock('../clients/spreadSheet', () => ({
 	getSheetData: vi.fn(),
 }));
 
-// Import after mocks
-import { createKV } from '../clients/kv';
 import { createGeminiClient } from '../clients/gemini';
 import { getSheetData } from '../clients/spreadSheet';
-import {
-	getSheetDataStep,
-	getHistoryStep,
-	callGeminiStep,
-	saveHistoryStep,
-	sendDiscordResponseStep,
-} from './answerQuestionWorkflow';
+import { callGeminiStep, getHistoryStep, getSheetDataStep, saveHistoryStep, sendDiscordResponseStep } from './answerQuestionWorkflow';
 
 // Mock Analytics Engine Dataset
 const mockAnalyticsDataset = {
@@ -65,6 +57,7 @@ const mockEnv: Bindings = {
 	GOOGLE_PRIVATE_KEY: 'test-key',
 	GOOGLE_SERVICE_ACCOUNT: '{"type":"service_account"}',
 	sushanshan_bot: {} as KVNamespace,
+	// biome-ignore lint/suspicious/noExplicitAny: mock binding for test
 	ANSWER_QUESTION_WORKFLOW: {} as Workflow<any>,
 	METRICS: mockAnalyticsDataset as unknown as AnalyticsEngineDataset,
 };
@@ -227,14 +220,11 @@ describe('AnswerQuestionWorkflow Steps', () => {
 
 			const result = await sendDiscordResponseStep(mockEnv, 'test-token-123', 'user question', 'AI answer', mockLogger);
 
-			expect(mockFetch).toHaveBeenCalledWith(
-				`https://discord.com/api/v10/webhooks/${mockEnv.DISCORD_APPLICATION_ID}/test-token-123`,
-				{
-					method: 'POST',
-					body: JSON.stringify({ content: '> user question\nAI answer' }),
-					headers: { 'Content-Type': 'application/json' },
-				}
-			);
+			expect(mockFetch).toHaveBeenCalledWith(`https://discord.com/api/v10/webhooks/${mockEnv.DISCORD_APPLICATION_ID}/test-token-123`, {
+				method: 'POST',
+				body: JSON.stringify({ content: '> user question\nAI answer' }),
+				headers: { 'Content-Type': 'application/json' },
+			});
 			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
 		});
 
