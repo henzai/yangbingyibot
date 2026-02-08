@@ -10,6 +10,10 @@ npm run deploy       # Deploy to Cloudflare Workers (with minification)
 npm test             # Run tests with Vitest
 npm run register     # Register Discord slash commands via Discord API
 npm run cf-typegen   # Generate Cloudflare Worker types
+npm run check        # Run Biome formatter + linter with auto-fix
+npm run check:ci     # Run Biome check without writing (for CI)
+npm run lint         # Run linter only
+npm run format       # Run formatter with auto-write
 ```
 
 ## Architecture
