@@ -11,7 +11,7 @@ export const verifyDiscordInteraction = createMiddleware(async (c, next) => {
 	}
 
 	const rawBody = await c.req.raw.clone().text();
-	const isValidRequest = verifyKey(rawBody, signature, timestamp, DISCORD_PUBLIC_KEY);
+	const isValidRequest = await verifyKey(rawBody, signature, timestamp, DISCORD_PUBLIC_KEY);
 
 	if (!isValidRequest) {
 		return c.json({ message: 'invalid request signature' }, 401);
