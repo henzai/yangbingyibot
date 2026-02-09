@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("discord-interactions", () => ({
-	verifyKey: vi.fn().mockReturnValue(true),
+	verifyKey: vi.fn().mockResolvedValue(true),
 	InteractionType: {
 		PING: 1,
 		APPLICATION_COMMAND: 2,
