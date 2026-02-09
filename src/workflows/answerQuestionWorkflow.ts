@@ -3,6 +3,7 @@ import {
 	type WorkflowEvent,
 	type WorkflowStep,
 } from "cloudflare:workers";
+import { GoogleGenAI } from "@google/genai";
 import { createDiscordWebhookClient } from "../clients/discord";
 import { createGeminiClient } from "../clients/gemini";
 import { createKV } from "../clients/kv";
@@ -133,6 +134,39 @@ export async function saveHistoryStep(
 const DISCORD_EDIT_INTERVAL_MS = 1500;
 const MIN_CHUNK_SIZE = 50;
 
+const SUMMARIZE_MODEL = "gemini-2.0-flash-lite";
+const THINKING_FALLBACK = "考え中...";
+
+export async function summarizeThinking(
+	client: GoogleGenAI,
+	thinkingText: string,
+	log: Logger,
+): Promise<string> {
+	try {
+		const result = await client.models.generateContent({
+			model: SUMMARIZE_MODEL,
+			contents:
+				"以下のAIの思考過程を日本語の1文（50文字以内）に要約してください。要約文のみを出力してください。\n\n" +
+				thinkingText,
+			config: {
+				temperature: 0,
+				maxOutputTokens: 128,
+			},
+		});
+		const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+		if (text) {
+			return text;
+		}
+		log.warn("Empty summarization result, using fallback");
+		return THINKING_FALLBACK;
+	} catch (error) {
+		log.warn("Thinking summarization failed (non-fatal)", {
+			error: error instanceof Error ? error.message : "Unknown error",
+		});
+		return THINKING_FALLBACK;
+	}
+}
+
 // Step 3+5 combined: Stream Gemini response + progressively edit Discord message
 export async function streamGeminiWithDiscordEditsStep(
 	env: Bindings,
@@ -153,6 +187,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		historyOutput.history,
 		log,
 	);
+	const summarizer = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
 	let lastEditTime = 0;
 	let lastThinkingEditLength = 0;
@@ -161,17 +196,8 @@ export async function streamGeminiWithDiscordEditsStep(
 	let currentPhase: "thinking" | "response" = "thinking";
 
 	const formatContent = (text: string) => `> ${question}\n${text}`;
-	const formatThinkingContent = (thinkingText: string) => {
-		const prefix = ":thought_balloon: **考え中...**\n";
-		const overhead =
-			`> ${question}\n`.length + prefix.length + "```\n\n```".length;
-		const maxThinkingLength = 2000 - overhead;
-		const truncated =
-			thinkingText.length > maxThinkingLength
-				? `...${thinkingText.slice(-(maxThinkingLength - 3))}`
-				: thinkingText;
-		return `> ${question}\n${prefix}\`\`\`\n${truncated}\n\`\`\``;
-	};
+	const formatThinkingContent = (summary: string) =>
+		`> ${question}\n:thought_balloon: ${summary}`;
 
 	const onChunk = async (
 		accumulatedText: string,
@@ -185,11 +211,6 @@ export async function streamGeminiWithDiscordEditsStep(
 			phase === "response" && currentPhase === "thinking";
 		currentPhase = phase;
 
-		const content =
-			phase === "thinking"
-				? formatThinkingContent(accumulatedText)
-				: formatContent(accumulatedText);
-
 		const lastLen =
 			phase === "thinking" ? lastThinkingEditLength : lastResponseEditLength;
 		const newCharsCount = accumulatedText.length - lastLen;
@@ -199,6 +220,13 @@ export async function streamGeminiWithDiscordEditsStep(
 			(timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
 				newCharsCount >= MIN_CHUNK_SIZE)
 		) {
+			const content =
+				phase === "thinking"
+					? formatThinkingContent(
+							await summarizeThinking(summarizer, accumulatedText, log),
+						)
+					: formatContent(accumulatedText);
+
 			const success = await discord.editOriginalMessage(content);
 			if (success) {
 				lastEditTime = now;
