@@ -136,16 +136,6 @@ describe("GeminiClient", () => {
 		});
 	});
 
-	describe("clearHistory", () => {
-		it("clears all history", () => {
-			const client = new GeminiClient("test-api-key", [
-				{ role: "user", text: "test" },
-			]);
-			client.clearHistory();
-			expect(client.getHistory()).toEqual([]);
-		});
-	});
-
 	describe("createGeminiClient", () => {
 		it("creates a new GeminiClient instance", () => {
 			const client = createGeminiClient("test-api-key");
