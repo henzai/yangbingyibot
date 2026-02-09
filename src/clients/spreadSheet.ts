@@ -166,25 +166,3 @@ export async function getSheetData(
 		throw new Error("スプレッドシート情報の取得中にエラーが発生しました。");
 	}
 }
-
-// スプレッドシートの情報を取得する関数
-// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
-// 戻り値: スプレッドシートの内容をCSV形式で返す
-// Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
-export const getSheetInfo = async (
-	serviceAccountJson: string,
-): Promise<string> => {
-	const { sheetInfo } = await getSheetData(serviceAccountJson);
-	return sheetInfo;
-};
-
-// スプレッドシートのdescriptionを取得する関数
-// serviceAccountJson: Google Service Accountの認証情報(JSON形式の文字列)
-// 戻り値: スプレッドシートのdescriptionを返す
-// Note: This function is kept for backward compatibility. Use getSheetData() for better performance.
-export const getSheetDescription = async (
-	serviceAccountJson: string,
-): Promise<string> => {
-	const { description } = await getSheetData(serviceAccountJson);
-	return description;
-};
