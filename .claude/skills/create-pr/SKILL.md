@@ -37,6 +37,12 @@ if [ "$current_branch" = "main" ]; then
   exit 1
 fi
 
+# Check for uncommitted changes
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: Uncommitted changes detected"
+  exit 1
+fi
+
 # Fetch latest
 git fetch origin
 ```
