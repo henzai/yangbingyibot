@@ -10,7 +10,11 @@
 	},
 	"linter": {
 		"rules": {
-			"recommended": true
+			"recommended": true,
+			"nursery": {
+				"noFloatingPromises": "error",
+				"noMisusedPromises": "error"
+			}
 		}
 	}
 }

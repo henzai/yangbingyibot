@@ -52,4 +52,4 @@ const registerCommands = async () => {
 	}
 };
 
-registerCommands();
+void registerCommands();
