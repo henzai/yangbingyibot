@@ -1,6 +1,6 @@
-const { WEN_COMMAND } = require('./commands.js');
-const dotenv = require('dotenv');
-const process = require('node:process');
+const { WEN_COMMAND } = require("./commands.js");
+const dotenv = require("dotenv");
+const process = require("node:process");
 
 /**
  * This file is meant to be run from the command line, and is not used by the
@@ -8,16 +8,18 @@ const process = require('node:process');
  * to be run once.
  */
 
-dotenv.config({ path: '.dev.vars' });
+dotenv.config({ path: ".dev.vars" });
 
 const token = process.env.DISCORD_TOKEN;
 const applicationId = process.env.DISCORD_APPLICATION_ID;
 
 if (!token) {
-	throw new Error('The DISCORD_TOKEN environment variable is required.');
+	throw new Error("The DISCORD_TOKEN environment variable is required.");
 }
 if (!applicationId) {
-	throw new Error('The DISCORD_APPLICATION_ID environment variable is required.');
+	throw new Error(
+		"The DISCORD_APPLICATION_ID environment variable is required.",
+	);
 }
 
 const registerCommands = async () => {
@@ -25,19 +27,19 @@ const registerCommands = async () => {
 
 	const response = await fetch(url, {
 		headers: {
-			'Content-Type': 'application/json',
+			"Content-Type": "application/json",
 			Authorization: `Bot ${token}`,
 		},
-		method: 'PUT',
+		method: "PUT",
 		body: JSON.stringify([WEN_COMMAND]),
 	});
 
 	if (response.ok) {
-		console.log('Registered all commands');
+		console.log("Registered all commands");
 		const data = await response.json();
 		console.log(JSON.stringify(data, null, 2));
 	} else {
-		console.error('Error registering commands');
+		console.error("Error registering commands");
 		let errorText = `Error registering commands \n ${response.url}: ${response.status} ${response.statusText}`;
 		try {
 			const error = await response.text();
@@ -45,7 +47,7 @@ const registerCommands = async () => {
 				errorText = `${errorText} \n\n ${error}`;
 			}
 		} catch (err) {
-			console.error('Error reading body from request:', err);
+			console.error("Error reading body from request:", err);
 		}
 		console.error(errorText);
 	}

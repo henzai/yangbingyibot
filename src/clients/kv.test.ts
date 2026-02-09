@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
-import { createKV, KV } from './kv';
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { createKV, KV } from "./kv";
 
 const createMockKVNamespace = () =>
 	({
@@ -10,7 +10,7 @@ const createMockKVNamespace = () =>
 		getWithMetadata: vi.fn(),
 	}) as unknown as KVNamespace;
 
-describe('KV class', () => {
+describe("KV class", () => {
 	let mockKV: KVNamespace;
 	let kv: KV;
 
@@ -20,29 +20,33 @@ describe('KV class', () => {
 		kv = new KV(mockKV);
 	});
 
-	describe('saveHistory', () => {
-		it('saves history with expirationTtl', async () => {
-			const history = [{ role: 'user', text: 'hello' }];
+	describe("saveHistory", () => {
+		it("saves history with expirationTtl", async () => {
+			const history = [{ role: "user", text: "hello" }];
 
 			await kv.saveHistory(history);
 
-			expect(mockKV.put).toHaveBeenCalledWith('chat_history', JSON.stringify([{ role: 'user', text: 'hello' }]), { expirationTtl: 300 });
+			expect(mockKV.put).toHaveBeenCalledWith(
+				"chat_history",
+				JSON.stringify([{ role: "user", text: "hello" }]),
+				{ expirationTtl: 300 },
+			);
 		});
 
-		it('strips extra fields from history entries', async () => {
+		it("strips extra fields from history entries", async () => {
 			// biome-ignore lint/suspicious/noExplicitAny: intentionally passing extra fields to test stripping behavior
-			const history = [{ role: 'user', text: 'hello', extra: 'field' }] as any;
+			const history = [{ role: "user", text: "hello", extra: "field" }] as any;
 
 			await kv.saveHistory(history);
 
 			const savedData = JSON.parse((mockKV.put as Mock).mock.calls[0][1]);
-			expect(savedData[0]).toEqual({ role: 'user', text: 'hello' });
-			expect(savedData[0]).not.toHaveProperty('extra');
+			expect(savedData[0]).toEqual({ role: "user", text: "hello" });
+			expect(savedData[0]).not.toHaveProperty("extra");
 		});
 	});
 
-	describe('getHistory', () => {
-		it('returns empty array when no history exists', async () => {
+	describe("getHistory", () => {
+		it("returns empty array when no history exists", async () => {
 			(mockKV.get as Mock).mockResolvedValue(null);
 
 			const result = await kv.getHistory();
@@ -50,43 +54,46 @@ describe('KV class', () => {
 			expect(result).toEqual([]);
 		});
 
-		it('returns all history entries (TTL handled by KV)', async () => {
+		it("returns all history entries (TTL handled by KV)", async () => {
 			(mockKV.get as Mock).mockResolvedValue([
-				{ role: 'user', text: 'first' },
-				{ role: 'model', text: 'response' },
+				{ role: "user", text: "first" },
+				{ role: "model", text: "response" },
 			]);
 
 			const result = await kv.getHistory();
 
 			expect(result).toHaveLength(2);
-			expect(result[0]).toEqual({ role: 'user', text: 'first' });
-			expect(result[1]).toEqual({ role: 'model', text: 'response' });
+			expect(result[0]).toEqual({ role: "user", text: "first" });
+			expect(result[1]).toEqual({ role: "model", text: "response" });
 		});
 
-		it('filters out invalid entries', async () => {
+		it("filters out invalid entries", async () => {
 			(mockKV.get as Mock).mockResolvedValue([
-				{ role: 'user', text: 'valid' },
+				{ role: "user", text: "valid" },
 				null,
-				{ role: 123, text: 'invalid role' },
-				{ role: 'user' },
+				{ role: 123, text: "invalid role" },
+				{ role: "user" },
 			]);
 
 			const result = await kv.getHistory();
 
 			expect(result).toHaveLength(1);
-			expect(result[0].text).toBe('valid');
+			expect(result[0].text).toBe("valid");
 		});
 
-		it('returns empty array when data is not an array', async () => {
-			(mockKV.get as Mock).mockResolvedValue({ role: 'user', text: 'not array' });
+		it("returns empty array when data is not an array", async () => {
+			(mockKV.get as Mock).mockResolvedValue({
+				role: "user",
+				text: "not array",
+			});
 
 			const result = await kv.getHistory();
 
 			expect(result).toEqual([]);
 		});
 
-		it('returns empty array on KV error', async () => {
-			(mockKV.get as Mock).mockRejectedValue(new Error('KV error'));
+		it("returns empty array on KV error", async () => {
+			(mockKV.get as Mock).mockRejectedValue(new Error("KV error"));
 
 			const result = await kv.getHistory();
 
@@ -94,8 +101,8 @@ describe('KV class', () => {
 		});
 	});
 
-	describe('getCache', () => {
-		it('returns null when no cache exists', async () => {
+	describe("getCache", () => {
+		it("returns null when no cache exists", async () => {
 			(mockKV.get as Mock).mockResolvedValue(null);
 
 			const result = await kv.getCache();
@@ -103,22 +110,22 @@ describe('KV class', () => {
 			expect(result).toBeNull();
 		});
 
-		it('returns cached data (TTL handled by KV)', async () => {
+		it("returns cached data (TTL handled by KV)", async () => {
 			const validCache = {
-				sheetInfo: 'sheet data',
-				description: 'description',
+				sheetInfo: "sheet data",
+				description: "description",
 			};
 			(mockKV.get as Mock).mockResolvedValue(validCache);
 
 			const result = await kv.getCache();
 
 			expect(result).toEqual({
-				sheetInfo: 'sheet data',
-				description: 'description',
+				sheetInfo: "sheet data",
+				description: "description",
 			});
 		});
 
-		it('returns null for invalid cache structure', async () => {
+		it("returns null for invalid cache structure", async () => {
 			(mockKV.get as Mock).mockResolvedValue({ sheetInfo: 123 });
 
 			const result = await kv.getCache();
@@ -126,8 +133,8 @@ describe('KV class', () => {
 			expect(result).toBeNull();
 		});
 
-		it('returns null on KV error', async () => {
-			(mockKV.get as Mock).mockRejectedValue(new Error('KV error'));
+		it("returns null on KV error", async () => {
+			(mockKV.get as Mock).mockRejectedValue(new Error("KV error"));
 
 			const result = await kv.getCache();
 
@@ -135,18 +142,22 @@ describe('KV class', () => {
 		});
 	});
 
-	describe('saveCache', () => {
-		it('saves cache with expirationTtl', async () => {
-			await kv.saveCache('sheet info', 'description');
+	describe("saveCache", () => {
+		it("saves cache with expirationTtl", async () => {
+			await kv.saveCache("sheet info", "description");
 
-			expect(mockKV.put).toHaveBeenCalledWith('sheet_info', JSON.stringify({ sheetInfo: 'sheet info', description: 'description' }), {
-				expirationTtl: 300,
-			});
+			expect(mockKV.put).toHaveBeenCalledWith(
+				"sheet_info",
+				JSON.stringify({ sheetInfo: "sheet info", description: "description" }),
+				{
+					expirationTtl: 300,
+				},
+			);
 		});
 	});
 
-	describe('createKV', () => {
-		it('creates a new KV instance', () => {
+	describe("createKV", () => {
+		it("creates a new KV instance", () => {
 			const instance = createKV(mockKV);
 			expect(instance).toBeInstanceOf(KV);
 		});

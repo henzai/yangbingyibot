@@ -1,4 +1,4 @@
-import type { WorkflowParams } from './workflows/types';
+import type { WorkflowParams } from "./workflows/types";
 
 export type Bindings = {
 	DISCORD_TOKEN: string;
