@@ -191,7 +191,7 @@ describe("GeminiClient", () => {
 			expect(result).toBe("The answer is 42");
 			expect(chunks).toEqual([
 				{ text: "Let me think...", phase: "thinking" },
-				{ text: "Let me think...Step 2...", phase: "thinking" },
+				{ text: "Step 2...", phase: "thinking" },
 				{ text: "The answer is 42", phase: "response" },
 			]);
 		});
