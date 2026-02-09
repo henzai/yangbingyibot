@@ -155,29 +155,62 @@ export async function streamGeminiWithDiscordEditsStep(
 	);
 
 	let lastEditTime = 0;
-	let lastEditLength = 0;
+	let lastThinkingEditLength = 0;
+	let lastResponseEditLength = 0;
 	let editCount = 0;
+	let currentPhase: "thinking" | "response" = "thinking";
 
 	const formatContent = (text: string) => `> ${question}\n${text}`;
+	const formatThinkingContent = (thinkingText: string) => {
+		const prefix = ":thought_balloon: **考え中...**\n";
+		const overhead =
+			`> ${question}\n`.length + prefix.length + "```\n\n```".length;
+		const maxThinkingLength = 2000 - overhead;
+		const truncated =
+			thinkingText.length > maxThinkingLength
+				? `...${thinkingText.slice(-(maxThinkingLength - 3))}`
+				: thinkingText;
+		return `> ${question}\n${prefix}\`\`\`\n${truncated}\n\`\`\``;
+	};
 
-	const onChunk = async (accumulatedText: string) => {
+	const onChunk = async (
+		accumulatedText: string,
+		phase: "thinking" | "response",
+	) => {
 		const now = Date.now();
 		const timeSinceLastEdit = now - lastEditTime;
-		const newCharsCount = accumulatedText.length - lastEditLength;
+
+		// Force an immediate edit on phase transition from thinking to response
+		const isPhaseTransition =
+			phase === "response" && currentPhase === "thinking";
+		currentPhase = phase;
+
+		const content =
+			phase === "thinking"
+				? formatThinkingContent(accumulatedText)
+				: formatContent(accumulatedText);
+
+		const lastLen =
+			phase === "thinking" ? lastThinkingEditLength : lastResponseEditLength;
+		const newCharsCount = accumulatedText.length - lastLen;
 
 		if (
-			timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
-			newCharsCount >= MIN_CHUNK_SIZE
+			isPhaseTransition ||
+			(timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
+				newCharsCount >= MIN_CHUNK_SIZE)
 		) {
-			const success = await discord.editOriginalMessage(
-				formatContent(accumulatedText),
-			);
+			const success = await discord.editOriginalMessage(content);
 			if (success) {
 				lastEditTime = now;
-				lastEditLength = accumulatedText.length;
+				if (phase === "thinking") {
+					lastThinkingEditLength = accumulatedText.length;
+				} else {
+					lastResponseEditLength = accumulatedText.length;
+				}
 				editCount++;
 				log.debug("Discord message edited", {
 					editCount,
+					phase,
 					contentLength: accumulatedText.length,
 				});
 			}
@@ -192,7 +225,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		onChunk,
 	);
 
-	// Final edit to ensure complete response is shown
+	// Final edit to ensure complete response is shown (response only, no thinking)
 	await discord.editOriginalMessage(formatContent(response));
 	editCount++;
 	log.info("Final Discord edit sent", {

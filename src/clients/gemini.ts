@@ -147,7 +147,10 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		input: string,
 		sheet: string,
 		description: string,
-		onChunk: (accumulatedText: string) => Promise<void>,
+		onChunk: (
+			accumulatedText: string,
+			phase: "thinking" | "response",
+		) => Promise<void>,
 	): Promise<string> {
 		try {
 			const systemPrompt = getPrompt(sheet, description);
@@ -160,6 +163,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 			let fullText = "";
+			let accumulatedThinking = "";
 
 			try {
 				this.log.info("Gemini streaming API request starting");
@@ -170,7 +174,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 						return await this.client.models.generateContentStream({
 							model: "gemini-3-flash-preview",
 							contents: fullPrompt,
-							config: generationConfig,
+							config: streamGenerationConfig,
 						});
 					},
 					{
@@ -193,10 +197,18 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				);
 
 				for await (const chunk of stream) {
-					const chunkText = chunk.text;
-					if (chunkText) {
-						fullText += chunkText;
-						await onChunk(fullText);
+					const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+					for (const part of parts) {
+						if (typeof part.text !== "string") {
+							continue;
+						}
+						if (part.thought) {
+							accumulatedThinking += part.text;
+							await onChunk(accumulatedThinking, "thinking");
+						} else {
+							fullText += part.text;
+							await onChunk(fullText, "response");
+						}
 					}
 				}
 
@@ -278,6 +290,13 @@ const generationConfig = {
 	topK: 40,
 	maxOutputTokens: 8192,
 	responseMimeType: "text/plain",
+};
+
+const streamGenerationConfig = {
+	...generationConfig,
+	thinkingConfig: {
+		includeThoughts: true,
+	},
 };
 
 const getPrompt = (sheet: string, description: string) => {
