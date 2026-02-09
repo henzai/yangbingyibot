@@ -66,7 +66,7 @@ describe("verifyDiscordInteraction middleware", () => {
 	});
 
 	it("returns 401 when verifyKey returns false", async () => {
-		mockVerifyKey.mockReturnValue(false);
+		mockVerifyKey.mockResolvedValue(false);
 
 		const req = new Request("http://localhost/", {
 			method: "POST",
@@ -91,7 +91,7 @@ describe("verifyDiscordInteraction middleware", () => {
 	});
 
 	it("calls next() for valid PING requests", async () => {
-		mockVerifyKey.mockReturnValue(true);
+		mockVerifyKey.mockResolvedValue(true);
 
 		const req = new Request("http://localhost/", {
 			method: "POST",
@@ -110,7 +110,7 @@ describe("verifyDiscordInteraction middleware", () => {
 	});
 
 	it("calls next() for valid non-PING requests", async () => {
-		mockVerifyKey.mockReturnValue(true);
+		mockVerifyKey.mockResolvedValue(true);
 
 		const req = new Request("http://localhost/", {
 			method: "POST",
