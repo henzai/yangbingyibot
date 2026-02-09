@@ -14,13 +14,6 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 	backoffMultiplier: 2,
 };
 
-export class RetryableError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "RetryableError";
-	}
-}
-
 export async function withRetry<T>(
 	fn: () => Promise<T>,
 	config: Partial<RetryConfig> = {},

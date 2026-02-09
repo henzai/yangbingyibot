@@ -146,10 +146,6 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 	getHistory(): { role: string; text: string }[] {
 		return this.history;
 	}
-
-	clearHistory() {
-		this.history = [];
-	}
 }
 
 export const createGeminiClient = (
