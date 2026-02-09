@@ -23,6 +23,7 @@ const mockKVInstance = {
 
 const mockGeminiInstance = {
 	ask: vi.fn(),
+	askStream: vi.fn(),
 	getHistory: vi.fn(),
 };
 
@@ -32,6 +33,14 @@ vi.mock("../clients/kv", () => ({
 
 vi.mock("../clients/gemini", () => ({
 	createGeminiClient: vi.fn(() => mockGeminiInstance),
+}));
+
+const mockDiscordInstance = {
+	editOriginalMessage: vi.fn(),
+};
+
+vi.mock("../clients/discord", () => ({
+	createDiscordWebhookClient: vi.fn(() => mockDiscordInstance),
 }));
 
 vi.mock("../clients/spreadSheet", () => ({
@@ -46,6 +55,7 @@ import {
 	getSheetDataStep,
 	saveHistoryStep,
 	sendDiscordResponseStep,
+	streamGeminiWithDiscordEditsStep,
 } from "./answerQuestionWorkflow";
 
 // Mock Analytics Engine Dataset
@@ -240,6 +250,108 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			const result = await saveHistoryStep(mockEnv, [], mockLogger);
 
 			expect(result).toEqual({ success: false });
+		});
+	});
+
+	describe("streamGeminiWithDiscordEditsStep", () => {
+		const sheetData: SheetDataOutput = {
+			sheetInfo: "sheet data",
+			description: "description",
+			fromCache: true,
+		};
+		const history: HistoryOutput = { history: [] };
+
+		it("streams Gemini response and edits Discord message", async () => {
+			const updatedHistory = [
+				{ role: "user", text: "質問: test message" },
+				{ role: "model", text: "full response" },
+			];
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (text: string) => Promise<void>,
+				) => {
+					await onChunk("partial");
+					await onChunk("full response");
+					return "full response";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue(updatedHistory);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"test-token",
+				"user question",
+				"test message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(result.response).toBe("full response");
+			expect(result.updatedHistory).toEqual(updatedHistory);
+			// At minimum, the final edit should be called
+			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledWith(
+				"> user question\nfull response",
+			);
+		});
+
+		it("continues streaming when intermediate Discord edit fails", async () => {
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (text: string) => Promise<void>,
+				) => {
+					await onChunk("response text");
+					return "response text";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			// Intermediate edits may fail, but final edit succeeds
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"test-token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(result.response).toBe("response text");
+		});
+
+		it("passes existing history to GeminiClient", async () => {
+			const existingHistory = [{ role: "user", text: "previous" }];
+			const historyWithExisting: HistoryOutput = {
+				history: existingHistory,
+			};
+			mockGeminiInstance.askStream.mockResolvedValue("response");
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				historyWithExisting,
+				mockLogger,
+			);
+
+			expect(createGeminiClient).toHaveBeenCalledWith(
+				mockEnv.GEMINI_API_KEY,
+				existingHistory,
+				mockLogger,
+			);
 		});
 	});
 

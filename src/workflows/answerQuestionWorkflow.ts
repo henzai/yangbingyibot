@@ -3,6 +3,7 @@ import {
 	type WorkflowEvent,
 	type WorkflowStep,
 } from "cloudflare:workers";
+import { createDiscordWebhookClient } from "../clients/discord";
 import { createGeminiClient } from "../clients/gemini";
 import { createKV } from "../clients/kv";
 import {
@@ -19,6 +20,7 @@ import type {
 	HistoryOutput,
 	SaveHistoryOutput,
 	SheetDataOutput,
+	StreamingGeminiOutput,
 	WorkflowParams,
 } from "./types";
 
@@ -127,7 +129,85 @@ export async function saveHistoryStep(
 	}
 }
 
-// Step 5: Send response to Discord webhook
+// Buffering constants for Discord PATCH throttling
+const DISCORD_EDIT_INTERVAL_MS = 1500;
+const MIN_CHUNK_SIZE = 50;
+
+// Step 3+5 combined: Stream Gemini response + progressively edit Discord message
+export async function streamGeminiWithDiscordEditsStep(
+	env: Bindings,
+	token: string,
+	question: string,
+	message: string,
+	sheetData: SheetDataOutput,
+	historyOutput: HistoryOutput,
+	log: Logger,
+): Promise<StreamingGeminiOutput> {
+	const discord = createDiscordWebhookClient(
+		env.DISCORD_APPLICATION_ID,
+		token,
+		log,
+	);
+	const gemini = createGeminiClient(
+		env.GEMINI_API_KEY,
+		historyOutput.history,
+		log,
+	);
+
+	let lastEditTime = 0;
+	let lastEditLength = 0;
+	let editCount = 0;
+
+	const formatContent = (text: string) => `> ${question}\n${text}`;
+
+	const onChunk = async (accumulatedText: string) => {
+		const now = Date.now();
+		const timeSinceLastEdit = now - lastEditTime;
+		const newCharsCount = accumulatedText.length - lastEditLength;
+
+		if (
+			timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
+			newCharsCount >= MIN_CHUNK_SIZE
+		) {
+			const success = await discord.editOriginalMessage(
+				formatContent(accumulatedText),
+			);
+			if (success) {
+				lastEditTime = now;
+				lastEditLength = accumulatedText.length;
+				editCount++;
+				log.debug("Discord message edited", {
+					editCount,
+					contentLength: accumulatedText.length,
+				});
+			}
+		}
+	};
+
+	log.info("Starting Gemini streaming with Discord edits");
+	const response = await gemini.askStream(
+		message,
+		sheetData.sheetInfo,
+		sheetData.description,
+		onChunk,
+	);
+
+	// Final edit to ensure complete response is shown
+	await discord.editOriginalMessage(formatContent(response));
+	editCount++;
+	log.info("Final Discord edit sent", {
+		editCount,
+		responseLength: response.length,
+	});
+
+	return {
+		response,
+		updatedHistory: gemini.getHistory(),
+		editCount,
+	};
+}
+
+// Step 5: Send response to Discord webhook (used for error messages)
 export async function sendDiscordResponseStep(
 	env: Bindings,
 	token: string,
@@ -246,28 +326,30 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			});
 			stepCount++;
 
-			// Step 3: Call Gemini AI
+			// Step 3: Stream Gemini response + progressively edit Discord message
 			const geminiStartTime = Date.now();
 			let geminiSuccess = false;
-			let geminiResult: GeminiOutput;
+			let streamResult: StreamingGeminiOutput;
 			try {
-				geminiResult = await step.do(
-					"callGemini",
+				streamResult = await step.do(
+					"streamGeminiAndEditDiscord",
 					{
 						retries: {
 							limit: 2,
 							delay: "1 second",
 							backoff: "exponential",
 						},
-						timeout: "60 seconds",
+						timeout: "120 seconds",
 					},
 					async () => {
-						return callGeminiStep(
+						return streamGeminiWithDiscordEditsStep(
 							this.env,
+							token,
+							message,
 							message,
 							sheetData,
 							historyOutput,
-							log.withContext({ step: "callGemini" }),
+							log.withContext({ step: "streamGeminiAndEditDiscord" }),
 						);
 					},
 				);
@@ -285,32 +367,11 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			await step.do("saveHistory", async () => {
 				return saveHistoryStep(
 					this.env,
-					geminiResult.updatedHistory,
+					streamResult.updatedHistory,
 					log.withContext({ step: "saveHistory" }),
 				);
 			});
 			stepCount++;
-
-			// Step 5: Send Discord response
-			const discordStartTime = Date.now();
-			const discordResult = await step.do("sendDiscordResponse", async () => {
-				return sendDiscordResponseStep(
-					this.env,
-					token,
-					message,
-					geminiResult.response,
-					log.withContext({ step: "sendDiscordResponse" }),
-				);
-			});
-			stepCount++;
-
-			metrics.recordDiscordWebhook({
-				requestId,
-				success: discordResult.success,
-				durationMs: Date.now() - discordStartTime,
-				retryCount: discordResult.retryCount,
-				statusCode: discordResult.statusCode,
-			});
 
 			// Record workflow completion (success)
 			metrics.recordWorkflowComplete({
