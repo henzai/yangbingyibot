@@ -12,17 +12,5 @@
 		"rules": {
 			"recommended": true
 		}
-	},
-	"overrides": [
-		{
-			"includes": ["scripts/**"],
-			"linter": {
-				"rules": {
-					"correctness": {
-						"noNodejsModules": "off"
-					}
-				}
-			}
-		}
-	]
+	}
 }

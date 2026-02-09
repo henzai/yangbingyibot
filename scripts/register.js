@@ -1,6 +1,5 @@
 const { WEN_COMMAND } = require("./commands.js");
 const dotenv = require("dotenv");
-const process = require("node:process");
 
 /**
  * This file is meant to be run from the command line, and is not used by the
