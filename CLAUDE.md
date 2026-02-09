@@ -54,8 +54,9 @@ KV namespace `sushanshan_bot` must be bound in wrangler.toml.
 
 ## Git Workflow
 
-- 新しいブランチは、明確に既存ブランチの作業を引き継ぐ場合を除き、必ず `main` から作成すること
+- 新しいブランチは、明確に既存ブランチの作業を引き継ぐ場合を除き、必ず `main` から作成すること。作成前に `git fetch origin` を実行し、`origin/main` から作成すること
 - PRを作成する際は、対象の変更に関係ないコミットが含まれていないことを確認すること
+- TODOリストの各項目が完了するごとにコミットを作成すること
 
 ## Critical Components
 
