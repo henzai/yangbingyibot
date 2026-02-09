@@ -57,10 +57,7 @@ const mockEnv: Bindings = {
 	DISCORD_TOKEN: "test-token",
 	DISCORD_PUBLIC_KEY: "test-public-key",
 	DISCORD_APPLICATION_ID: "test-app-id",
-	DISCORD_TEST_GUILD_ID: "test-guild-id",
 	GEMINI_API_KEY: "test-gemini-key",
-	GOOGLE_SERVICE_ACCOUNT_EMAIL: "test@example.com",
-	GOOGLE_PRIVATE_KEY: "test-key",
 	GOOGLE_SERVICE_ACCOUNT: '{"type":"service_account"}',
 	sushanshan_bot: {} as KVNamespace,
 	// biome-ignore lint/suspicious/noExplicitAny: mock binding for test
