@@ -163,7 +163,6 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 			let fullText = "";
-			let accumulatedThinking = "";
 
 			try {
 				this.log.info("Gemini streaming API request starting");
@@ -203,8 +202,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 							continue;
 						}
 						if (part.thought) {
-							accumulatedThinking += part.text;
-							await onChunk(accumulatedThinking, "thinking");
+							await onChunk(part.text, "thinking");
 						} else {
 							fullText += part.text;
 							await onChunk(fullText, "response");
@@ -302,6 +300,7 @@ const streamGenerationConfig = {
 const getPrompt = (sheet: string, description: string) => {
 	return `
 ${description}
+思考過程は必ず日本語で行ってください。
 ---
 スプレッドシートの情報:
 ${sheet}
