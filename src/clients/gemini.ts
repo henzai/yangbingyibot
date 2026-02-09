@@ -143,6 +143,122 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		}
 	}
 
+	async askStream(
+		input: string,
+		sheet: string,
+		description: string,
+		onChunk: (accumulatedText: string) => Promise<void>,
+	): Promise<string> {
+		try {
+			const systemPrompt = getPrompt(sheet, description);
+			const historyText = this.history
+				.map((h) => `${h.role}: ${h.text}`)
+				.join("\n");
+
+			const fullPrompt = `${systemPrompt}
+
+${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
+
+			let fullText = "";
+
+			try {
+				this.log.info("Gemini streaming API request starting");
+				const startTime = Date.now();
+
+				const stream = await withRetry(
+					async () => {
+						return await this.client.models.generateContentStream({
+							model: "gemini-3-flash-preview",
+							contents: fullPrompt,
+							config: generationConfig,
+						});
+					},
+					{
+						maxAttempts: 2,
+						initialDelayMs: 500,
+						maxDelayMs: 2000,
+					},
+					(error) => {
+						const msg = error.message.toLowerCase();
+						return (
+							msg.includes("quota") ||
+							msg.includes("rate limit") ||
+							msg.includes("network") ||
+							msg.includes("timeout") ||
+							msg.includes("500") ||
+							msg.includes("503")
+						);
+					},
+					this.log,
+				);
+
+				for await (const chunk of stream) {
+					const chunkText = chunk.text;
+					if (chunkText) {
+						fullText += chunkText;
+						await onChunk(fullText);
+					}
+				}
+
+				this.log.info("Gemini streaming API completed", {
+					durationMs: Date.now() - startTime,
+				});
+			} catch (error) {
+				this.log.error("Gemini streaming API request failed", {
+					error: error instanceof Error ? error.message : "Unknown error",
+				});
+
+				if (error instanceof Error) {
+					if (
+						error.message.includes("quota") ||
+						error.message.includes("rate limit")
+					) {
+						throw new Error(
+							"API使用制限に達しました。しばらく待ってから再度お試しください。",
+						);
+					}
+					if (
+						error.message.includes("invalid") ||
+						error.message.includes("API key")
+					) {
+						throw new Error("API認証エラーが発生しました。");
+					}
+				}
+
+				throw new Error("AI APIへのリクエストに失敗しました。");
+			}
+
+			if (!fullText || !fullText.trim()) {
+				this.log.error("Empty text from Gemini streaming response");
+				throw new Error("AIから有効な応答が得られませんでした。");
+			}
+
+			// Add to history only after stream completes successfully
+			this.history.push({
+				role: "user",
+				text: `質問: ${input}`,
+			});
+			this.history.push({
+				role: "model",
+				text: fullText,
+			});
+
+			return fullText;
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				(error.message.includes("API") || error.message.includes("AI"))
+			) {
+				throw error;
+			}
+
+			this.log.error("Unexpected error in Gemini streaming client", {
+				error: error instanceof Error ? error.message : "Unknown error",
+			});
+			throw new Error("AI処理中に予期しないエラーが発生しました。");
+		}
+	}
+
 	getHistory(): { role: string; text: string }[] {
 		return this.history;
 	}
