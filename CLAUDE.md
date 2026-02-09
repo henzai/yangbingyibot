@@ -48,7 +48,7 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 
 - `DISCORD_TOKEN`, `DISCORD_PUBLIC_KEY`, `DISCORD_APPLICATION_ID` - Discord credentials
 - `GEMINI_API_KEY` - Google Gemini API key
-- `GOOGLE_CLIENT_EMAIL`, `GOOGLE_PRIVATE_KEY` - Google Service Account for Sheets
+- `GOOGLE_SERVICE_ACCOUNT` - Google Service Account credentials (JSON string)
 
 KV namespace `sushanshan_bot` must be bound in wrangler.toml.
 
