@@ -1,13 +1,13 @@
-import { InteractionResponseType, InteractionType } from 'discord-interactions';
-import { Hono } from 'hono';
-import { verifyDiscordInteraction } from './middleware/verifyDiscordInteraction';
-import { errorResponse } from './responses/errorResponse';
-import type { Bindings } from './types';
-import { logger } from './utils/logger';
-import { generateRequestId } from './utils/requestId';
+import { InteractionResponseType, InteractionType } from "discord-interactions";
+import { Hono } from "hono";
+import { verifyDiscordInteraction } from "./middleware/verifyDiscordInteraction";
+import { errorResponse } from "./responses/errorResponse";
+import type { Bindings } from "./types";
+import { logger } from "./utils/logger";
+import { generateRequestId } from "./utils/requestId";
 
 // Re-export the Workflow class for Cloudflare to discover
-export { AnswerQuestionWorkflow } from './workflows/answerQuestionWorkflow';
+export { AnswerQuestionWorkflow } from "./workflows/answerQuestionWorkflow";
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -15,24 +15,26 @@ const app = new Hono<{ Bindings: Bindings }>();
 // biome-ignore lint/suspicious/noExplicitAny: Discord interaction body is dynamically typed and validated at runtime
 function validateDiscordCommand(body: any): { question: string } {
 	if (!body?.data) {
-		throw new Error('Invalid Discord interaction: missing data');
+		throw new Error("Invalid Discord interaction: missing data");
 	}
 
 	if (!Array.isArray(body.data.options) || body.data.options.length === 0) {
-		throw new Error('Invalid Discord interaction: missing options');
+		throw new Error("Invalid Discord interaction: missing options");
 	}
 
 	const question = body.data.options[0]?.value;
-	if (typeof question !== 'string' || !question.trim()) {
-		throw new Error('Invalid Discord interaction: question must be a non-empty string');
+	if (typeof question !== "string" || !question.trim()) {
+		throw new Error(
+			"Invalid Discord interaction: question must be a non-empty string",
+		);
 	}
 
 	return { question: question.trim() };
 }
 
-app.get('/', (c) => c.text('Hello Cloudflare Workers!'));
+app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 
-app.post('/', verifyDiscordInteraction, async (c) => {
+app.post("/", verifyDiscordInteraction, async (c) => {
 	const body = await c.req.json();
 	const requestId = generateRequestId();
 	const log = logger.withContext({ requestId });
@@ -51,7 +53,9 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 				const { question } = validateDiscordCommand(body);
 
 				// Start the workflow
-				log.info('Starting AnswerQuestionWorkflow', { messageLength: question.length });
+				log.info("Starting AnswerQuestionWorkflow", {
+					messageLength: question.length,
+				});
 
 				try {
 					await c.env.ANSWER_QUESTION_WORKFLOW.create({
@@ -62,10 +66,13 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 						},
 					});
 				} catch (workflowError) {
-					log.error('Failed to create workflow', {
-						error: workflowError instanceof Error ? workflowError.message : 'Unknown error',
+					log.error("Failed to create workflow", {
+						error:
+							workflowError instanceof Error
+								? workflowError.message
+								: "Unknown error",
 					});
-					throw new Error('Failed to start processing');
+					throw new Error("Failed to start processing");
 				}
 
 				return c.json({
@@ -73,12 +80,16 @@ app.post('/', verifyDiscordInteraction, async (c) => {
 				});
 			}
 			default:
-				throw new Error('Invalid interaction type');
+				throw new Error("Invalid interaction type");
 		}
 	} catch (e) {
 		// This catch only handles synchronous errors before deferred response
-		log.error('Request failed', { error: e instanceof Error ? e.message : 'Unknown error' });
-		return c.json(errorResponse(e instanceof Error ? e.message : 'Unknown error'));
+		log.error("Request failed", {
+			error: e instanceof Error ? e.message : "Unknown error",
+		});
+		return c.json(
+			errorResponse(e instanceof Error ? e.message : "Unknown error"),
+		);
 	}
 });
 

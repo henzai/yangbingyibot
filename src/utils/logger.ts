@@ -1,8 +1,8 @@
 export enum LogLevel {
-	ERROR = 'ERROR',
-	WARN = 'WARN',
-	INFO = 'INFO',
-	DEBUG = 'DEBUG',
+	ERROR = "ERROR",
+	WARN = "WARN",
+	INFO = "INFO",
+	DEBUG = "DEBUG",
 }
 
 export interface LogContext {
@@ -70,7 +70,11 @@ export class Logger {
 	/**
 	 * Performance timing wrapper that logs operation duration
 	 */
-	async trackTiming<T>(operation: string, fn: () => Promise<T>, metadata?: LogContext): Promise<T> {
+	async trackTiming<T>(
+		operation: string,
+		fn: () => Promise<T>,
+		metadata?: LogContext,
+	): Promise<T> {
 		const startTime = Date.now();
 		let success = false;
 

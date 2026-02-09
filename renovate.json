@@ -4,7 +4,11 @@
 	"packageRules": [
 		{
 			"groupName": "vitest",
-			"matchPackageNames": ["/vitest/", "/@vitest//", "/@cloudflare/vitest-pool-workers/"]
+			"matchPackageNames": [
+				"/vitest/",
+				"/@vitest//",
+				"/@cloudflare/vitest-pool-workers/"
+			]
 		}
 	]
 }

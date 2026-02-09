@@ -1,9 +1,14 @@
-import { logger as defaultLogger, type Logger } from '../utils/logger';
+import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 /**
  * Metric event types for categorizing data points
  */
-export type MetricEventType = 'gemini_api_call' | 'workflow_complete' | 'kv_cache_access' | 'discord_webhook' | 'sheets_api_call';
+export type MetricEventType =
+	| "gemini_api_call"
+	| "workflow_complete"
+	| "kv_cache_access"
+	| "discord_webhook"
+	| "sheets_api_call";
 
 /**
  * Base interface for all metric data
@@ -26,7 +31,7 @@ export interface GeminiMetricData extends MetricData {
  */
 export interface KVCacheMetricData extends MetricData {
 	cacheHit: boolean;
-	operation: 'get' | 'put';
+	operation: "get" | "put";
 }
 
 /**
@@ -79,7 +84,7 @@ export class MetricsClient implements IMetricsClient {
 	 * doubles: [durationMs, success, retryCount]
 	 */
 	recordGeminiCall(data: GeminiMetricData): void {
-		this.writeDataPoint('gemini_api_call', {
+		this.writeDataPoint("gemini_api_call", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId],
 			doubles: [data.durationMs, data.success ? 1 : 0, data.retryCount ?? 0],
@@ -91,10 +96,15 @@ export class MetricsClient implements IMetricsClient {
 	 * doubles: [durationMs, success, stepCount, fromCache]
 	 */
 	recordWorkflowComplete(data: WorkflowMetricData): void {
-		this.writeDataPoint('workflow_complete', {
+		this.writeDataPoint("workflow_complete", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId, data.workflowId],
-			doubles: [data.durationMs, data.success ? 1 : 0, data.stepCount, data.fromCache ? 1 : 0],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.stepCount,
+				data.fromCache ? 1 : 0,
+			],
 		});
 	}
 
@@ -103,7 +113,7 @@ export class MetricsClient implements IMetricsClient {
 	 * doubles: [durationMs, success, cacheHit]
 	 */
 	recordKVCacheAccess(data: KVCacheMetricData): void {
-		this.writeDataPoint('kv_cache_access', {
+		this.writeDataPoint("kv_cache_access", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId, data.operation],
 			doubles: [data.durationMs, data.success ? 1 : 0, data.cacheHit ? 1 : 0],
@@ -115,10 +125,15 @@ export class MetricsClient implements IMetricsClient {
 	 * doubles: [durationMs, success, retryCount, statusCode]
 	 */
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void {
-		this.writeDataPoint('discord_webhook', {
+		this.writeDataPoint("discord_webhook", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId],
-			doubles: [data.durationMs, data.success ? 1 : 0, data.retryCount, data.statusCode ?? 0],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.retryCount,
+				data.statusCode ?? 0,
+			],
 		});
 	}
 
@@ -127,7 +142,7 @@ export class MetricsClient implements IMetricsClient {
 	 * doubles: [durationMs, success]
 	 */
 	recordSheetsApiCall(data: MetricData): void {
-		this.writeDataPoint('sheets_api_call', {
+		this.writeDataPoint("sheets_api_call", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId],
 			doubles: [data.durationMs, data.success ? 1 : 0],
@@ -139,7 +154,10 @@ export class MetricsClient implements IMetricsClient {
 	 * Prepends eventType to blobs for filtering in SQL queries
 	 * Non-blocking - errors are logged but don't affect main flow
 	 */
-	private writeDataPoint(eventType: MetricEventType, dataPoint: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void {
+	private writeDataPoint(
+		eventType: MetricEventType,
+		dataPoint: { indexes?: string[]; blobs?: string[]; doubles?: number[] },
+	): void {
 		try {
 			const blobsWithType = [eventType, ...(dataPoint.blobs ?? [])];
 
@@ -150,9 +168,9 @@ export class MetricsClient implements IMetricsClient {
 			});
 		} catch (error) {
 			// Log but don't throw - metrics should never break the main flow
-			this.log.warn('Failed to write metric data point', {
+			this.log.warn("Failed to write metric data point", {
 				eventType,
-				error: error instanceof Error ? error.message : 'Unknown error',
+				error: error instanceof Error ? error.message : "Unknown error",
 			});
 		}
 	}
@@ -172,6 +190,9 @@ export class NoOpMetricsClient implements IMetricsClient {
 /**
  * Factory function following existing patterns (createKV, createGeminiClient)
  */
-export function createMetricsClient(dataset: AnalyticsEngineDataset, log?: Logger): MetricsClient {
+export function createMetricsClient(
+	dataset: AnalyticsEngineDataset,
+	log?: Logger,
+): MetricsClient {
 	return new MetricsClient(dataset, log);
 }

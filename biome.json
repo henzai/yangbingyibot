@@ -8,17 +8,9 @@
 	"files": {
 		"includes": ["**", "!worker-configuration.d.ts", "!.claude"]
 	},
-	"formatter": {
-		"lineWidth": 140
-	},
 	"linter": {
 		"rules": {
 			"recommended": true
-		}
-	},
-	"javascript": {
-		"formatter": {
-			"quoteStyle": "single"
 		}
 	},
 	"overrides": [
