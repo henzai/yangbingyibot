@@ -24,6 +24,12 @@ export interface GeminiOutput {
 	updatedHistory: { role: string; text: string }[];
 }
 
+export interface StreamingGeminiOutput {
+	response: string;
+	updatedHistory: { role: string; text: string }[];
+	editCount: number;
+}
+
 export interface SaveHistoryOutput {
 	success: boolean;
 }
