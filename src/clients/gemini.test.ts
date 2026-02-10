@@ -141,29 +141,32 @@ describe("GeminiClient", () => {
 	describe("askStream", () => {
 		it("accumulates streamed text and calls onChunk with accumulated text", async () => {
 			const mockStream = (async function* () {
-				yield { text: "Hello " };
-				yield { text: "world" };
+				yield { text: "Hello ", parts: [{ thought: false }] };
+				yield { text: "world", parts: [{ thought: false }] };
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
-			const chunks: string[] = [];
+			const chunks: { text: string; phase: "thinking" | "response" }[] = [];
 			const client = new GeminiClient("test-api-key");
 			const result = await client.askStream(
 				"question",
 				"sheet",
 				"desc",
-				async (text) => {
-					chunks.push(text);
+				async (text, phase) => {
+					chunks.push({ text, phase });
 				},
 			);
 
 			expect(result).toBe("Hello world");
-			expect(chunks).toEqual(["Hello ", "Hello world"]);
+			expect(chunks).toEqual([
+				{ text: "Hello ", phase: "response" },
+				{ text: "Hello world", phase: "response" },
+			]);
 		});
 
 		it("updates history after streaming completes", async () => {
 			const mockStream = (async function* () {
-				yield { text: "streamed response" };
+				yield { text: "streamed response", parts: [{ thought: false }] };
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
@@ -207,25 +210,33 @@ describe("GeminiClient", () => {
 
 		it("skips chunks with no text", async () => {
 			const mockStream = (async function* () {
-				yield { text: "Hello" };
+				yield { text: "Hello", parts: [{ thought: false }] };
 				yield { text: undefined };
-				yield { text: " world" };
+				yield { text: " world", parts: [{ thought: false }] };
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
-			const chunks: string[] = [];
+			const chunks: { text: string; phase: "thinking" | "response" }[] = [];
 			const client = new GeminiClient("test-api-key");
-			const result = await client.askStream("q", "s", "d", async (text) => {
-				chunks.push(text);
-			});
+			const result = await client.askStream(
+				"q",
+				"s",
+				"d",
+				async (text, phase) => {
+					chunks.push({ text, phase });
+				},
+			);
 
 			expect(result).toBe("Hello world");
-			expect(chunks).toEqual(["Hello", "Hello world"]);
+			expect(chunks).toEqual([
+				{ text: "Hello", phase: "response" },
+				{ text: "Hello world", phase: "response" },
+			]);
 		});
 
 		it("includes conversation history in prompt", async () => {
 			const mockStream = (async function* () {
-				yield { text: "response" };
+				yield { text: "response", parts: [{ thought: false }] };
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
@@ -239,6 +250,52 @@ describe("GeminiClient", () => {
 					contents: expect.stringContaining("previous"),
 				}),
 			);
+		});
+
+		it("detects thinking phase when chunk.parts[0].thought is true", async () => {
+			const mockStream = (async function* () {
+				yield { text: "考えています...", parts: [{ thought: true }] };
+				yield { text: "回答です", parts: [{ thought: false }] };
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const phases: ("thinking" | "response")[] = [];
+			const client = new GeminiClient("test-api-key");
+			await client.askStream("q", "s", "d", async (_, phase) => {
+				phases.push(phase);
+			});
+
+			expect(phases).toEqual(["thinking", "response"]);
+		});
+
+		it("detects response phase when chunk.parts[0].thought is false", async () => {
+			const mockStream = (async function* () {
+				yield { text: "response text", parts: [{ thought: false }] };
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const phases: ("thinking" | "response")[] = [];
+			const client = new GeminiClient("test-api-key");
+			await client.askStream("q", "s", "d", async (_, phase) => {
+				phases.push(phase);
+			});
+
+			expect(phases).toEqual(["response"]);
+		});
+
+		it("defaults to response phase when parts is undefined", async () => {
+			const mockStream = (async function* () {
+				yield { text: "response text" };
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const phases: ("thinking" | "response")[] = [];
+			const client = new GeminiClient("test-api-key");
+			await client.askStream("q", "s", "d", async (_, phase) => {
+				phases.push(phase);
+			});
+
+			expect(phases).toEqual(["response"]);
 		});
 	});
 
