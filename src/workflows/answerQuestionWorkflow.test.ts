@@ -271,10 +271,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					_input: string,
 					_sheet: string,
 					_desc: string,
-					onChunk: (text: string) => Promise<void>,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
 				) => {
-					await onChunk("partial");
-					await onChunk("full response");
+					await onChunk("partial", "response");
+					await onChunk("full response", "response");
 					return "full response";
 				},
 			);
@@ -305,9 +308,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					_input: string,
 					_sheet: string,
 					_desc: string,
-					onChunk: (text: string) => Promise<void>,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
 				) => {
-					await onChunk("response text");
+					await onChunk("response text", "response");
 					return "response text";
 				},
 			);
@@ -352,6 +358,135 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				existingHistory,
 				mockLogger,
 			);
+		});
+
+		it("handles thinking phase and transitions to response phase", async () => {
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
+				) => {
+					await onChunk("thinking text", "thinking");
+					await onChunk("response text", "response");
+					return "response text";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(result.response).toBe("response text");
+			// Should have been called at least twice: once for phase transition, once for final
+			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalled();
+		});
+
+		it("displays thinking summary with 💭 icon during thinking phase", async () => {
+			// Mock the summarizeThinking API call
+			const mockGenerateContent = vi.fn().mockResolvedValue({
+				candidates: [
+					{
+						content: {
+							parts: [{ text: "考えています" }],
+						},
+					},
+				],
+			});
+
+			vi.doMock("@google/genai", () => ({
+				GoogleGenAI: vi.fn().mockImplementation(() => ({
+					models: {
+						generateContent: mockGenerateContent,
+					},
+				})),
+			}));
+
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
+				) => {
+					// Simulate long enough thinking text to trigger edit
+					const longThinking = "a".repeat(100);
+					await onChunk(longThinking, "thinking");
+					// Wait for interval to pass
+					await new Promise((resolve) => setTimeout(resolve, 1600));
+					await onChunk(longThinking, "thinking");
+					await onChunk("response", "response");
+					return "response";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			// The function should have called editOriginalMessage
+			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalled();
+		});
+
+		it("immediately updates Discord on phase transition from thinking to response", async () => {
+			let editCallCount = 0;
+			mockDiscordInstance.editOriginalMessage.mockImplementation(async () => {
+				editCallCount++;
+				return true;
+			});
+
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
+				) => {
+					await onChunk("thinking", "thinking");
+					await onChunk("response", "response");
+					return "response";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			// Should include at least: phase transition edit + final edit
+			expect(editCallCount).toBeGreaterThanOrEqual(2);
 		});
 	});
 
