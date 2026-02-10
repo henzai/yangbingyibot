@@ -147,7 +147,10 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		input: string,
 		sheet: string,
 		description: string,
-		onChunk: (accumulatedText: string) => Promise<void>,
+		onChunk: (
+			accumulatedText: string,
+			phase: "thinking" | "response",
+		) => Promise<void>,
 	): Promise<string> {
 		try {
 			const systemPrompt = getPrompt(sheet, description);
@@ -170,7 +173,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 						return await this.client.models.generateContentStream({
 							model: "gemini-3-flash-preview",
 							contents: fullPrompt,
-							config: generationConfig,
+							config: streamGenerationConfig,
 						});
 					},
 					{
@@ -193,10 +196,17 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				);
 
 				for await (const chunk of stream) {
-					const chunkText = chunk.text;
-					if (chunkText) {
-						fullText += chunkText;
-						await onChunk(fullText);
+					const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+					for (const part of parts) {
+						if (typeof part.text !== "string") {
+							continue;
+						}
+						if (part.thought) {
+							await onChunk(part.text, "thinking");
+						} else {
+							fullText += part.text;
+							await onChunk(fullText, "response");
+						}
 					}
 				}
 
@@ -280,9 +290,17 @@ const generationConfig = {
 	responseMimeType: "text/plain",
 };
 
+const streamGenerationConfig = {
+	...generationConfig,
+	thinkingConfig: {
+		includeThoughts: true,
+	},
+};
+
 const getPrompt = (sheet: string, description: string) => {
 	return `
 ${description}
+思考過程は必ず日本語で行ってください。
 ---
 スプレッドシートの情報:
 ${sheet}
