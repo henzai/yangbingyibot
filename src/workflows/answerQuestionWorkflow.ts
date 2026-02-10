@@ -133,6 +133,38 @@ export async function saveHistoryStep(
 const DISCORD_EDIT_INTERVAL_MS = 1500;
 const MIN_CHUNK_SIZE = 50;
 
+/**
+ * Summarize thinking text to a short Japanese sentence
+ */
+async function summarizeThinking(
+	thinkingText: string,
+	apiKey: string,
+	log: Logger,
+): Promise<string> {
+	try {
+		const { GoogleGenAI } = await import("@google/genai");
+		const client = new GoogleGenAI({ apiKey });
+
+		const result = await client.models.generateContent({
+			model: "gemini-2.0-flash-lite",
+			contents: `以下の思考内容を50文字以内の日本語1文に要約してください:\n\n${thinkingText}`,
+			config: {
+				temperature: 0.3,
+				maxOutputTokens: 100,
+			},
+		});
+
+		const summary =
+			result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "考え中...";
+		return summary.length > 50 ? `${summary.slice(0, 50)}...` : summary;
+	} catch (error) {
+		log.warn("Failed to summarize thinking", {
+			error: error instanceof Error ? error.message : "Unknown error",
+		});
+		return "考え中...";
+	}
+}
+
 // Step 3+5 combined: Stream Gemini response + progressively edit Discord message
 export async function streamGeminiWithDiscordEditsStep(
 	env: Bindings,
@@ -157,29 +189,91 @@ export async function streamGeminiWithDiscordEditsStep(
 	let lastEditTime = 0;
 	let lastEditLength = 0;
 	let editCount = 0;
+	let currentPhase: "thinking" | "response" | null = null;
+	let thinkingText = "";
+	let responseText = "";
+	let lastThinkingSummary = "";
 
 	const formatContent = (text: string) => `> ${question}\n${text}`;
 
-	const onChunk = async (accumulatedText: string) => {
+	const onChunk = async (
+		accumulatedText: string,
+		phase: "thinking" | "response",
+	) => {
 		const now = Date.now();
 		const timeSinceLastEdit = now - lastEditTime;
-		const newCharsCount = accumulatedText.length - lastEditLength;
 
-		if (
-			timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
-			newCharsCount >= MIN_CHUNK_SIZE
-		) {
-			const success = await discord.editOriginalMessage(
-				formatContent(accumulatedText),
-			);
-			if (success) {
-				lastEditTime = now;
-				lastEditLength = accumulatedText.length;
-				editCount++;
-				log.debug("Discord message edited", {
-					editCount,
-					contentLength: accumulatedText.length,
-				});
+		// Track phase transition
+		const phaseChanged = currentPhase !== null && currentPhase !== phase;
+		currentPhase = phase;
+
+		if (phase === "thinking") {
+			// Accumulate thinking text
+			thinkingText = accumulatedText;
+
+			// Summarize thinking and display with 💭 icon
+			const newCharsCount = accumulatedText.length - lastEditLength;
+			if (
+				timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
+				newCharsCount >= MIN_CHUNK_SIZE
+			) {
+				const summary = await summarizeThinking(
+					thinkingText,
+					env.GEMINI_API_KEY,
+					log,
+				);
+				lastThinkingSummary = summary;
+				const success = await discord.editOriginalMessage(
+					formatContent(`💭 ${summary}`),
+				);
+				if (success) {
+					lastEditTime = now;
+					lastEditLength = accumulatedText.length;
+					editCount++;
+					log.debug("Discord thinking message edited", {
+						editCount,
+						summary,
+					});
+				}
+			}
+		} else {
+			// Response phase
+			responseText = accumulatedText;
+
+			// If transitioning from thinking to response, immediately update Discord
+			if (phaseChanged) {
+				const success = await discord.editOriginalMessage(
+					formatContent(responseText),
+				);
+				if (success) {
+					lastEditTime = now;
+					lastEditLength = accumulatedText.length;
+					editCount++;
+					log.info("Phase transition: thinking → response", {
+						editCount,
+						lastThinkingSummary,
+					});
+				}
+			} else {
+				// Normal response streaming
+				const newCharsCount = accumulatedText.length - lastEditLength;
+				if (
+					timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
+					newCharsCount >= MIN_CHUNK_SIZE
+				) {
+					const success = await discord.editOriginalMessage(
+						formatContent(accumulatedText),
+					);
+					if (success) {
+						lastEditTime = now;
+						lastEditLength = accumulatedText.length;
+						editCount++;
+						log.debug("Discord response message edited", {
+							editCount,
+							contentLength: accumulatedText.length,
+						});
+					}
+				}
 			}
 		}
 	};
@@ -192,7 +286,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		onChunk,
 	);
 
-	// Final edit to ensure complete response is shown
+	// Final edit to ensure complete response is shown (without thinking content)
 	await discord.editOriginalMessage(formatContent(response));
 	editCount++;
 	log.info("Final Discord edit sent", {
