@@ -28,9 +28,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.PAT_TOKEN }}
-          claude_args: "--model claude-opus-4-6 --max-turns 30"
-          allowed_tools: "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test)"
-          direct_prompt: |
+          claude_args: '--model claude-opus-4-6 --max-turns 30 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test)"'
+          prompt: |
             You are an AI issue triage assistant for this repository. Analyze the newly opened issue and perform a comprehensive triage.
 
             ## Issue Details
