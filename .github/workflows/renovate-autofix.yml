@@ -1,0 +1,124 @@
+name: Renovate Auto-fix
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+jobs:
+  autofix:
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Get PR info and check conditions
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: ${{ github.event.workflow_run.id }},
+            });
+
+            const pullRequests = run.data.pull_requests;
+            if (!pullRequests || pullRequests.length === 0) {
+              console.log('No PRs associated with this workflow run');
+              core.setOutput('should_fix', 'false');
+              return;
+            }
+
+            const prNumber = pullRequests[0].number;
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            // Renovate PR かどうか確認
+            const isRenovate = pr.data.user.login === 'renovate[bot]'
+              && pr.data.head.ref.startsWith('renovate/');
+            if (!isRenovate) {
+              console.log(`PR #${prNumber} is not a Renovate PR`);
+              core.setOutput('should_fix', 'false');
+              return;
+            }
+
+            // ラベルによる重複実行防止
+            const labels = pr.data.labels.map(l => l.name);
+            if (labels.includes('auto-fix-attempted')) {
+              console.log(`PR #${prNumber}: auto-fix already attempted, skipping`);
+              core.setOutput('should_fix', 'false');
+              return;
+            }
+
+            core.setOutput('should_fix', 'true');
+            core.setOutput('pr_number', prNumber.toString());
+
+      - name: Add auto-fix-attempted label
+        if: steps.pr-info.outputs.should_fix == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-info.outputs.pr_number }};
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'auto-fix-attempted',
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: 'auto-fix-attempted',
+                  color: 'fbca04',
+                  description: 'Claude auto-fix was attempted for CI failure',
+                });
+              }
+            }
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['auto-fix-attempted'],
+            });
+
+      - name: Post @claude comment to trigger fix
+        if: steps.pr-info.outputs.should_fix == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.pr-info.outputs.pr_number }};
+            const runId = ${{ github.event.workflow_run.id }};
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${runId}`;
+
+            const body = [
+              '@claude This Renovate dependency update PR has CI failures. Please fix them.',
+              '',
+              `**Failed CI run:** ${runUrl}`,
+              '',
+              'Please:',
+              '1. Check the CI failure logs from the linked workflow run above',
+              '2. Identify what broke (type errors, lint issues, or test failures from the dependency update)',
+              '3. Fix the code to work with the updated dependencies',
+              '4. Run `npm run check` to fix any formatting/lint issues',
+              '5. Run `npm test` to verify tests pass',
+              '6. If `npm run cf-typegen` generates changed types, include those changes',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: body,
+            });
