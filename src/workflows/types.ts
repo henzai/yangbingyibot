@@ -19,11 +19,6 @@ export interface HistoryOutput {
 	history: { role: string; text: string }[];
 }
 
-export interface GeminiOutput {
-	response: string;
-	updatedHistory: { role: string; text: string }[];
-}
-
 export interface StreamingGeminiOutput {
 	response: string;
 	updatedHistory: { role: string; text: string }[];

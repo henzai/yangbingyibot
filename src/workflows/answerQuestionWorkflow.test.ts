@@ -61,7 +61,6 @@ vi.mock("@google/genai", () => ({
 import { createGeminiClient } from "../clients/gemini";
 import { getSheetData } from "../clients/spreadSheet";
 import {
-	callGeminiStep,
 	getHistoryStep,
 	getSheetDataStep,
 	saveHistoryStep,
@@ -177,69 +176,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			const result = await getHistoryStep(mockEnv, mockLogger);
 
 			expect(result).toEqual({ history: [] });
-		});
-	});
-
-	describe("callGeminiStep", () => {
-		it("calls Gemini with correct parameters", async () => {
-			const sheetData: SheetDataOutput = {
-				sheetInfo: "sheet data",
-				description: "sheet description",
-				fromCache: true,
-			};
-			const history: HistoryOutput = { history: [] };
-			mockGeminiInstance.ask.mockResolvedValue("AI response");
-			mockGeminiInstance.getHistory.mockReturnValue([
-				{ role: "user", text: "質問: test message" },
-				{ role: "model", text: "AI response" },
-			]);
-
-			const result = await callGeminiStep(
-				mockEnv,
-				"test message",
-				sheetData,
-				history,
-				mockLogger,
-			);
-
-			expect(createGeminiClient).toHaveBeenCalledWith(
-				mockEnv.GEMINI_API_KEY,
-				[],
-				mockLogger,
-			);
-			expect(mockGeminiInstance.ask).toHaveBeenCalledWith(
-				"test message",
-				"sheet data",
-				"sheet description",
-			);
-			expect(result.response).toBe("AI response");
-			expect(result.updatedHistory).toHaveLength(2);
-		});
-
-		it("passes existing history to GeminiClient", async () => {
-			const existingHistory = [{ role: "user", text: "previous question" }];
-			const sheetData: SheetDataOutput = {
-				sheetInfo: "sheet",
-				description: "desc",
-				fromCache: true,
-			};
-			const history: HistoryOutput = { history: existingHistory };
-			mockGeminiInstance.ask.mockResolvedValue("response");
-			mockGeminiInstance.getHistory.mockReturnValue([]);
-
-			await callGeminiStep(
-				mockEnv,
-				"new message",
-				sheetData,
-				history,
-				mockLogger,
-			);
-
-			expect(createGeminiClient).toHaveBeenCalledWith(
-				mockEnv.GEMINI_API_KEY,
-				existingHistory,
-				mockLogger,
-			);
 		});
 	});
 

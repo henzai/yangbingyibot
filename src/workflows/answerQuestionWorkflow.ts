@@ -18,7 +18,6 @@ import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 import type {
 	DiscordResponseOutput,
-	GeminiOutput,
 	HistoryOutput,
 	SaveHistoryOutput,
 	SheetDataOutput,
@@ -82,34 +81,6 @@ export async function getHistoryStep(
 	const history = await kv.getHistory();
 	log.info("History loaded", { historyLength: history.length });
 	return { history };
-}
-
-// Step 3: Call Gemini API
-export async function callGeminiStep(
-	env: Bindings,
-	message: string,
-	sheetData: SheetDataOutput,
-	historyOutput: HistoryOutput,
-	log: Logger,
-): Promise<GeminiOutput> {
-	log.info("Calling Gemini API", { messageLength: message.length });
-	const gemini = createGeminiClient(
-		env.GEMINI_API_KEY,
-		historyOutput.history,
-		log,
-	);
-	const response = await gemini.ask(
-		message,
-		sheetData.sheetInfo,
-		sheetData.description,
-	);
-	const updatedHistory = gemini.getHistory();
-	log.info("Gemini response received", { responseLength: response.length });
-
-	return {
-		response,
-		updatedHistory,
-	};
 }
 
 // Step 4: Save conversation history to KV
