@@ -47,6 +47,16 @@ vi.mock("../clients/spreadSheet", () => ({
 	getSheetData: vi.fn(),
 }));
 
+const mockGenerateContent = vi.fn();
+
+vi.mock("@google/genai", () => ({
+	GoogleGenAI: vi.fn().mockImplementation(() => ({
+		models: {
+			generateContent: mockGenerateContent,
+		},
+	})),
+}));
+
 import { createGeminiClient } from "../clients/gemini";
 import { getSheetData } from "../clients/spreadSheet";
 import {
@@ -56,6 +66,7 @@ import {
 	saveHistoryStep,
 	sendDiscordResponseStep,
 	streamGeminiWithDiscordEditsStep,
+	summarizeThinking,
 } from "./answerQuestionWorkflow";
 
 // Mock Analytics Engine Dataset
@@ -271,10 +282,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					_input: string,
 					_sheet: string,
 					_desc: string,
-					onChunk: (text: string) => Promise<void>,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
 				) => {
-					await onChunk("partial");
-					await onChunk("full response");
+					await onChunk("partial", "response");
+					await onChunk("full response", "response");
 					return "full response";
 				},
 			);
@@ -293,10 +307,94 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			expect(result.response).toBe("full response");
 			expect(result.updatedHistory).toEqual(updatedHistory);
-			// At minimum, the final edit should be called
-			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledWith(
-				"> user question\nfull response",
+			// Final edit should contain only response text (not thinking)
+			const lastCall =
+				mockDiscordInstance.editOriginalMessage.mock.calls.at(-1);
+			expect(lastCall?.[0]).toBe("> user question\nfull response");
+		});
+
+		it("displays summarized thinking content with thought balloon", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [
+					{ content: { parts: [{ text: "問題を多角的に分析中" }] } },
+				],
+			});
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
+				) => {
+					await onChunk(
+						"analyzing the problem in detail here, considering multiple factors and approaches...",
+						"thinking",
+					);
+					await onChunk("final answer", "response");
+					return "final answer";
+				},
 			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"q",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			// First edit should be summarized thinking format
+			const firstCall = mockDiscordInstance.editOriginalMessage.mock
+				.calls[0]?.[0] as string;
+			expect(firstCall).toContain(":thought_balloon:");
+			expect(firstCall).toContain("問題を多角的に分析中");
+			expect(firstCall).not.toContain("```");
+		});
+
+		it("forces Discord edit on phase transition from thinking to response", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "思考要約" }] } }],
+			});
+			mockGeminiInstance.askStream.mockImplementation(
+				async (
+					_input: string,
+					_sheet: string,
+					_desc: string,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
+				) => {
+					await onChunk("long thinking text that exceeds minimum", "thinking");
+					await onChunk("response start", "response");
+					return "response start";
+				},
+			);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			// Should have at least: thinking edit, phase transition edit, final edit
+			const calls = mockDiscordInstance.editOriginalMessage.mock.calls;
+			expect(calls.length).toBeGreaterThanOrEqual(2);
+			// The final call should be the response-only content
+			expect(calls.at(-1)?.[0]).toBe("> question\nresponse start");
 		});
 
 		it("continues streaming when intermediate Discord edit fails", async () => {
@@ -305,9 +403,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					_input: string,
 					_sheet: string,
 					_desc: string,
-					onChunk: (text: string) => Promise<void>,
+					onChunk: (
+						text: string,
+						phase: "thinking" | "response",
+					) => Promise<void>,
 				) => {
-					await onChunk("response text");
+					await onChunk("response text", "response");
 					return "response text";
 				},
 			);
@@ -352,6 +453,54 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				existingHistory,
 				mockLogger,
 			);
+		});
+	});
+
+	describe("summarizeThinking", () => {
+		it("returns summarized text from LLM", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "要約結果テスト" }] } }],
+			});
+			const { GoogleGenAI } = await import("@google/genai");
+			const client = new GoogleGenAI({ apiKey: "test" });
+
+			const result = await summarizeThinking(
+				client,
+				"long thinking text here",
+				mockLogger,
+			);
+
+			expect(result).toBe("要約結果テスト");
+		});
+
+		it("returns fallback on empty response", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "" }] } }],
+			});
+			const { GoogleGenAI } = await import("@google/genai");
+			const client = new GoogleGenAI({ apiKey: "test" });
+
+			const result = await summarizeThinking(
+				client,
+				"thinking text",
+				mockLogger,
+			);
+
+			expect(result).toBe("考え中...");
+		});
+
+		it("returns fallback on API error", async () => {
+			mockGenerateContent.mockRejectedValue(new Error("API error"));
+			const { GoogleGenAI } = await import("@google/genai");
+			const client = new GoogleGenAI({ apiKey: "test" });
+
+			const result = await summarizeThinking(
+				client,
+				"thinking text",
+				mockLogger,
+			);
+
+			expect(result).toBe("考え中...");
 		});
 	});
 

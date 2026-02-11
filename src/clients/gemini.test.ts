@@ -139,31 +139,81 @@ describe("GeminiClient", () => {
 	});
 
 	describe("askStream", () => {
-		it("accumulates streamed text and calls onChunk with accumulated text", async () => {
+		// Helper to create a mock chunk with candidates/parts structure
+		const makeChunk = (parts: { text?: string; thought?: boolean }[]) => ({
+			candidates: [{ content: { parts } }],
+		});
+
+		it("accumulates streamed text and calls onChunk with response phase", async () => {
 			const mockStream = (async function* () {
-				yield { text: "Hello " };
-				yield { text: "world" };
+				yield makeChunk([{ text: "Hello " }]);
+				yield makeChunk([{ text: "world" }]);
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
-			const chunks: string[] = [];
+			const chunks: { text: string; phase: string }[] = [];
 			const client = new GeminiClient("test-api-key");
 			const result = await client.askStream(
 				"question",
 				"sheet",
 				"desc",
-				async (text) => {
-					chunks.push(text);
+				async (text, phase) => {
+					chunks.push({ text, phase });
 				},
 			);
 
 			expect(result).toBe("Hello world");
-			expect(chunks).toEqual(["Hello ", "Hello world"]);
+			expect(chunks).toEqual([
+				{ text: "Hello ", phase: "response" },
+				{ text: "Hello world", phase: "response" },
+			]);
+		});
+
+		it("calls onChunk with thinking phase for thought parts", async () => {
+			const mockStream = (async function* () {
+				yield makeChunk([{ text: "Let me think...", thought: true }]);
+				yield makeChunk([{ text: "Step 2...", thought: true }]);
+				yield makeChunk([{ text: "The answer is 42" }]);
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const chunks: { text: string; phase: string }[] = [];
+			const client = new GeminiClient("test-api-key");
+			const result = await client.askStream(
+				"q",
+				"s",
+				"d",
+				async (text, phase) => {
+					chunks.push({ text, phase });
+				},
+			);
+
+			expect(result).toBe("The answer is 42");
+			expect(chunks).toEqual([
+				{ text: "Let me think...", phase: "thinking" },
+				{ text: "Step 2...", phase: "thinking" },
+				{ text: "The answer is 42", phase: "response" },
+			]);
+		});
+
+		it("excludes thinking text from return value and history", async () => {
+			const mockStream = (async function* () {
+				yield makeChunk([{ text: "thinking stuff", thought: true }]);
+				yield makeChunk([{ text: "actual response" }]);
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const client = new GeminiClient("test-api-key");
+			const result = await client.askStream("q", "s", "d", async () => {});
+
+			expect(result).toBe("actual response");
+			const history = client.getHistory();
+			expect(history[1].text).toBe("actual response");
 		});
 
 		it("updates history after streaming completes", async () => {
 			const mockStream = (async function* () {
-				yield { text: "streamed response" };
+				yield makeChunk([{ text: "streamed response" }]);
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
@@ -172,7 +222,10 @@ describe("GeminiClient", () => {
 
 			const history = client.getHistory();
 			expect(history).toHaveLength(2);
-			expect(history[0]).toEqual({ role: "user", text: "質問: test question" });
+			expect(history[0]).toEqual({
+				role: "user",
+				text: "質問: test question",
+			});
 			expect(history[1]).toEqual({
 				role: "model",
 				text: "streamed response",
@@ -191,9 +244,21 @@ describe("GeminiClient", () => {
 			).rejects.toThrow("AIから有効な応答が得られませんでした。");
 		});
 
+		it("throws on thinking-only response with no response text", async () => {
+			const mockStream = (async function* () {
+				yield makeChunk([{ text: "just thinking", thought: true }]);
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const client = new GeminiClient("test-api-key");
+			await expect(
+				client.askStream("q", "s", "d", async () => {}),
+			).rejects.toThrow("AIから有効な応答が得られませんでした。");
+		});
+
 		it("does not update history if stream fails mid-way", async () => {
 			const mockStream = (async function* () {
-				yield { text: "partial" };
+				yield makeChunk([{ text: "partial" }]);
 				throw new Error("stream interrupted");
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
@@ -205,27 +270,49 @@ describe("GeminiClient", () => {
 			expect(client.getHistory()).toEqual([]);
 		});
 
-		it("skips chunks with no text", async () => {
+		it("skips parts with no text", async () => {
 			const mockStream = (async function* () {
-				yield { text: "Hello" };
-				yield { text: undefined };
-				yield { text: " world" };
+				yield makeChunk([{ text: "Hello" }]);
+				yield { candidates: [{ content: { parts: [{}] } }] };
+				yield makeChunk([{ text: " world" }]);
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
-			const chunks: string[] = [];
+			const chunks: { text: string; phase: string }[] = [];
 			const client = new GeminiClient("test-api-key");
-			const result = await client.askStream("q", "s", "d", async (text) => {
-				chunks.push(text);
-			});
+			const result = await client.askStream(
+				"q",
+				"s",
+				"d",
+				async (text, phase) => {
+					chunks.push({ text, phase });
+				},
+			);
 
 			expect(result).toBe("Hello world");
-			expect(chunks).toEqual(["Hello", "Hello world"]);
+			expect(chunks).toEqual([
+				{ text: "Hello", phase: "response" },
+				{ text: "Hello world", phase: "response" },
+			]);
+		});
+
+		it("handles chunks with missing candidates gracefully", async () => {
+			const mockStream = (async function* () {
+				yield makeChunk([{ text: "Hello" }]);
+				yield {}; // no candidates (e.g., usage metadata chunk)
+				yield makeChunk([{ text: " world" }]);
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const client = new GeminiClient("test-api-key");
+			const result = await client.askStream("q", "s", "d", async () => {});
+
+			expect(result).toBe("Hello world");
 		});
 
 		it("includes conversation history in prompt", async () => {
 			const mockStream = (async function* () {
-				yield { text: "response" };
+				yield makeChunk([{ text: "response" }]);
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
