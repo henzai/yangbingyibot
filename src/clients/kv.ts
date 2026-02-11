@@ -1,3 +1,4 @@
+import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 // KV用のキー
@@ -39,7 +40,7 @@ export class KV {
 			});
 		} catch (error) {
 			this.log.error("Failed to save history to KV", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			throw new Error("Failed to save conversation history");
 		}
@@ -70,7 +71,7 @@ export class KV {
 				.map(({ role, text }) => ({ role, text }));
 		} catch (error) {
 			this.log.error("Failed to get history from KV", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			return [];
 		}
@@ -94,7 +95,7 @@ export class KV {
 			return cachedData;
 		} catch (error) {
 			this.log.error("Failed to get cache from KV", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			return null;
 		}
@@ -112,7 +113,7 @@ export class KV {
 			});
 		} catch (error) {
 			this.log.error("Failed to save cache to KV", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			throw new Error("Failed to save cache data");
 		}

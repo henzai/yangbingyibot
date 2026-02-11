@@ -1,3 +1,4 @@
+import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
@@ -40,7 +41,7 @@ export class DiscordWebhookClient {
 			return false;
 		} catch (error) {
 			this.log.warn("Discord PATCH error", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			return false;
 		}

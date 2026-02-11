@@ -1,5 +1,6 @@
 import { type GenerateContentResponse, GoogleGenAI } from "@google/genai";
 import type { HistoryEntry } from "../types";
+import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
@@ -53,7 +54,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 	private handleGeminiError(error: unknown): never {
 		this.log.error("Gemini API request failed", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 
 		if (error instanceof Error) {
@@ -153,7 +154,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 			}
 
 			this.log.error("Unexpected error in Gemini client", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			throw new Error("AI処理中に予期しないエラーが発生しました。");
 		}
@@ -229,7 +230,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 			}
 
 			this.log.error("Unexpected error in Gemini streaming client", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			throw new Error("AI処理中に予期しないエラーが発生しました。");
 		}
