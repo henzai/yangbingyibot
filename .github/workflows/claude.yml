@@ -39,4 +39,12 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: '--model claude-opus-4-6 --max-turns 50 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test)"'
+          prompt: |
+            実装タスクを完了した場合、必ず以下の手順でドラフトPRを作成してください:
+
+            1. 実装が完了したら `npm run check` と `npm test` を実行して検証する
+            2. 変更をコミット＆プッシュする
+            3. `gh pr create --draft` でドラフトPRを作成する（PRボディには `Fixes #<issue-number>` を含める）
+
+            PRの作成は必須です。「Create PR →」リンクに頼らず、必ず自分で `gh pr create` を実行してください。
 
