@@ -24,22 +24,31 @@ This is a Discord bot deployed on Cloudflare Workers that answers questions usin
 1. Discord sends POST request to `/` endpoint
 2. Middleware verifies Discord signature (Ed25519)
 3. App immediately returns deferred response (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE)
-4. Actual processing happens asynchronously via `executionCtx.waitUntil()`
-5. Result posted to Discord via webhook follow-up
+4. Cloudflare Workflow (`AnswerQuestionWorkflow`) executes asynchronously with 4 steps:
+   - Step 1: Get sheet data from Google Sheets (with KV cache)
+   - Step 2: Get conversation history from KV
+   - Step 3: Stream Gemini response + progressively edit Discord message via PATCH (every 1.5s)
+   - Step 4: Save conversation history to KV
 
 **Caching Strategy:**
-- Sheet data cached in KV for 5 minutes
-- Conversation history stored in KV with 5-minute window for context
+- Sheet data cached in KV for 5 minutes using native `expirationTtl`
+- Conversation history stored in KV with 5-minute TTL for context
 
 ## Project Structure
 
-- `src/index.ts` - Hono app entry point, Discord interaction routing
+- `src/index.ts` - Hono app entry point, Discord interaction routing, Workflow re-export
+- `src/types.ts` - TypeScript type definitions (Bindings, etc.)
 - `src/clients/` - External API wrappers
-  - `gemini.ts` - Google Gemini AI client with conversation history
-  - `kv.ts` - Cloudflare KV wrapper for caching
+  - `discord.ts` - Discord Webhook client for PATCH message edits
+  - `gemini.ts` - Google Gemini AI client with streaming support
+  - `kv.ts` - Cloudflare KV wrapper with native TTL
+  - `metrics.ts` - Analytics Engine metrics client
   - `spreadSheet.ts` - Google Sheets client
-- `src/handlers/answerQuestion.ts` - Orchestrates question answering flow
+- `src/workflows/` - Cloudflare Workflows
+  - `answerQuestionWorkflow.ts` - Main 4-step workflow orchestrating question answering
+  - `types.ts` - Workflow-specific type definitions
 - `src/middleware/verifyDiscordInteraction.ts` - Discord request signature verification
+- `src/utils/` - Utility functions (logger, requestId, retry)
 - `scripts/` - Discord command registration utilities
 
 ## Environment Variables
@@ -50,7 +59,10 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 - `GEMINI_API_KEY` - Google Gemini API key
 - `GOOGLE_SERVICE_ACCOUNT` - Google Service Account credentials (JSON string)
 
-KV namespace `sushanshan_bot` must be bound in wrangler.toml.
+**Bindings in wrangler.toml:**
+- KV Namespace: `sushanshan_bot`
+- Analytics Engine: `METRICS` (dataset: `yangbingyibot_metrics`)
+- Workflow: `ANSWER_QUESTION_WORKFLOW` (class: `AnswerQuestionWorkflow`)
 
 ## Git Workflow
 
