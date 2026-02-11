@@ -38,5 +38,5 @@ jobs:
           github_token: ${{ secrets.PAT_TOKEN }}
           additional_permissions: |
             actions: read
-          claude_args: "--model claude-opus-4-6"
+          claude_args: '--model claude-opus-4-6 --max-turns 50 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test)"'
 
