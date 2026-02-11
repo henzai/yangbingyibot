@@ -37,6 +37,7 @@ vi.mock("../clients/gemini", () => ({
 
 const mockDiscordInstance = {
 	editOriginalMessage: vi.fn(),
+	postMessage: vi.fn(),
 };
 
 vi.mock("../clients/discord", () => ({
@@ -506,11 +507,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 	describe("sendDiscordResponseStep", () => {
 		it("sends successful response to Discord webhook", async () => {
-			const mockFetch = vi.fn().mockResolvedValue({
-				ok: true,
-				status: 200,
-			});
-			globalThis.fetch = mockFetch;
+			mockDiscordInstance.postMessage.mockResolvedValue(true);
 
 			const result = await sendDiscordResponseStep(
 				mockEnv,
@@ -520,23 +517,14 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockLogger,
 			);
 
-			expect(mockFetch).toHaveBeenCalledWith(
-				`https://discord.com/api/v10/webhooks/${mockEnv.DISCORD_APPLICATION_ID}/test-token-123`,
-				{
-					method: "POST",
-					body: JSON.stringify({ content: "> user question\nAI answer" }),
-					headers: { "Content-Type": "application/json" },
-				},
+			expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
+				"> user question\nAI answer",
 			);
 			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
 		});
 
 		it("sends error response when AI fails", async () => {
-			const mockFetch = vi.fn().mockResolvedValue({
-				ok: true,
-				status: 200,
-			});
-			globalThis.fetch = mockFetch;
+			mockDiscordInstance.postMessage.mockResolvedValue(true);
 
 			const result = await sendDiscordResponseStep(
 				mockEnv,
@@ -547,27 +535,16 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				"Some error occurred",
 			);
 
-			expect(mockFetch).toHaveBeenCalledWith(expect.any(String), {
-				method: "POST",
-				body: JSON.stringify({
-					content:
-						"> question\n:rotating_light: エラーが発生しました: Some error occurred",
-				}),
-				headers: { "Content-Type": "application/json" },
-			});
+			expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
+				"> question\n:rotating_light: エラーが発生しました: Some error occurred",
+			);
 			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
 		});
 
 		it("retries on failure", async () => {
-			const mockFetch = vi
-				.fn()
-				.mockResolvedValueOnce({
-					ok: false,
-					status: 500,
-					text: () => "Server error",
-				})
-				.mockResolvedValueOnce({ ok: true, status: 200 });
-			globalThis.fetch = mockFetch;
+			mockDiscordInstance.postMessage
+				.mockRejectedValueOnce(new Error("Discord POST failed with status 500"))
+				.mockResolvedValueOnce(true);
 
 			const result = await sendDiscordResponseStep(
 				mockEnv,
@@ -577,17 +554,14 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockLogger,
 			);
 
-			expect(mockFetch).toHaveBeenCalledTimes(2);
+			expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(2);
 			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 1 });
 		});
 
 		it("returns failure after all retries exhausted", async () => {
-			const mockFetch = vi.fn().mockResolvedValue({
-				ok: false,
-				status: 500,
-				text: () => Promise.resolve("Server error"),
-			});
-			globalThis.fetch = mockFetch;
+			mockDiscordInstance.postMessage.mockRejectedValue(
+				new Error("Discord POST failed with status 500"),
+			);
 
 			const result = await sendDiscordResponseStep(
 				mockEnv,
@@ -597,7 +571,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockLogger,
 			);
 
-			expect(mockFetch).toHaveBeenCalledTimes(3); // Initial + 2 retries
+			expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(3); // Initial + 2 retries
 			expect(result).toEqual({
 				success: false,
 				statusCode: 500,

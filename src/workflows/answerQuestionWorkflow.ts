@@ -15,6 +15,7 @@ import {
 import { getSheetData } from "../clients/spreadSheet";
 import type { Bindings } from "../types";
 import { type Logger, logger } from "../utils/logger";
+import { withRetry } from "../utils/retry";
 import type {
 	DiscordResponseOutput,
 	GeminiOutput,
@@ -277,58 +278,54 @@ export async function sendDiscordResponseStep(
 	log: Logger,
 	errorMessage?: string,
 ): Promise<DiscordResponseOutput> {
-	const endpoint = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${token}`;
+	const discord = createDiscordWebhookClient(
+		env.DISCORD_APPLICATION_ID,
+		token,
+		log,
+	);
 
 	const content = errorMessage
 		? `> ${question}\n:rotating_light: エラーが発生しました: ${errorMessage}`
 		: `> ${question}\n${response}`;
 
-	const maxRetries = 2;
+	let attemptCount = 0;
+	let statusCode: number | undefined;
 
-	for (let attempt = 0; attempt <= maxRetries; attempt++) {
-		try {
-			const res = await fetch(endpoint, {
-				method: "POST",
-				body: JSON.stringify({ content }),
-				headers: { "Content-Type": "application/json" },
-			});
+	try {
+		await withRetry(
+			async () => {
+				attemptCount++;
+				await discord.postMessage(content);
+				statusCode = 200; // Success status
+			},
+			{
+				maxAttempts: 3, // Initial attempt + 2 retries
+				initialDelayMs: 1000,
+				backoffMultiplier: 2,
+			},
+			() => true, // Retry all errors
+			log,
+		);
 
-			if (res.ok) {
-				log.info("Discord webhook sent successfully", {
-					statusCode: res.status,
-					attempt,
-				});
-				return { success: true, statusCode: res.status, retryCount: attempt };
-			}
-
-			if (attempt === maxRetries) {
-				log.error("Discord webhook failed", {
-					statusCode: res.status,
-					attempt,
-				});
-				return { success: false, statusCode: res.status, retryCount: attempt };
-			}
-
-			log.warn("Discord webhook retry", { statusCode: res.status, attempt });
-			// Wait before retry (exponential backoff)
-			await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1000));
-		} catch (error) {
-			if (attempt === maxRetries) {
-				log.error("Discord webhook failed after retries", {
-					error: error instanceof Error ? error.message : "Unknown error",
-					attempt,
-				});
-				return { success: false, retryCount: attempt };
-			}
-			log.warn("Discord webhook error, retrying", {
-				error: error instanceof Error ? error.message : "Unknown error",
-				attempt,
-			});
-			await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1000));
+		return {
+			success: true,
+			statusCode: statusCode ?? 200,
+			retryCount: attemptCount - 1, // retryCount = attempts - 1
+		};
+	} catch (error) {
+		// Extract status code from error message if available
+		const errorMsg = error instanceof Error ? error.message : "";
+		const match = errorMsg.match(/status (\d+)/);
+		if (match) {
+			statusCode = Number.parseInt(match[1], 10);
 		}
-	}
 
-	return { success: false, retryCount: maxRetries };
+		return {
+			success: false,
+			statusCode,
+			retryCount: attemptCount > 0 ? attemptCount - 1 : 2, // Max retries is 2
+		};
+	}
 }
 
 // Workflow class

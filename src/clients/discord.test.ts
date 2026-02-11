@@ -70,6 +70,47 @@ describe("DiscordWebhookClient", () => {
 		});
 	});
 
+	describe("postMessage", () => {
+		it("sends POST to correct endpoint", async () => {
+			const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+			globalThis.fetch = mockFetch;
+
+			const client = new DiscordWebhookClient("app-id", "test-token");
+			const result = await client.postMessage("hello world");
+
+			expect(result).toBe(true);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://discord.com/api/v10/webhooks/app-id/test-token",
+				{
+					method: "POST",
+					body: JSON.stringify({ content: "hello world" }),
+					headers: { "Content-Type": "application/json" },
+				},
+			);
+		});
+
+		it("throws error on non-ok response", async () => {
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 500,
+			});
+
+			const client = new DiscordWebhookClient("app-id", "token");
+			await expect(client.postMessage("content")).rejects.toThrow(
+				"Discord POST failed with status 500",
+			);
+		});
+
+		it("throws error on fetch error", async () => {
+			globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+
+			const client = new DiscordWebhookClient("app-id", "token");
+			await expect(client.postMessage("content")).rejects.toThrow(
+				"Network error",
+			);
+		});
+	});
+
 	describe("createDiscordWebhookClient", () => {
 		it("creates a new DiscordWebhookClient instance", () => {
 			const client = createDiscordWebhookClient("app-id", "token");
