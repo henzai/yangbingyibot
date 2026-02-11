@@ -81,6 +81,21 @@ describe("KV class", () => {
 			expect(result[0].text).toBe("valid");
 		});
 
+		it("filters out entries with invalid role literals", async () => {
+			(mockKV.get as Mock).mockResolvedValue([
+				{ role: "user", text: "valid" },
+				{ role: "assistant", text: "invalid role literal" },
+				{ role: "model", text: "valid" },
+				{ role: "bot", text: "invalid role literal" },
+			]);
+
+			const result = await kv.getHistory();
+
+			expect(result).toHaveLength(2);
+			expect(result[0]).toEqual({ role: "user", text: "valid" });
+			expect(result[1]).toEqual({ role: "model", text: "valid" });
+		});
+
 		it("returns empty array when data is not an array", async () => {
 			(mockKV.get as Mock).mockResolvedValue({
 				role: "user",

@@ -1,3 +1,4 @@
+import type { HistoryEntry } from "../types";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -14,11 +15,6 @@ type SheetInfo = {
 	description: string;
 };
 
-type ChatHistory = {
-	role: string;
-	text: string;
-};
-
 export class KV {
 	private kv: KVNamespace;
 	private log: Logger;
@@ -28,9 +24,9 @@ export class KV {
 		this.log = log ?? defaultLogger;
 	}
 
-	async saveHistory(history: { role: string; text: string }[]): Promise<void> {
+	async saveHistory(history: HistoryEntry[]): Promise<void> {
 		try {
-			const newHistory: ChatHistory[] = history.map(({ role, text }) => ({
+			const newHistory: HistoryEntry[] = history.map(({ role, text }) => ({
 				role,
 				text,
 			}));
@@ -46,10 +42,10 @@ export class KV {
 		}
 	}
 
-	async getHistory(): Promise<{ role: string; text: string }[]> {
+	async getHistory(): Promise<HistoryEntry[]> {
 		try {
 			// KVネイティブTTLにより期限切れデータは自動的にnullになる
-			const parsedHistory = await this.kv.get<ChatHistory[]>(
+			const parsedHistory = await this.kv.get<HistoryEntry[]>(
 				HISTORY_KEY,
 				"json",
 			);
@@ -62,10 +58,10 @@ export class KV {
 
 			return parsedHistory
 				.filter(
-					(h): h is ChatHistory =>
+					(h): h is HistoryEntry =>
 						!!h &&
 						typeof h === "object" &&
-						typeof h.role === "string" &&
+						(h.role === "user" || h.role === "model") &&
 						typeof h.text === "string",
 				)
 				.map(({ role, text }) => ({ role, text }));
