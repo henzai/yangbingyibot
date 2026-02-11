@@ -1,3 +1,5 @@
+import type { HistoryEntry } from "../types";
+
 // Workflow event payload
 export interface WorkflowParams {
 	// Discord interaction token for webhook response
@@ -16,12 +18,12 @@ export interface SheetDataOutput {
 }
 
 export interface HistoryOutput {
-	history: { role: string; text: string }[];
+	history: HistoryEntry[];
 }
 
 export interface StreamingGeminiOutput {
 	response: string;
-	updatedHistory: { role: string; text: string }[];
+	updatedHistory: HistoryEntry[];
 	editCount: number;
 }
 

@@ -1,5 +1,7 @@
 import type { WorkflowParams } from "./workflows/types";
 
+export type HistoryEntry = { role: "user" | "model"; text: string };
+
 export type Bindings = {
 	DISCORD_TOKEN: string;
 	DISCORD_PUBLIC_KEY: string;
