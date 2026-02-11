@@ -7,6 +7,12 @@ export class GeminiClient {
 	private history: { role: string; text: string }[];
 	private log: Logger;
 
+	private readonly RETRY_CONFIG = {
+		maxAttempts: 2,
+		initialDelayMs: 500,
+		maxDelayMs: 2000,
+	};
+
 	constructor(
 		apiKey: string,
 		initialHistory: { role: string; text: string }[] = [],
@@ -17,21 +23,76 @@ export class GeminiClient {
 		this.log = log ?? defaultLogger;
 	}
 
+	private buildPrompt(
+		input: string,
+		sheet: string,
+		description: string,
+	): string {
+		const systemPrompt = getPrompt(sheet, description);
+		const historyText = this.history
+			.map((h) => `${h.role}: ${h.text}`)
+			.join("\n");
+
+		return `${systemPrompt}
+
+${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
+	}
+
+	private isRetryableError(error: Error): boolean {
+		const msg = error.message.toLowerCase();
+		return (
+			msg.includes("quota") ||
+			msg.includes("rate limit") ||
+			msg.includes("network") ||
+			msg.includes("timeout") ||
+			msg.includes("500") ||
+			msg.includes("503")
+		);
+	}
+
+	private handleGeminiError(error: unknown): never {
+		this.log.error("Gemini API request failed", {
+			error: error instanceof Error ? error.message : "Unknown error",
+		});
+
+		if (error instanceof Error) {
+			if (
+				error.message.includes("quota") ||
+				error.message.includes("rate limit")
+			) {
+				throw new Error(
+					"API使用制限に達しました。しばらく待ってから再度お試しください。",
+				);
+			}
+			if (
+				error.message.includes("invalid") ||
+				error.message.includes("API key")
+			) {
+				throw new Error("API認証エラーが発生しました。");
+			}
+		}
+
+		throw new Error("AI APIへのリクエストに失敗しました。");
+	}
+
+	private addToHistory(input: string, response: string): void {
+		this.history.push({
+			role: "user",
+			text: `質問: ${input}`,
+		});
+		this.history.push({
+			role: "model",
+			text: response,
+		});
+	}
+
 	async ask(
 		input: string,
 		sheet: string,
 		description: string,
 	): Promise<string> {
 		try {
-			// Create the full prompt with context and history
-			const systemPrompt = getPrompt(sheet, description);
-			const historyText = this.history
-				.map((h) => `${h.role}: ${h.text}`)
-				.join("\n");
-
-			const fullPrompt = `${systemPrompt}
-
-${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
+			const fullPrompt = this.buildPrompt(input, sheet, description);
 
 			let result: GenerateContentResponse;
 			try {
@@ -46,53 +107,15 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 							config: generationConfig,
 						});
 					},
-					{
-						maxAttempts: 2,
-						initialDelayMs: 500,
-						maxDelayMs: 2000,
-					},
-					// Only retry on transient errors
-					(error) => {
-						const msg = error.message.toLowerCase();
-						// Retry rate limits, network errors, and server errors
-						return (
-							msg.includes("quota") ||
-							msg.includes("rate limit") ||
-							msg.includes("network") ||
-							msg.includes("timeout") ||
-							msg.includes("500") ||
-							msg.includes("503")
-						);
-					},
+					this.RETRY_CONFIG,
+					this.isRetryableError,
 					this.log,
 				);
 				this.log.info("Gemini API completed", {
 					durationMs: Date.now() - startTime,
 				});
 			} catch (error) {
-				this.log.error("Gemini API request failed", {
-					error: error instanceof Error ? error.message : "Unknown error",
-				});
-
-				// Check for specific error types
-				if (error instanceof Error) {
-					if (
-						error.message.includes("quota") ||
-						error.message.includes("rate limit")
-					) {
-						throw new Error(
-							"API使用制限に達しました。しばらく待ってから再度お試しください。",
-						);
-					}
-					if (
-						error.message.includes("invalid") ||
-						error.message.includes("API key")
-					) {
-						throw new Error("API認証エラーが発生しました。");
-					}
-				}
-
-				throw new Error("AI APIへのリクエストに失敗しました。");
+				this.handleGeminiError(error);
 			}
 
 			// Validate response structure
@@ -116,15 +139,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				throw new Error("AIから有効な応答が得られませんでした。");
 			}
 
-			// Add to history
-			this.history.push({
-				role: "user",
-				text: `質問: ${input}`,
-			});
-			this.history.push({
-				role: "model",
-				text: response,
-			});
+			this.addToHistory(input, response);
 
 			return response;
 		} catch (error) {
@@ -153,14 +168,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		) => Promise<void>,
 	): Promise<string> {
 		try {
-			const systemPrompt = getPrompt(sheet, description);
-			const historyText = this.history
-				.map((h) => `${h.role}: ${h.text}`)
-				.join("\n");
-
-			const fullPrompt = `${systemPrompt}
-
-${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
+			const fullPrompt = this.buildPrompt(input, sheet, description);
 
 			let fullText = "";
 
@@ -176,22 +184,8 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 							config: streamGenerationConfig,
 						});
 					},
-					{
-						maxAttempts: 2,
-						initialDelayMs: 500,
-						maxDelayMs: 2000,
-					},
-					(error) => {
-						const msg = error.message.toLowerCase();
-						return (
-							msg.includes("quota") ||
-							msg.includes("rate limit") ||
-							msg.includes("network") ||
-							msg.includes("timeout") ||
-							msg.includes("500") ||
-							msg.includes("503")
-						);
-					},
+					this.RETRY_CONFIG,
+					this.isRetryableError,
 					this.log,
 				);
 
@@ -214,28 +208,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 					durationMs: Date.now() - startTime,
 				});
 			} catch (error) {
-				this.log.error("Gemini streaming API request failed", {
-					error: error instanceof Error ? error.message : "Unknown error",
-				});
-
-				if (error instanceof Error) {
-					if (
-						error.message.includes("quota") ||
-						error.message.includes("rate limit")
-					) {
-						throw new Error(
-							"API使用制限に達しました。しばらく待ってから再度お試しください。",
-						);
-					}
-					if (
-						error.message.includes("invalid") ||
-						error.message.includes("API key")
-					) {
-						throw new Error("API認証エラーが発生しました。");
-					}
-				}
-
-				throw new Error("AI APIへのリクエストに失敗しました。");
+				this.handleGeminiError(error);
 			}
 
 			if (!fullText || !fullText.trim()) {
@@ -243,15 +216,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				throw new Error("AIから有効な応答が得られませんでした。");
 			}
 
-			// Add to history only after stream completes successfully
-			this.history.push({
-				role: "user",
-				text: `質問: ${input}`,
-			});
-			this.history.push({
-				role: "model",
-				text: fullText,
-			});
+			this.addToHistory(input, fullText);
 
 			return fullText;
 		} catch (error) {
