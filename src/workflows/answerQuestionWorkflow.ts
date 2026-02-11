@@ -14,6 +14,7 @@ import {
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
 import type { Bindings, HistoryEntry } from "../types";
+import { getErrorMessage } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 import type {
@@ -61,7 +62,7 @@ export async function getSheetDataStep(
 		log.info("Sheet data cached");
 	} catch (error) {
 		log.warn("Failed to save cache (non-fatal)", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 	}
 
@@ -96,7 +97,7 @@ export async function saveHistoryStep(
 		return { success: true };
 	} catch (error) {
 		log.warn("Failed to save history (non-fatal)", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 		return { success: false };
 	}
@@ -133,7 +134,7 @@ export async function summarizeThinking(
 		return THINKING_FALLBACK;
 	} catch (error) {
 		log.warn("Thinking summarization failed (non-fatal)", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 		return THINKING_FALLBACK;
 	}
@@ -285,7 +286,7 @@ export async function sendDiscordResponseStep(
 		};
 	} catch (error) {
 		// Extract status code from error message if available
-		const errorMsg = error instanceof Error ? error.message : "";
+		const errorMsg = getErrorMessage(error);
 		const match = errorMsg.match(/status (\d+)/);
 		if (match) {
 			statusCode = Number.parseInt(match[1], 10);
@@ -417,8 +418,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			});
 		} catch (error) {
 			// Send error response to Discord
-			const errorMessage =
-				error instanceof Error ? error.message : "Unknown error occurred";
+			const errorMessage = getErrorMessage(error);
 			const failureDurationMs = Date.now() - workflowStartTime;
 			log.error("Workflow error", {
 				error: errorMessage,

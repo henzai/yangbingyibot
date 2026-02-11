@@ -1,3 +1,4 @@
+import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 /**
@@ -170,7 +171,7 @@ export class MetricsClient implements IMetricsClient {
 			// Log but don't throw - metrics should never break the main flow
 			this.log.warn("Failed to write metric data point", {
 				eventType,
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 		}
 	}

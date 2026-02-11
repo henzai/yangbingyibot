@@ -2,6 +2,7 @@ import GoogleAuth, {
 	type GoogleKey,
 } from "cloudflare-workers-and-google-oauth";
 import { GoogleSpreadsheet } from "google-spreadsheet";
+import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 // スプレッドシートのID
@@ -53,11 +54,9 @@ async function authenticateGoogle(
 		return token;
 	} catch (error) {
 		log.error("Google authentication error", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
-		throw new Error(
-			`Google authentication failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-		);
+		throw new Error(`Google authentication failed: ${getErrorMessage(error)}`);
 	}
 }
 
@@ -89,7 +88,7 @@ async function fetchSheetInfo(
 		return csvContent;
 	} catch (error) {
 		log.error("Failed to download sheet as CSV", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 		throw new Error("シートデータのダウンロードに失敗しました。");
 	}
@@ -114,7 +113,7 @@ async function fetchSheetDescription(
 		return cell.value?.toString() || "";
 	} catch (error) {
 		log.warn("Failed to load description cell", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 		return "";
 	}
@@ -136,7 +135,7 @@ export async function getSheetData(
 			await doc.loadInfo();
 		} catch (error) {
 			logger.error("Failed to load spreadsheet info", {
-				error: error instanceof Error ? error.message : "Unknown error",
+				error: getErrorMessage(error),
 			});
 			throw new Error(
 				"スプレッドシートへのアクセスに失敗しました。権限を確認してください。",
@@ -161,7 +160,7 @@ export async function getSheetData(
 		}
 
 		logger.error("Unexpected error in getSheetData", {
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: getErrorMessage(error),
 		});
 		throw new Error("スプレッドシート情報の取得中にエラーが発生しました。");
 	}
