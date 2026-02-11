@@ -45,6 +45,26 @@ export class DiscordWebhookClient {
 			return false;
 		}
 	}
+
+	/**
+	 * Post a new message to the webhook (POST).
+	 * Used for sending responses (e.g., error messages).
+	 * Throws on failure.
+	 */
+	async postMessage(content: string): Promise<boolean> {
+		const res = await fetch(this.endpoint, {
+			method: "POST",
+			body: JSON.stringify({ content }),
+			headers: { "Content-Type": "application/json" },
+		});
+
+		if (!res.ok) {
+			throw new Error(`Discord POST failed with status ${res.status}`);
+		}
+
+		this.log.info("Discord POST succeeded", { statusCode: res.status });
+		return true;
+	}
 }
 
 export const createDiscordWebhookClient = (
