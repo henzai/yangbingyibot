@@ -138,7 +138,7 @@ jobs:
 
             Adapt the sections based on the issue type (bug vs feature vs question etc).
 
-            ### Step 7: Auto-fix PR (Conditional)
+            ### Step 7a: Auto-fix PR (Conditional)
             ONLY attempt this if ALL conditions are met:
             - The issue type is `bug` or `enhancement`
             - The fix is obviously simple (2 files or fewer, ~20 lines or fewer)
@@ -156,4 +156,36 @@ jobs:
                ```
             6. If checks fail, discard changes and note in the triage comment that auto-fix was attempted but could not be completed.
 
-            If conditions are NOT met, skip this step entirely (this is expected for most issues).
+            If conditions are NOT met, skip this step and proceed to Step 7b.
+
+            ### Step 7b: Trigger @claude Implementation (Conditional)
+            If Step 7a was NOT executed, evaluate whether this issue is suitable for automated implementation via `@claude`.
+
+            ONLY trigger this if ALL conditions are met:
+            - The issue type is `bug`, `enhancement`, or `feature`
+            - Complexity is S or M
+            - The Implementation Approach (or Root Cause Hypothesis for bugs) is concrete: specific target files, functions, and changes are identified
+            - The issue is NOT a duplicate
+            - Step 7a was NOT executed
+
+            If ALL conditions are met, post a comment using `gh issue comment` to trigger the `claude.yml` workflow:
+
+            ```
+            gh issue comment ${{ github.event.issue.number }} --body "@claude 上記のトリアージ分析に基づいて、このissueを実装してください。
+
+            ## 実装指示
+            <トリアージ分析のImplementation ApproachまたはRoot Cause Hypothesisから導出した具体的な実装手順をここに記述>
+
+            ## 対象ファイル
+            <トリアージで特定したファイルリストをここに記述>
+
+            ## 完了条件
+            - 実装が完了していること
+            - \`npm run check\` がパスすること
+            - \`npm test\` がパスすること
+            - ドラフトPRを作成すること"
+            ```
+
+            IMPORTANT: The `@claude` comment MUST be posted using the PAT_TOKEN (already configured as github_token) so that the comment is created by the `henzai` user, which is required to trigger the `claude.yml` workflow.
+
+            If conditions are NOT met, skip this step entirely (this is expected for questions, documentation issues, complex issues, or duplicates).
