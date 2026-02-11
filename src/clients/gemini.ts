@@ -5,6 +5,8 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
 export class GeminiClient {
+	private static readonly MODEL_NAME = "gemini-3-flash-preview";
+
 	private client: GoogleGenAI;
 	private history: HistoryEntry[];
 	private log: Logger;
@@ -77,6 +79,20 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		throw new Error("AI APIへのリクエストに失敗しました。");
 	}
 
+	private handleUnexpectedError(error: unknown, context: string): never {
+		if (
+			error instanceof Error &&
+			(error.message.includes("API") || error.message.includes("AI"))
+		) {
+			throw error;
+		}
+
+		this.log.error(`Unexpected error in ${context}`, {
+			error: getErrorMessage(error),
+		});
+		throw new Error("AI処理中に予期しないエラーが発生しました。");
+	}
+
 	private addToHistory(input: string, response: string): void {
 		this.history.push({
 			role: "user",
@@ -104,7 +120,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				result = await withRetry(
 					async () => {
 						return await this.client.models.generateContent({
-							model: "gemini-3-flash-preview",
+							model: GeminiClient.MODEL_NAME,
 							contents: fullPrompt,
 							config: generationConfig,
 						});
@@ -145,18 +161,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 			return response;
 		} catch (error) {
-			// Preserve user-friendly errors
-			if (
-				error instanceof Error &&
-				(error.message.includes("API") || error.message.includes("AI"))
-			) {
-				throw error;
-			}
-
-			this.log.error("Unexpected error in Gemini client", {
-				error: getErrorMessage(error),
-			});
-			throw new Error("AI処理中に予期しないエラーが発生しました。");
+			this.handleUnexpectedError(error, "Gemini client");
 		}
 	}
 
@@ -181,7 +186,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				const stream = await withRetry(
 					async () => {
 						return await this.client.models.generateContentStream({
-							model: "gemini-3-flash-preview",
+							model: GeminiClient.MODEL_NAME,
 							contents: fullPrompt,
 							config: streamGenerationConfig,
 						});
@@ -222,17 +227,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 			return fullText;
 		} catch (error) {
-			if (
-				error instanceof Error &&
-				(error.message.includes("API") || error.message.includes("AI"))
-			) {
-				throw error;
-			}
-
-			this.log.error("Unexpected error in Gemini streaming client", {
-				error: getErrorMessage(error),
-			});
-			throw new Error("AI処理中に予期しないエラーが発生しました。");
+			this.handleUnexpectedError(error, "Gemini streaming client");
 		}
 	}
 
