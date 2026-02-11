@@ -329,6 +329,64 @@ describe("GeminiClient", () => {
 		});
 	});
 
+	describe("handleUnexpectedError (outer catch)", () => {
+		describe("ask", () => {
+			it("re-throws errors containing 'API' in message", async () => {
+				mockGenerateContent.mockResolvedValue({
+					candidates: null,
+				});
+
+				const client = new GeminiClient("test-api-key");
+
+				// "AIからの応答形式が不正です。" thrown in validation, re-thrown by handleUnexpectedError
+				// because it contains "AI"
+				await expect(client.ask("q", "s", "d")).rejects.toThrow(
+					"AIからの応答形式が不正です。",
+				);
+			});
+
+			it("converts non-API/AI errors to generic message", async () => {
+				// Pass null in history to cause a TypeError in buildPrompt's map()
+				// TypeError message doesn't contain "API" or "AI"
+				const client = new GeminiClient("test-api-key", [
+					null as unknown as { role: string; text: string },
+				]);
+
+				await expect(client.ask("q", "s", "d")).rejects.toThrow(
+					"AI処理中に予期しないエラーが発生しました。",
+				);
+			});
+		});
+
+		describe("askStream", () => {
+			it("re-throws errors containing 'AI' in message", async () => {
+				const mockStream = (async function* () {
+					// yields nothing
+				})();
+				mockGenerateContentStream.mockResolvedValue(mockStream);
+
+				const client = new GeminiClient("test-api-key");
+
+				// Empty stream triggers "AIから有効な応答が得られませんでした。" which contains "AI"
+				await expect(
+					client.askStream("q", "s", "d", async () => {}),
+				).rejects.toThrow("AIから有効な応答が得られませんでした。");
+			});
+
+			it("converts non-API/AI errors to generic message", async () => {
+				// Pass null in history to cause a TypeError in buildPrompt's map()
+				// TypeError message doesn't contain "API" or "AI"
+				const client = new GeminiClient("test-api-key", [
+					null as unknown as { role: string; text: string },
+				]);
+
+				await expect(
+					client.askStream("q", "s", "d", async () => {}),
+				).rejects.toThrow("AI処理中に予期しないエラーが発生しました。");
+			});
+		});
+	});
+
 	describe("createGeminiClient", () => {
 		it("creates a new GeminiClient instance", () => {
 			const client = createGeminiClient("test-api-key");
