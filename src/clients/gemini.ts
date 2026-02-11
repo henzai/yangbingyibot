@@ -1,10 +1,11 @@
 import { type GenerateContentResponse, GoogleGenAI } from "@google/genai";
+import type { HistoryEntry } from "../types";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
 export class GeminiClient {
 	private client: GoogleGenAI;
-	private history: { role: string; text: string }[];
+	private history: HistoryEntry[];
 	private log: Logger;
 
 	private readonly RETRY_CONFIG = {
@@ -15,7 +16,7 @@ export class GeminiClient {
 
 	constructor(
 		apiKey: string,
-		initialHistory: { role: string; text: string }[] = [],
+		initialHistory: HistoryEntry[] = [],
 		log?: Logger,
 	) {
 		this.client = new GoogleGenAI({ apiKey });
@@ -234,14 +235,14 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		}
 	}
 
-	getHistory(): { role: string; text: string }[] {
+	getHistory(): HistoryEntry[] {
 		return this.history;
 	}
 }
 
 export const createGeminiClient = (
 	apiKey: string,
-	initialHistory: { role: string; text: string }[] = [],
+	initialHistory: HistoryEntry[] = [],
 	log?: Logger,
 ): GeminiClient => {
 	return new GeminiClient(apiKey, initialHistory, log);

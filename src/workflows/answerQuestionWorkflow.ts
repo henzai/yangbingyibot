@@ -13,7 +13,7 @@ import {
 	NoOpMetricsClient,
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
-import type { Bindings } from "../types";
+import type { Bindings, HistoryEntry } from "../types";
 import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 import type {
@@ -86,7 +86,7 @@ export async function getHistoryStep(
 // Step 4: Save conversation history to KV
 export async function saveHistoryStep(
 	env: Bindings,
-	history: { role: string; text: string }[],
+	history: HistoryEntry[],
 	log: Logger,
 ): Promise<SaveHistoryOutput> {
 	try {
