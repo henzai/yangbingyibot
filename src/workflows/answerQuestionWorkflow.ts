@@ -6,6 +6,7 @@ import {
 import { GoogleGenAI } from "@google/genai";
 import { createDiscordWebhookClient } from "../clients/discord";
 import { createGeminiClient } from "../clients/gemini";
+import { createGitHubIssueClient, type ErrorReport } from "../clients/github";
 import { createKV } from "../clients/kv";
 import {
 	createMetricsClient,
@@ -300,6 +301,60 @@ export async function sendDiscordResponseStep(
 	}
 }
 
+const ERROR_REPORTED_TTL_SECONDS = 60 * 60; // 1 hour
+
+/**
+ * Report an error to GitHub Issues with KV + GitHub search deduplication.
+ * Non-fatal: never throws, all errors are logged as warnings.
+ * Must be called OUTSIDE step.do() to avoid Workflow retry.
+ */
+export async function reportErrorToGitHub(
+	env: Bindings,
+	report: ErrorReport,
+	log: Logger,
+): Promise<void> {
+	try {
+		if (!env.GITHUB_TOKEN) {
+			log.debug("GITHUB_TOKEN not set, skipping error report");
+			return;
+		}
+
+		const github = createGitHubIssueClient(env.GITHUB_TOKEN, log);
+		const fingerprint = github.generateFingerprint(report.errorMessage);
+		const kvKey = `error_reported:${fingerprint}`;
+
+		// Layer 1: KV deduplication
+		const kv = env.sushanshan_bot;
+		const existing = await kv.get(kvKey);
+		if (existing) {
+			log.debug("Error already reported (KV cache hit)", { fingerprint });
+			return;
+		}
+
+		// Layer 2: GitHub Issues search deduplication
+		const isDup = await github.isDuplicate(fingerprint);
+		if (isDup) {
+			log.debug("Error already reported (GitHub search hit)", {
+				fingerprint,
+			});
+			// Cache in KV to avoid repeated searches
+			await kv.put(kvKey, "1", { expirationTtl: ERROR_REPORTED_TTL_SECONDS });
+			return;
+		}
+
+		// Create the issue
+		const created = await github.createIssue(report, fingerprint);
+		if (created) {
+			await kv.put(kvKey, "1", { expirationTtl: ERROR_REPORTED_TTL_SECONDS });
+			log.info("Error reported to GitHub Issues", { fingerprint });
+		}
+	} catch (error) {
+		log.warn("Failed to report error to GitHub (non-fatal)", {
+			error: getErrorMessage(error),
+		});
+	}
+}
+
 // Workflow class
 export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 	Bindings,
@@ -434,6 +489,20 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				stepCount,
 				fromCache,
 			});
+
+			// Report error to GitHub Issues (non-fatal, outside step.do)
+			await reportErrorToGitHub(
+				this.env,
+				{
+					errorMessage,
+					requestId,
+					workflowId: event.instanceId,
+					durationMs: failureDurationMs,
+					stepCount,
+					timestamp: new Date().toISOString(),
+				},
+				log,
+			);
 
 			const discordErrorStartTime = Date.now();
 			const discordErrorResult = await step.do(
