@@ -120,3 +120,6 @@ enabled = true
 name = "answer-question-workflow"
 binding = "ANSWER_QUESTION_WORKFLOW"
 class_name = "AnswerQuestionWorkflow"
+
+[triggers]
+crons = ["*/5 * * * *"]

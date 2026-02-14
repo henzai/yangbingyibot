@@ -9,7 +9,8 @@ export type MetricEventType =
 	| "workflow_complete"
 	| "kv_cache_access"
 	| "discord_webhook"
-	| "sheets_api_call";
+	| "sheets_api_call"
+	| "health_check";
 
 /**
  * Base interface for all metric data
@@ -53,6 +54,15 @@ export interface WorkflowMetricData extends MetricData {
 }
 
 /**
+ * Health check specific metrics
+ */
+export interface HealthCheckMetricData {
+	checkName: string;
+	success: boolean;
+	durationMs: number;
+}
+
+/**
  * Interface for MetricsClient to enable testing with mocks
  */
 export interface IMetricsClient {
@@ -61,6 +71,7 @@ export interface IMetricsClient {
 	recordKVCacheAccess(data: KVCacheMetricData): void;
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void;
 	recordSheetsApiCall(data: MetricData): void;
+	recordHealthCheck(data: HealthCheckMetricData): void;
 }
 
 /**
@@ -151,6 +162,18 @@ export class MetricsClient implements IMetricsClient {
 	}
 
 	/**
+	 * Record health check metrics
+	 * doubles: [durationMs, success]
+	 */
+	recordHealthCheck(data: HealthCheckMetricData): void {
+		this.writeDataPoint("health_check", {
+			indexes: [data.checkName],
+			blobs: [data.checkName],
+			doubles: [data.durationMs, data.success ? 1 : 0],
+		});
+	}
+
+	/**
 	 * Internal method to write data points to Analytics Engine
 	 * Prepends eventType to blobs for filtering in SQL queries
 	 * Non-blocking - errors are logged but don't affect main flow
@@ -186,6 +209,7 @@ export class NoOpMetricsClient implements IMetricsClient {
 	recordKVCacheAccess(_data: KVCacheMetricData): void {}
 	recordDiscordWebhook(_data: DiscordWebhookMetricData): void {}
 	recordSheetsApiCall(_data: MetricData): void {}
+	recordHealthCheck(_data: HealthCheckMetricData): void {}
 }
 
 /**

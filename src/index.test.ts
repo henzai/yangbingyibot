@@ -22,7 +22,7 @@ vi.mock("discord-api-types/v10", () => ({
 	},
 }));
 
-import app from "./index";
+import { app } from "./index";
 import type { Bindings } from "./types";
 
 const mockWorkflowCreate = vi.fn();

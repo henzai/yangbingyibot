@@ -1,5 +1,6 @@
 import { InteractionResponseType, InteractionType } from "discord-interactions";
 import { Hono } from "hono";
+import { runHealthCheck } from "./health";
 import { verifyDiscordInteraction } from "./middleware/verifyDiscordInteraction";
 import { errorResponse } from "./responses/errorResponse";
 import type { Bindings } from "./types";
@@ -93,4 +94,17 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 	}
 });
 
-export default app;
+export { app };
+
+export default {
+	fetch: app.fetch,
+	scheduled: async (
+		_event: ScheduledEvent,
+		env: Bindings,
+		ctx: ExecutionContext,
+	) => {
+		const log = logger.withContext({ trigger: "scheduled" });
+		log.info("Cron health check started");
+		ctx.waitUntil(runHealthCheck(env, log));
+	},
+};
