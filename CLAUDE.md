@@ -72,8 +72,6 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 
 ## Claude Code Actions
 
-GitHub issue の `@claude` メンションで起動された場合の指示:
-
 - コード変更を行った場合は `npm run check` と `npm test` で検証し、ドラフトPRを作成すること
 
 ## Critical Components
