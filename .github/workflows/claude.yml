@@ -39,7 +39,4 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: '--model claude-opus-4-6 --max-turns 50 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test),Bash(npm run cf-typegen)"'
-          prompt: |
-            @claude メンション内の指示に従って作業を実行してください。
-            コード変更を行った場合は `npm run check` と `npm test` で検証してください。
 
