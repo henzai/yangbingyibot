@@ -15,6 +15,19 @@ export interface ErrorReport {
 	timestamp: string;
 }
 
+export interface HealthCheckReport {
+	failedChecks: {
+		name: string;
+		error: string;
+		durationMs: number;
+	}[];
+	passedChecks: {
+		name: string;
+		durationMs: number;
+	}[];
+	timestamp: string;
+}
+
 export class GitHubIssueClient {
 	private token: string;
 	private log: Logger;
@@ -70,6 +83,92 @@ export class GitHubIssueClient {
 			return data.total_count > 0;
 		} catch (error) {
 			this.log.warn("GitHub issue search error (fail-open)", {
+				error: getErrorMessage(error),
+			});
+			return false;
+		}
+	}
+
+	/**
+	 * Create a GitHub Issue for a health check failure.
+	 * Non-fatal: logs warnings but does not throw on failure.
+	 */
+	async createHealthCheckIssue(
+		report: HealthCheckReport,
+		fingerprint: string,
+	): Promise<boolean> {
+		try {
+			const failedNames = report.failedChecks.map((c) => c.name).join(", ");
+			const title = `[Health Check] ${failedNames} 異常検知`;
+
+			const allChecks = [
+				...report.failedChecks.map((c) => ({
+					name: c.name,
+					status: "❌ 異常",
+					durationMs: c.durationMs,
+					detail: c.error,
+				})),
+				...report.passedChecks.map((c) => ({
+					name: c.name,
+					status: "✅ 正常",
+					durationMs: c.durationMs,
+					detail: "-",
+				})),
+			];
+
+			const tableRows = allChecks
+				.map(
+					(c) =>
+						`| ${c.name} | ${c.status} | ${c.durationMs}ms | ${c.detail} |`,
+				)
+				.join("\n");
+
+			const body = [
+				"## ヘルスチェック結果",
+				"",
+				"| チェック | 状態 | レイテンシ | 詳細 |",
+				"| --- | --- | --- | --- |",
+				tableRows,
+				"",
+				"## Fingerprint",
+				"",
+				`\`${fingerprint}\``,
+				"",
+				`**検知時刻:** ${report.timestamp}`,
+				"",
+				"---",
+				"*This issue was automatically created by the health check monitoring system.*",
+			].join("\n");
+
+			const res = await fetch(
+				`${GITHUB_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/issues`,
+				{
+					method: "POST",
+					headers: {
+						Authorization: `Bearer ${this.token}`,
+						Accept: "application/vnd.github+json",
+						"User-Agent": "yangbingyibot-error-reporter",
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						title,
+						body,
+						labels: ["health-check", "auto-reported"],
+					}),
+				},
+			);
+
+			if (!res.ok) {
+				this.log.warn("GitHub health check issue creation failed", {
+					statusCode: res.status,
+				});
+				return false;
+			}
+
+			this.log.info("GitHub health check issue created successfully");
+			return true;
+		} catch (error) {
+			this.log.warn("GitHub health check issue creation error", {
 				error: getErrorMessage(error),
 			});
 			return false;
