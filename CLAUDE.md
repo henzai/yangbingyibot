@@ -30,17 +30,23 @@ This is a Discord bot deployed on Cloudflare Workers that answers questions usin
    - Step 3: Stream Gemini response + progressively edit Discord message via PATCH (every 1.5s)
    - Step 4: Save conversation history to KV
 
+**Cron Health Check (every 5 minutes):**
+- `scheduled` handler runs `runHealthCheck()` to verify KV, Gemini API, and Google Service Account
+- Failures are reported as GitHub Issues (with KV + GitHub search deduplication)
+
 **Caching Strategy:**
 - Sheet data cached in KV for 5 minutes using native `expirationTtl`
 - Conversation history stored in KV with 5-minute TTL for context
 
 ## Project Structure
 
-- `src/index.ts` - Hono app entry point, Discord interaction routing, Workflow re-export
+- `src/index.ts` - Hono app entry point, Discord interaction routing, scheduled handler, Workflow re-export
+- `src/health.ts` - Cron health check module (KV, Gemini, Google SA checks)
 - `src/types.ts` - TypeScript type definitions (Bindings, etc.)
 - `src/clients/` - External API wrappers
   - `discord.ts` - Discord Webhook client for PATCH message edits
   - `gemini.ts` - Google Gemini AI client with streaming support
+  - `github.ts` - GitHub Issues client for error and health check reporting
   - `kv.ts` - Cloudflare KV wrapper with native TTL
   - `metrics.ts` - Analytics Engine metrics client
   - `spreadSheet.ts` - Google Sheets client
@@ -48,7 +54,9 @@ This is a Discord bot deployed on Cloudflare Workers that answers questions usin
   - `answerQuestionWorkflow.ts` - Main 4-step workflow orchestrating question answering
   - `types.ts` - Workflow-specific type definitions
 - `src/middleware/verifyDiscordInteraction.ts` - Discord request signature verification
-- `src/utils/` - Utility functions (logger, requestId, retry)
+- `src/responses/` - Response helpers
+  - `errorResponse.ts` - Error response formatting
+- `src/utils/` - Utility functions (errors, logger, requestId, retry)
 - `scripts/` - Discord command registration utilities
 
 ## Environment Variables
@@ -58,11 +66,13 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 - `DISCORD_TOKEN`, `DISCORD_PUBLIC_KEY`, `DISCORD_APPLICATION_ID` - Discord credentials
 - `GEMINI_API_KEY` - Google Gemini API key
 - `GOOGLE_SERVICE_ACCOUNT` - Google Service Account credentials (JSON string)
+- `GITHUB_TOKEN` (optional) - GitHub PAT for auto-reporting errors and health check failures as Issues
 
 **Bindings in wrangler.toml:**
 - KV Namespace: `sushanshan_bot`
 - Analytics Engine: `METRICS` (dataset: `yangbingyibot_metrics`)
 - Workflow: `ANSWER_QUESTION_WORKFLOW` (class: `AnswerQuestionWorkflow`)
+- Cron Trigger: `*/5 * * * *` (health check every 5 minutes)
 
 ## Git Workflow
 
