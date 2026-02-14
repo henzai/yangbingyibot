@@ -193,7 +193,9 @@ jobs:
             - 実装が完了していること
             - \`npm run check\` がパスすること
             - \`npm test\` がパスすること
-            - ドラフトPRを作成すること"
+            - \`main\` ブランチから新しいブランチを作成すること（\`git fetch origin && git checkout -b <branch> origin/main\`）
+            - 変更をコミット＆プッシュすること
+            - \`gh pr create --draft\` でドラフトPRを作成すること（PRボディには \`Fixes #<issue-number>\` を含める）"
             ```
 
             IMPORTANT: The `@claude` comment MUST be posted using the PAT_TOKEN (already configured as github_token) so that the comment is created by the `henzai` user, which is required to trigger the `claude.yml` workflow.
