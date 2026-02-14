@@ -1,0 +1,99 @@
+name: Scheduled Maintenance
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Scheduled Maintenance
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.PAT_TOKEN }}
+          claude_args: '--model claude-opus-4-6 --max-turns 20 --allowedTools "Read,Glob,Grep,Bash(npm outdated:*),Bash(npm audit:*),Bash(gh issue:*),Bash(gh search:*),Bash(gh label:*)"'
+          prompt: |
+            あなたはリポジトリのメンテナンスアシスタントです。以下の4つのヘルスチェックを実行し、結果を1つのGitHub Issueにまとめてください。
+
+            ## チェック項目
+
+            ### 1. 依存パッケージの更新チェック
+            `npm outdated` を実行し、更新可能なパッケージを確認してください。
+            出力がなければ「全パッケージが最新です」と記録してください。
+            出力がある場合、Current / Wanted / Latest をテーブル形式でまとめてください。
+
+            ### 2. セキュリティ脆弱性チェック
+            `npm audit` を実行し、脆弱性を確認してください。
+            - 脆弱性が見つからなければ「脆弱性なし」と記録
+            - 見つかった場合、severity ごとに件数をまとめ、影響を受けるパッケージ名を列挙
+
+            ### 3. 古いIssueのレビュー
+            90日以上オープンのままのIssueを検索してください:
+            `gh search issues --repo ${{ github.repository }} --state open --sort created --order asc --limit 20`
+            結果から、作成日が90日以上前のIssueを抽出してリストアップしてください。
+            なければ「90日以上オープンのIssueはありません」と記録してください。
+
+            ### 4. TODOコメントのスキャン
+            Grepツールを使って、ソースコード内の `TODO`、`FIXME`、`HACK`、`XXX` コメントを検索してください。
+            対象ディレクトリは `src/` です。
+            - 見つかった場合: ファイルパス、行番号、内容をテーブルで列挙
+            - 見つからなければ「TODOコメントはありません」と記録
+
+            ## Issue作成
+
+            まず `maintenance` ラベルを作成（既存なら上書き）:
+            `gh label create "maintenance" --color "0e8a16" --description "定期メンテナンスレポート" --force`
+
+            以下のフォーマットで1つのGitHub Issueを作成してください:
+
+            タイトル: `Weekly Maintenance Report - <YYYY-MM-DD>`（本日の日付）
+
+            ボディ:
+            ```
+            ## Weekly Maintenance Report
+
+            自動メンテナンスチェックの結果レポートです。
+
+            ### 1. 依存パッケージの更新状況
+            <結果>
+
+            ### 2. セキュリティ脆弱性
+            <結果>
+
+            ### 3. 古いIssue（90日以上オープン）
+            <結果>
+
+            ### 4. TODOコメント
+            <結果>
+
+            ---
+            ### 推奨アクション
+            <優先度の高い順にアクションを提案>
+
+            ---
+            *このIssueは GitHub Actions の定期メンテナンスワークフローにより自動作成されました。*
+            ```
+
+            重要: 各チェックでエラーが発生しても他のチェックは続行してください。
+            `npm audit` が非ゼロで終了してもエラーではありません。
+            Issue本文は日本語で記述してください。
