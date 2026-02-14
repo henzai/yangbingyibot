@@ -72,7 +72,8 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 
 ## Claude Code Actions
 
-- コード変更を行った場合は `npm run check` と `npm test` で検証し、ドラフトPRを作成すること
+- コード変更を行った場合は `npm run check` と `npm test` で検証すること
+- PRが存在しない場合はドラフトPRを作成すること
 
 ## Critical Components
 
