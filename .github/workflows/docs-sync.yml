@@ -1,0 +1,110 @@
+name: Documentation Sync
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - 'src/clients/**'
+      - 'src/workflows/**'
+      - 'src/utils/**'
+      - 'src/middleware/**'
+      - 'src/responses/**'
+      - 'wrangler.toml'
+      - 'src/types.ts'
+      - 'src/index.ts'
+
+jobs:
+  sync-docs:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Run Documentation Sync
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.PAT_TOKEN }}
+          claude_args: '--model claude-opus-4-6 --max-turns 30 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(git:*),Bash(gh pr:*)"'
+          prompt: |
+            あなたはドキュメント同期アシスタントです。マージされたPRの変更内容を分析し、CLAUDE.md の更新が必要かどうかを判断してください。
+
+            ## マージされたPRの情報
+            - PR番号: #${{ github.event.pull_request.number }}
+            - タイトル: ${{ github.event.pull_request.title }}
+
+            ## Step 1: 変更ファイルの分析
+
+            以下のコマンドでマージされたPRの変更内容を確認:
+            ```
+            git log --oneline ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+            git diff --name-status ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+            ```
+
+            CLAUDE.md に影響しうる変更を特定:
+            - `src/clients/` 内のファイル追加・削除・リネーム
+            - `src/workflows/` 内のファイル追加・削除・リネーム
+            - `src/utils/` 内のファイル追加・削除・リネーム
+            - `src/middleware/` 内のファイル追加・削除・リネーム
+            - `src/responses/` 内のファイル追加・削除・リネーム
+            - `src/types.ts` の型定義変更（Bindings型等）
+            - `src/index.ts` のルーティングやエンドポイント変更
+            - `wrangler.toml` のバインディング変更
+
+            ## Step 2: CLAUDE.md の正確性を照合
+
+            CLAUDE.md を読み、以下のセクションを実コードと比較:
+            1. **Development Commands** - package.json の scripts と一致しているか
+            2. **Architecture** - Request Flow の説明が実コードと一致しているか
+            3. **Project Structure** - 実際のファイル構成と一致しているか（Globで `src/**/*.ts` を検索して確認）
+            4. **Environment Variables** - `src/types.ts` の Bindings型 と `wrangler.toml` と一致しているか
+
+            ## Step 3: 更新判断と実行
+
+            ### 更新が必要な場合:
+
+            1. ブランチ作成:
+            ```
+            git fetch origin
+            git checkout -b docs/sync-from-pr-${{ github.event.pull_request.number }} origin/main
+            ```
+
+            2. CLAUDE.md を Edit ツールで更新（既存スタイル・言語を維持、変更は最小限）
+
+            3. コミット＆プッシュ:
+            ```
+            git add CLAUDE.md
+            git commit -m "docs: sync CLAUDE.md with changes from PR #${{ github.event.pull_request.number }}"
+            git push origin docs/sync-from-pr-${{ github.event.pull_request.number }}
+            ```
+
+            4. ドラフトPR作成:
+            ```
+            gh pr create --draft \
+              --title "docs: CLAUDE.md を PR #${{ github.event.pull_request.number }} の変更に同期" \
+              --body "<変更内容の説明>
+
+            元PR: #${{ github.event.pull_request.number }}
+
+            ---
+            *このPRは Documentation Sync ワークフローにより自動作成されました。*"
+            ```
+
+            ### 更新が不要な場合:
+
+            元PRにコメント:
+            ```
+            gh pr comment ${{ github.event.pull_request.number }} --body "**Documentation Sync**: CLAUDE.md は最新の状態です。更新は不要でした。"
+            ```
+
+            ## 重要
+            - CLAUDE.md のみを変更すること
+            - 既存の文書スタイル（Markdown書式、インデント、言語）を維持すること
+            - PR変更と無関係なCLAUDE.mdの問題も合わせて修正すること
