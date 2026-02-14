@@ -38,6 +38,14 @@ jobs:
             - **Author**: ${{ github.event.issue.user.login }}
             - **Issue Number**: ${{ github.event.issue.number }}
 
+            ## Issue Naming Convention
+
+            This repository uses prefixes in issue titles to control triage behavior:
+
+            - **`Plan: `** - Design/planning issues. Perform triage analysis (Steps 1-6) but do NOT attempt implementation (skip Steps 7a and 7b entirely).
+
+            Check the issue title for these prefixes before proceeding to Step 7.
+
             ## Triage Steps
 
             Follow these 7 steps in order:
@@ -140,6 +148,7 @@ jobs:
 
             ### Step 7a: Auto-fix PR (Conditional)
             ONLY attempt this if ALL conditions are met:
+            - The issue title does NOT start with "Plan:" or "Plan："(全角コロンも含む)
             - The issue type is `bug` or `enhancement`
             - The fix is obviously simple (2 files or fewer, ~20 lines or fewer)
             - You have 90%+ confidence in the fix
@@ -162,6 +171,7 @@ jobs:
             If Step 7a was NOT executed, evaluate whether this issue is suitable for automated implementation via `@claude`.
 
             ONLY trigger this if ALL conditions are met:
+            - The issue title does NOT start with "Plan:" or "Plan："(全角コロンも含む)
             - The issue type is `bug`, `enhancement`, or `feature`
             - Complexity is S or M
             - The Implementation Approach (or Root Cause Hypothesis for bugs) is concrete: specific target files, functions, and changes are identified
