@@ -70,6 +70,11 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 - PRを作成する際は、対象の変更に関係ないコミットが含まれていないことを確認すること
 - TODOリストの各項目が完了するごとにコミットを作成すること
 
+## Claude Code Actions
+
+- コード変更を行った場合は `npm run check` と `npm test` で検証すること
+- PRが存在しない場合はドラフトPRを作成すること
+
 ## Critical Components
 
 ### Discord PING/PONG Endpoint (src/index.ts)
