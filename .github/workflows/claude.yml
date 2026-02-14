@@ -38,7 +38,7 @@ jobs:
           github_token: ${{ secrets.PAT_TOKEN }}
           additional_permissions: |
             actions: read
-          claude_args: '--model claude-opus-4-6 --max-turns 50 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test)"'
+          claude_args: '--model claude-opus-4-6 --max-turns 50 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(gh issue:*),Bash(gh search:*),Bash(gh pr:*),Bash(gh label:*),Bash(git:*),Bash(npm run check),Bash(npm test),Bash(npm run cf-typegen)"'
           prompt: |
             実装タスクを完了した場合、必ず以下の手順でドラフトPRを作成してください:
 
