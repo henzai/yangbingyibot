@@ -44,6 +44,16 @@ vi.mock("../clients/discord", () => ({
 	createDiscordWebhookClient: vi.fn(() => mockDiscordInstance),
 }));
 
+const mockGitHubInstance = {
+	generateFingerprint: vi.fn(),
+	isDuplicate: vi.fn(),
+	createIssue: vi.fn(),
+};
+
+vi.mock("../clients/github", () => ({
+	createGitHubIssueClient: vi.fn(() => mockGitHubInstance),
+}));
+
 vi.mock("../clients/spreadSheet", () => ({
 	getSheetData: vi.fn(),
 }));
@@ -63,6 +73,7 @@ import { getSheetData } from "../clients/spreadSheet";
 import {
 	getHistoryStep,
 	getSheetDataStep,
+	reportErrorToGitHub,
 	saveHistoryStep,
 	sendDiscordResponseStep,
 	streamGeminiWithDiscordEditsStep,
@@ -74,16 +85,22 @@ const mockAnalyticsDataset = {
 	writeDataPoint: vi.fn(),
 };
 
+const mockKVNamespace = {
+	get: vi.fn(),
+	put: vi.fn(),
+} as unknown as KVNamespace;
+
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: "test-token",
 	DISCORD_PUBLIC_KEY: "test-public-key",
 	DISCORD_APPLICATION_ID: "test-app-id",
 	GEMINI_API_KEY: "test-gemini-key",
 	GOOGLE_SERVICE_ACCOUNT: '{"type":"service_account"}',
-	sushanshan_bot: {} as KVNamespace,
+	sushanshan_bot: mockKVNamespace,
 	// biome-ignore lint/suspicious/noExplicitAny: mock binding for test
 	ANSWER_QUESTION_WORKFLOW: {} as Workflow<any>,
 	METRICS: mockAnalyticsDataset as unknown as AnalyticsEngineDataset,
+	GITHUB_TOKEN: "test-github-token",
 };
 
 describe("AnswerQuestionWorkflow Steps", () => {
@@ -438,6 +455,80 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 
 			expect(result).toBe("考え中...");
+		});
+	});
+
+	describe("reportErrorToGitHub", () => {
+		const sampleReport = {
+			errorMessage: "Gemini API failed",
+			requestId: "req-123",
+			workflowId: "wf-456",
+			durationMs: 5000,
+			stepCount: 2,
+			timestamp: "2026-02-14T12:00:00.000Z",
+		};
+
+		it("skips when GITHUB_TOKEN is not set", async () => {
+			const envWithoutToken = { ...mockEnv, GITHUB_TOKEN: undefined };
+
+			await reportErrorToGitHub(envWithoutToken, sampleReport, mockLogger);
+
+			expect(mockGitHubInstance.generateFingerprint).not.toHaveBeenCalled();
+		});
+
+		it("skips when KV cache indicates already reported", async () => {
+			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-1");
+			vi.mocked(mockKVNamespace.get).mockResolvedValue("1");
+
+			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
+
+			expect(mockGitHubInstance.isDuplicate).not.toHaveBeenCalled();
+			expect(mockGitHubInstance.createIssue).not.toHaveBeenCalled();
+		});
+
+		it("skips when GitHub search finds duplicate", async () => {
+			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-2");
+			vi.mocked(mockKVNamespace.get).mockResolvedValue(null);
+			mockGitHubInstance.isDuplicate.mockResolvedValue(true);
+
+			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
+
+			expect(mockGitHubInstance.createIssue).not.toHaveBeenCalled();
+			// Should cache in KV to avoid future searches
+			expect(mockKVNamespace.put).toHaveBeenCalledWith(
+				"error_reported:fingerprint-2",
+				"1",
+				{ expirationTtl: 3600 },
+			);
+		});
+
+		it("creates issue and caches in KV on new error", async () => {
+			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-3");
+			vi.mocked(mockKVNamespace.get).mockResolvedValue(null);
+			mockGitHubInstance.isDuplicate.mockResolvedValue(false);
+			mockGitHubInstance.createIssue.mockResolvedValue(true);
+
+			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
+
+			expect(mockGitHubInstance.createIssue).toHaveBeenCalledWith(
+				sampleReport,
+				"fingerprint-3",
+			);
+			expect(mockKVNamespace.put).toHaveBeenCalledWith(
+				"error_reported:fingerprint-3",
+				"1",
+				{ expirationTtl: 3600 },
+			);
+		});
+
+		it("does not throw on any error", async () => {
+			mockGitHubInstance.generateFingerprint.mockImplementation(() => {
+				throw new Error("unexpected error");
+			});
+
+			await expect(
+				reportErrorToGitHub(mockEnv, sampleReport, mockLogger),
+			).resolves.toBeUndefined();
 		});
 	});
 
