@@ -1,0 +1,154 @@
+name: Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: security-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security-review:
+    if: |
+      github.event.pull_request.user.login == 'henzai' ||
+      github.event.pull_request.user.login == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Security Review
+        id: security-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          max_turns: "20"
+          claude_args: '--model claude-opus-4-6 --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"'
+          direct_prompt: |
+            You are a security-focused code reviewer. Analyze the changes in this PR from a security perspective only.
+
+            First, get the diff:
+            ```
+            git diff origin/main...HEAD
+            ```
+
+            Review the diff against the following 12-category security checklist. For each category, only report findings if you identify actual issues in the changed code.
+
+            ## Security Checklist
+
+            1. **Secrets & Credentials Exposure**
+               - Hardcoded secrets, API keys, tokens, or passwords
+               - Secrets logged to console or included in error messages
+               - Secrets committed in config files or .env files
+
+            2. **Input Validation**
+               - Discord user input not properly validated or sanitized
+               - Prompt injection risks in AI-related inputs
+               - Unexpected input types or sizes not handled
+
+            3. **Discord Signature Verification**
+               - Changes that bypass or weaken `verifyDiscordInteraction` middleware
+               - Removal or modification of Ed25519 signature verification
+               - New endpoints missing signature verification
+
+            4. **API Key Handling**
+               - API keys passed insecurely (query params, logs, client-side)
+               - Keys stored in intermediate variables longer than necessary
+               - Keys exposed through error messages or stack traces
+
+            5. **Error Message Information Leakage**
+               - Stack traces exposed to end users
+               - Internal file paths, server info, or environment details leaked
+               - Secrets or sensitive data included in error responses
+
+            6. **Dependency Security**
+               - New packages with known vulnerabilities
+               - Packages with low maintainer trust or small user base
+               - Unnecessary dependencies that increase attack surface
+
+            7. **Cloudflare Workers Security**
+               - Changes to wrangler.toml that expose secrets via `vars` instead of secrets
+               - Insecure binding configurations
+               - Service binding permission issues
+
+            8. **OWASP-Related Checks**
+               - Injection vulnerabilities (command, SQL, NoSQL, template)
+               - Authentication or authorization bypass
+               - SSRF risks (user-controlled URLs in fetch/HTTP calls)
+               - CORS misconfigurations
+
+            9. **Rate Limiting & Retry Abuse**
+               - Retry logic without proper backoff or max attempts
+               - Missing rate limiting on public endpoints
+               - Infinite loops or unbounded recursion risks
+
+            10. **KV Data Handling**
+                - Missing or improper TTL on sensitive data
+                - No validation of data read from KV (cache poisoning risk)
+                - Sensitive data stored without encryption
+
+            11. **Workflow Security**
+                - Unsafe data passing between workflow steps
+                - Missing error handling in workflow steps
+                - Retry configurations that could cause issues
+
+            12. **CI/CD & GitHub Actions Security**
+                - Workflow changes that escalate permissions
+                - Use of untrusted third-party actions
+                - Secrets exposed in workflow logs or outputs
+                - Unsafe use of `github.event` context in scripts
+
+            ## Output Format
+
+            Respond with a structured security report as a PR comment in the following format:
+
+            ---
+
+            ## 🔒 Security Review
+
+            **PR**: #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}
+
+            ### Summary
+            <Brief overview of security findings or lack thereof>
+
+            ### Findings
+
+            If issues found, include a table:
+
+            | # | Severity | Category | File | Description |
+            |---|----------|----------|------|-------------|
+            | 1 | 🔴 Critical / 🟠 High / 🟡 Medium / 🔵 Low / ⚪ Info | <category> | `file:line` | <brief description> |
+
+            ### Details
+
+            For each finding:
+
+            #### Finding <N>: <title>
+            **Severity**: <severity with emoji>
+            **Category**: <checklist category>
+            **File**: `<file:line>`
+            **Issue**: <detailed description of the security concern>
+            **Recommendation**: <specific remediation steps>
+
+            ---
+
+            If NO security concerns are identified, respond with:
+
+            ## 🔒 Security Review
+
+            **PR**: #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}
+
+            ✅ No security concerns identified in this PR.
+
+            ---
+
+            *🤖 Automated security review by Claude Code.*
