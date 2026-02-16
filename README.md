@@ -11,6 +11,8 @@ Google SheetsのナレッジベースとGoogle Gemini AIを使用してDiscord�
 - 会話履歴をKVに保存してコンテキストを維持（5分間）
 - シートデータを5分間キャッシュ（KVネイティブTTL）
 - Analytics Engineでメトリクス収集
+- Cronヘルスチェック（5分間隔でKV・Gemini API・サービスアカウントを監視）
+- エラー・障害の自動GitHub Issues報告（重複排除付き）
 
 ## アーキテクチャ
 
@@ -22,6 +24,8 @@ Discord → Cloudflare Workers → Cloudflare Workflow → Google Gemini AI (str
                                Cloudflare KV (キャッシュ・履歴)
                                       ↓
                                Analytics Engine (メトリクス)
+
+Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 ```
 
 **リクエストフロー:**
@@ -60,6 +64,7 @@ DISCORD_PUBLIC_KEY=<Discord Public Key>
 DISCORD_APPLICATION_ID=<Discord Application ID>
 GEMINI_API_KEY=<Google Gemini API Key>
 GOOGLE_SERVICE_ACCOUNT=<Google Service Account credentials (JSON文字列)>
+GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動報告用）>
 ```
 
 本番環境では `wrangler secret` でシークレットを設定してください。
@@ -68,6 +73,7 @@ GOOGLE_SERVICE_ACCOUNT=<Google Service Account credentials (JSON文字列)>
 - KV Namespace: `sushanshan_bot`
 - Analytics Engine: `METRICS`
 - Workflow: `ANSWER_QUESTION_WORKFLOW` (class: `AnswerQuestionWorkflow`)
+- Cron Trigger: `*/5 * * * *`（5分間隔のヘルスチェック）
 
 ### Discordコマンドの登録
 
@@ -98,10 +104,12 @@ npm run deploy
 ```
 src/
 ├── index.ts                           # Honoアプリエントリーポイント、Workflow再エクスポート
+├── health.ts                          # Cronヘルスチェック（KV・Gemini・SA検証）
 ├── types.ts                           # 型定義（Bindings含む）
 ├── clients/
 │   ├── discord.ts                     # Discord Webhookクライアント（PATCH編集用）
 │   ├── gemini.ts                      # Google Gemini AIクライアント（ストリーミング対応）
+│   ├── github.ts                      # GitHub Issues APIクライアント（エラー自動報告）
 │   ├── kv.ts                          # Cloudflare KVラッパー（ネイティブTTL）
 │   ├── metrics.ts                     # Analytics Engineメトリクスクライアント
 │   └── spreadSheet.ts                 # Google Sheetsクライアント
@@ -113,6 +121,7 @@ src/
 ├── responses/
 │   └── errorResponse.ts               # エラーレスポンス
 └── utils/
+    ├── errors.ts                      # エラーメッセージ抽出ヘルパー
     ├── logger.ts                      # 構造化ロガー
     ├── requestId.ts                   # リクエストID生成
     └── retry.ts                       # リトライロジック（指数バックオフ）
@@ -131,6 +140,7 @@ scripts/
 - [Cloudflare Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/) - メトリクス収集
 - [Google Gemini AI](https://ai.google.dev/) - LLM（ストリーミング対応）
 - [Google Sheets API](https://developers.google.com/sheets/api) - ナレッジベース
+- [GitHub API](https://docs.github.com/en/rest) - エラー・障害の自動Issue報告
 - [Biome](https://biomejs.dev/) - フォーマッター・リンター
 
 ## ライセンス
