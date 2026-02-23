@@ -273,6 +273,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					{ content: { parts: [{ text: "問題を多角的に分析中" }] } },
 				],
 			});
+			// Simulate multiple thinking chunks as the real streaming client sends them
+			const thinkingChunk1 =
+				"analyzing the problem in detail here, considering multiple factors";
+			const thinkingChunk2 =
+				" and approaches, weighing pros and cons of each option, looking at historical data for patterns and insights that might help us";
+			const thinkingChunk3 =
+				" and finally synthesizing all findings into a coherent answer strategy";
 			mockGeminiInstance.askStream.mockImplementation(
 				async (
 					_input: string,
@@ -283,10 +290,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						phase: "thinking" | "response",
 					) => Promise<void>,
 				) => {
-					await onChunk(
-						"analyzing the problem in detail here, considering multiple factors and approaches...",
-						"thinking",
-					);
+					// Individual thinking chunks (not accumulated) — matching gemini.ts behavior
+					await onChunk(thinkingChunk1, "thinking");
+					await onChunk(thinkingChunk2, "thinking");
+					await onChunk(thinkingChunk3, "thinking");
 					await onChunk("final answer", "response");
 					return "final answer";
 				},
@@ -310,6 +317,19 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(firstCall).toContain(":thought_balloon:");
 			expect(firstCall).toContain("問題を多角的に分析中");
 			expect(firstCall).not.toContain("```");
+
+			// First summarization fires immediately on the first thinking chunk
+			const firstSummarizeCall = mockGenerateContent.mock.calls[0]?.[0];
+			const firstPrompt = firstSummarizeCall?.contents as string;
+			expect(firstPrompt).toContain(thinkingChunk1);
+
+			// Subsequent summarization calls receive accumulated text
+			if (mockGenerateContent.mock.calls.length > 1) {
+				const laterCall = mockGenerateContent.mock.calls.at(-1)?.[0];
+				const laterPrompt = laterCall?.contents as string;
+				expect(laterPrompt).toContain(thinkingChunk1);
+				expect(laterPrompt).toContain(thinkingChunk2);
+			}
 		});
 
 		it("forces Discord edit on phase transition from thinking to response", async () => {
@@ -326,7 +346,19 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						phase: "thinking" | "response",
 					) => Promise<void>,
 				) => {
-					await onChunk("long thinking text that exceeds minimum", "thinking");
+					// Individual thinking chunks (matching gemini.ts behavior)
+					await onChunk(
+						"long thinking text that exceeds minimum chunk size threshold for display",
+						"thinking",
+					);
+					await onChunk(
+						" continued analysis with additional considerations and reasoning steps here",
+						"thinking",
+					);
+					await onChunk(
+						" and more thoughts to accumulate past the threshold value needed",
+						"thinking",
+					);
 					await onChunk("response start", "response");
 					return "response start";
 				},
