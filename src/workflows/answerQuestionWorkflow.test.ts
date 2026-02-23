@@ -273,6 +273,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					{ content: { parts: [{ text: "問題を多角的に分析中" }] } },
 				],
 			});
+			// Simulate multiple thinking chunks as the real streaming client sends them
+			const thinkingChunk1 =
+				"analyzing the problem in detail here, considering multiple factors";
+			const thinkingChunk2 =
+				" and approaches, weighing pros and cons of each option, looking at historical data for patterns and insights that might help us";
+			const thinkingChunk3 =
+				" and finally synthesizing all findings into a coherent answer strategy";
 			mockGeminiInstance.askStream.mockImplementation(
 				async (
 					_input: string,
@@ -283,10 +290,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						phase: "thinking" | "response",
 					) => Promise<void>,
 				) => {
-					await onChunk(
-						"analyzing the problem in detail here, considering multiple factors and approaches...",
-						"thinking",
-					);
+					// Individual thinking chunks (not accumulated) — matching gemini.ts behavior
+					await onChunk(thinkingChunk1, "thinking");
+					await onChunk(thinkingChunk2, "thinking");
+					await onChunk(thinkingChunk3, "thinking");
 					await onChunk("final answer", "response");
 					return "final answer";
 				},
@@ -310,6 +317,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(firstCall).toContain(":thought_balloon:");
 			expect(firstCall).toContain("問題を多角的に分析中");
 			expect(firstCall).not.toContain("```");
+
+			// Verify summarizeThinking received accumulated text (not just the last chunk)
+			const summarizeCall = mockGenerateContent.mock.calls[0]?.[0];
+			const promptText = summarizeCall?.contents as string;
+			expect(promptText).toContain(thinkingChunk1);
+			expect(promptText).toContain(thinkingChunk2);
 		});
 
 		it("forces Discord edit on phase transition from thinking to response", async () => {
@@ -326,7 +339,19 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						phase: "thinking" | "response",
 					) => Promise<void>,
 				) => {
-					await onChunk("long thinking text that exceeds minimum", "thinking");
+					// Individual thinking chunks (matching gemini.ts behavior)
+					await onChunk(
+						"long thinking text that exceeds minimum chunk size threshold for display",
+						"thinking",
+					);
+					await onChunk(
+						" continued analysis with additional considerations and reasoning steps here",
+						"thinking",
+					);
+					await onChunk(
+						" and more thoughts to accumulate past the threshold value needed",
+						"thinking",
+					);
 					await onChunk("response start", "response");
 					return "response start";
 				},

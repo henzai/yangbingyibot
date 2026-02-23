@@ -108,6 +108,10 @@ export async function saveHistoryStep(
 const DISCORD_EDIT_INTERVAL_MS = 1500;
 const MIN_CHUNK_SIZE = 50;
 
+// Thinking phase uses more aggressive intervals since updates are summarized
+const THINKING_EDIT_INTERVAL_MS = 1000;
+const THINKING_MIN_CHUNK_SIZE = 200;
+
 const SUMMARIZE_MODEL = "gemini-2.0-flash-lite";
 const THINKING_FALLBACK = "考え中...";
 
@@ -168,6 +172,7 @@ export async function streamGeminiWithDiscordEditsStep(
 	let lastResponseEditLength = 0;
 	let editCount = 0;
 	let currentPhase: "thinking" | "response" = "thinking";
+	let accumulatedThinking = "";
 
 	const formatContent = (text: string) => `> ${question}\n${text}`;
 	const formatThinkingContent = (summary: string) =>
@@ -185,19 +190,35 @@ export async function streamGeminiWithDiscordEditsStep(
 			phase === "response" && currentPhase === "thinking";
 		currentPhase = phase;
 
+		// Accumulate thinking text from individual chunks
+		if (phase === "thinking") {
+			accumulatedThinking += accumulatedText;
+		}
+
+		// Use phase-specific throttling constants
+		const editInterval =
+			phase === "thinking"
+				? THINKING_EDIT_INTERVAL_MS
+				: DISCORD_EDIT_INTERVAL_MS;
+		const minChunkSize =
+			phase === "thinking" ? THINKING_MIN_CHUNK_SIZE : MIN_CHUNK_SIZE;
+
 		const lastLen =
 			phase === "thinking" ? lastThinkingEditLength : lastResponseEditLength;
-		const newCharsCount = accumulatedText.length - lastLen;
+		const textLength =
+			phase === "thinking"
+				? accumulatedThinking.length
+				: accumulatedText.length;
+		const newCharsCount = textLength - lastLen;
 
 		if (
 			isPhaseTransition ||
-			(timeSinceLastEdit >= DISCORD_EDIT_INTERVAL_MS &&
-				newCharsCount >= MIN_CHUNK_SIZE)
+			(timeSinceLastEdit >= editInterval && newCharsCount >= minChunkSize)
 		) {
 			const content =
 				phase === "thinking"
 					? formatThinkingContent(
-							await summarizeThinking(summarizer, accumulatedText, log),
+							await summarizeThinking(summarizer, accumulatedThinking, log),
 						)
 					: formatContent(accumulatedText);
 
@@ -205,7 +226,7 @@ export async function streamGeminiWithDiscordEditsStep(
 			if (success) {
 				lastEditTime = now;
 				if (phase === "thinking") {
-					lastThinkingEditLength = accumulatedText.length;
+					lastThinkingEditLength = accumulatedThinking.length;
 				} else {
 					lastResponseEditLength = accumulatedText.length;
 				}
@@ -213,7 +234,7 @@ export async function streamGeminiWithDiscordEditsStep(
 				log.debug("Discord message edited", {
 					editCount,
 					phase,
-					contentLength: accumulatedText.length,
+					contentLength: textLength,
 				});
 			}
 		}
