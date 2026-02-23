@@ -191,6 +191,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		currentPhase = phase;
 
 		// Accumulate thinking text from individual chunks
+		const isFirstThinking = phase === "thinking" && accumulatedThinking === "";
 		if (phase === "thinking") {
 			accumulatedThinking += accumulatedText;
 		}
@@ -212,6 +213,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		const newCharsCount = textLength - lastLen;
 
 		if (
+			isFirstThinking ||
 			isPhaseTransition ||
 			(timeSinceLastEdit >= editInterval && newCharsCount >= minChunkSize)
 		) {
