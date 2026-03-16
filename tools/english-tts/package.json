@@ -1,0 +1,12 @@
+{
+	"name": "english-tts",
+	"version": "1.0.0",
+	"description": "Convert English discussion text to speech audio using Google Cloud TTS",
+	"type": "module",
+	"scripts": {
+		"tts": "node tts.js"
+	},
+	"dependencies": {
+		"@google-cloud/text-to-speech": "^6.0.0"
+	}
+}
