@@ -141,6 +141,7 @@ scripts/
 - [Google Gemini AI](https://ai.google.dev/) - LLM（ストリーミング対応）
 - [Google Sheets API](https://developers.google.com/sheets/api) - ナレッジベース
 - [GitHub API](https://docs.github.com/en/rest) - エラー・障害の自動Issue報告
+- [Vitest](https://vitest.dev/) + [@cloudflare/vitest-pool-workers](https://developers.cloudflare.com/workers/testing/vitest-integration/) - Workers統合テスト
 - [Biome](https://biomejs.dev/) - フォーマッター・リンター
 
 ## ライセンス
