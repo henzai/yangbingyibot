@@ -42,7 +42,7 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 
 ### 必要なもの
 
-- Node.js
+- Node.js 24（`.nvmrc` 参照）
 - Cloudflareアカウント
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
@@ -141,6 +141,8 @@ scripts/
 - [Google Gemini AI](https://ai.google.dev/) - LLM（ストリーミング対応）
 - [Google Sheets API](https://developers.google.com/sheets/api) - ナレッジベース
 - [GitHub API](https://docs.github.com/en/rest) - エラー・障害の自動Issue報告
+- [TypeScript](https://www.typescriptlang.org/) - 型付きJavaScript
+- [Vitest](https://vitest.dev/) - テストフレームワーク（`@cloudflare/vitest-pool-workers`）
 - [Biome](https://biomejs.dev/) - フォーマッター・リンター
 
 ## ライセンス
