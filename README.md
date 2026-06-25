@@ -141,6 +141,8 @@ scripts/
 - [Google Gemini AI](https://ai.google.dev/) - LLM（ストリーミング対応）
 - [Google Sheets API](https://developers.google.com/sheets/api) - ナレッジベース
 - [GitHub API](https://docs.github.com/en/rest) - エラー・障害の自動Issue報告
+- [TypeScript](https://www.typescriptlang.org/) - 型安全な開発言語
+- [Vitest](https://vitest.dev/) - テストフレームワーク
 - [Biome](https://biomejs.dev/) - フォーマッター・リンター
 
 ## ライセンス
