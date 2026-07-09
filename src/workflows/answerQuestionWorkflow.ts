@@ -112,7 +112,7 @@ const MIN_CHUNK_SIZE = 50;
 const THINKING_EDIT_INTERVAL_MS = 1000;
 const THINKING_MIN_CHUNK_SIZE = 200;
 
-const SUMMARIZE_MODEL = "gemini-2.0-flash-lite";
+const SUMMARIZE_MODEL = "gemini-2.5-flash-lite";
 const THINKING_FALLBACK = "考え中...";
 
 export async function summarizeThinking(
