@@ -42,7 +42,7 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 
 ### 必要なもの
 
-- Node.js
+- Node.js 24（`.nvmrc` で指定）
 - Cloudflareアカウント
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
@@ -86,6 +86,7 @@ npm run register
 ```bash
 npm run dev          # ローカル開発（ホットリロード）
 npm test             # テスト実行
+npm run test:watch   # テスト実行（ウォッチモード）
 npm run cf-typegen   # Cloudflare Worker型を生成
 npm run check        # Biome フォーマッター + リンター（自動修正）
 npm run check:ci     # Biome チェック（CI用、書き込みなし）
