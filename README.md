@@ -8,8 +8,7 @@ Google SheetsのナレッジベースとGoogle Gemini AIを使用してDiscord�
 - Google Sheetsからナレッジベースを取得
 - Google Gemini AIでストリーミング回答（リアルタイムでDiscordメッセージを段階的更新）
 - Gemini思考過程の表示（💭 AI要約で表示）
-- 会話履歴をKVに保存してコンテキストを維持（5分間）
-- シートデータを5分間キャッシュ（KVネイティブTTL）
+- 会話履歴とシートデータをKVに5分間保持
 - Analytics Engineでメトリクス収集
 - Cronヘルスチェック（5分間隔でKV・Gemini API・サービスアカウントを監視）
 - エラー・障害の自動GitHub Issues報告（重複排除付き）
@@ -35,8 +34,10 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 4. Cloudflare Workflow (`AnswerQuestionWorkflow`) を非同期実行:
    - Step 1: Google SheetsからシートデータをKVキャッシュ経由で取得
    - Step 2: KVから会話履歴を取得
-   - Step 3: Gemini APIでストリーミング応答 + Discordメッセージを1.5秒間隔でPATCH更新
+   - Step 3: Gemini APIでストリーミング応答 + Discordメッセージを1〜1.5秒間隔でPATCH更新
    - Step 4: 会話履歴をKVに保存
+
+Discordはインタラクションに3秒以内の応答を要求するため、実処理はWorkflowに逃がして即座に遅延レスポンスを返す構成になっています。
 
 ## セットアップ
 
@@ -47,12 +48,6 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
 - Google Gemini APIキー
-
-### インストール
-
-```bash
-npm install
-```
 
 ### 環境変数
 
@@ -69,29 +64,22 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 
 本番環境では `wrangler secret` でシークレットを設定してください。
 
-**wrangler.tomlでのバインディング:**
-- KV Namespace: `sushanshan_bot`
-- Analytics Engine: `METRICS`
-- Workflow: `ANSWER_QUESTION_WORKFLOW` (class: `AnswerQuestionWorkflow`)
-- Cron Trigger: `*/5 * * * *`（5分間隔のヘルスチェック）
-
-### Discordコマンドの登録
+### 起動
 
 ```bash
-npm run register
+npm install
+npm run register   # Discordにスラッシュコマンドを登録（初回とコマンド定義の変更時のみ）
+npm run dev
 ```
 
 ## 開発
 
 ```bash
-npm run dev          # ローカル開発（ホットリロード）
-npm test             # テスト実行
-npm run cf-typegen   # Cloudflare Worker型を生成
-npm run check        # Biome フォーマッター + リンター（自動修正）
-npm run check:ci     # Biome チェック（CI用、書き込みなし）
-npm run lint         # リンターのみ実行
-npm run format       # フォーマッターのみ実行
+npm test           # テスト実行
+npm run check      # Biomeでフォーマット + Lint（コミット前に実行すること）
 ```
+
+その他のスクリプトは `package.json` を参照してください。
 
 ## デプロイ
 
@@ -99,49 +87,11 @@ npm run format       # フォーマッターのみ実行
 npm run deploy
 ```
 
-## プロジェクト構成
+## コードの読み進め方
 
-```
-src/
-├── index.ts                           # Honoアプリエントリーポイント、Workflow再エクスポート
-├── health.ts                          # Cronヘルスチェック（KV・Gemini・SA検証）
-├── types.ts                           # 型定義（Bindings含む）
-├── clients/
-│   ├── discord.ts                     # Discord Webhookクライアント（PATCH編集用）
-│   ├── gemini.ts                      # Google Gemini AIクライアント（ストリーミング対応）
-│   ├── github.ts                      # GitHub Issues APIクライアント（エラー自動報告）
-│   ├── kv.ts                          # Cloudflare KVラッパー（ネイティブTTL）
-│   ├── metrics.ts                     # Analytics Engineメトリクスクライアント
-│   └── spreadSheet.ts                 # Google Sheetsクライアント
-├── workflows/
-│   ├── answerQuestionWorkflow.ts      # メインワークフロー（4ステップ）
-│   └── types.ts                       # Workflow用型定義
-├── middleware/
-│   └── verifyDiscordInteraction.ts    # Discord署名検証
-├── responses/
-│   └── errorResponse.ts               # エラーレスポンス
-└── utils/
-    ├── errors.ts                      # エラーメッセージ抽出ヘルパー
-    ├── logger.ts                      # 構造化ロガー
-    ├── requestId.ts                   # リクエストID生成
-    └── retry.ts                       # リトライロジック（指数バックオフ）
-
-scripts/
-├── commands.js                        # Discordコマンド定義
-└── register.js                        # コマンド登録スクリプト
-```
-
-## 技術スタック
-
-- [Hono](https://hono.dev/) - Webフレームワーク
-- [Cloudflare Workers](https://workers.cloudflare.com/) - サーバーレス実行環境
-- [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) - 非同期ワークフロー実行
-- [Cloudflare KV](https://developers.cloudflare.com/kv/) - キーバリューストレージ
-- [Cloudflare Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/) - メトリクス収集
-- [Google Gemini AI](https://ai.google.dev/) - LLM（ストリーミング対応）
-- [Google Sheets API](https://developers.google.com/sheets/api) - ナレッジベース
-- [GitHub API](https://docs.github.com/en/rest) - エラー・障害の自動Issue報告
-- [Biome](https://biomejs.dev/) - フォーマッター・リンター
+- `src/index.ts` — Honoアプリのエントリーポイント。Cloudflareに Workflow クラスを発見させるため、`AnswerQuestionWorkflow` をここから再エクスポートしている
+- `src/workflows/answerQuestionWorkflow.ts` — 回答生成の本体（上記リクエストフローの Step 1〜4）
+- `src/health.ts` — Cronトリガーから呼ばれるヘルスチェック
 
 ## ライセンス
 
