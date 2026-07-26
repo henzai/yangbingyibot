@@ -9,7 +9,7 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
 export class GeminiClient {
-	private static readonly MODEL_NAME = "gemini-3-flash-preview";
+	private static readonly MODEL_NAME = "gemini-3.6-flash";
 
 	private client: GoogleGenAI;
 	private history: HistoryEntry[];
