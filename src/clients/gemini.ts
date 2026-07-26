@@ -1,4 +1,8 @@
-import { type GenerateContentResponse, GoogleGenAI } from "@google/genai";
+import {
+	type GenerateContentResponse,
+	type GenerateContentResponseUsageMetadata,
+	GoogleGenAI,
+} from "@google/genai";
 import type { HistoryEntry } from "../types";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
@@ -93,6 +97,36 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		throw new Error("AI処理中に予期しないエラーが発生しました。");
 	}
 
+	// トークン使用量を記録する。入力トークンがコストの大半を占めるため、
+	// 内訳とキャッシュのヒット率を追えるようにしておく。
+	private logUsage(
+		usage: GenerateContentResponseUsageMetadata | undefined,
+		mode: "generate" | "stream",
+	): void {
+		if (!usage) {
+			this.log.warn("Gemini usage metadata missing", { mode });
+			return;
+		}
+
+		const promptTokens = usage.promptTokenCount ?? 0;
+		const cachedTokens = usage.cachedContentTokenCount ?? 0;
+
+		this.log.info("Gemini token usage", {
+			mode,
+			model: GeminiClient.MODEL_NAME,
+			promptTokens,
+			cachedTokens,
+			// 暗黙キャッシュが効いているかはこの比率で判断する
+			cachedRatio:
+				promptTokens > 0
+					? Number((cachedTokens / promptTokens).toFixed(3))
+					: null,
+			thoughtsTokens: usage.thoughtsTokenCount ?? 0,
+			candidatesTokens: usage.candidatesTokenCount ?? 0,
+			totalTokens: usage.totalTokenCount ?? 0,
+		});
+	}
+
 	private addToHistory(input: string, response: string): void {
 		this.history.push({
 			role: "user",
@@ -132,6 +166,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				this.log.info("Gemini API completed", {
 					durationMs: Date.now() - startTime,
 				});
+				this.logUsage(result.usageMetadata, "generate");
 			} catch (error) {
 				this.handleGeminiError(error);
 			}
@@ -178,6 +213,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 			const fullPrompt = this.buildPrompt(input, sheet, description);
 
 			let fullText = "";
+			let usage: GenerateContentResponseUsageMetadata | undefined;
 
 			try {
 				this.log.info("Gemini streaming API request starting");
@@ -197,6 +233,11 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				);
 
 				for await (const chunk of stream) {
+					// ストリーミングでは使用量は終盤のチャンクに載るため、最後の値を採用する
+					if (chunk.usageMetadata) {
+						usage = chunk.usageMetadata;
+					}
+
 					const parts = chunk.candidates?.[0]?.content?.parts ?? [];
 					for (const part of parts) {
 						if (typeof part.text !== "string") {
@@ -214,6 +255,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				this.log.info("Gemini streaming API completed", {
 					durationMs: Date.now() - startTime,
 				});
+				this.logUsage(usage, "stream");
 			} catch (error) {
 				this.handleGeminiError(error);
 			}

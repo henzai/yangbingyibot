@@ -387,6 +387,123 @@ describe("GeminiClient", () => {
 		});
 	});
 
+	describe("token usage logging", () => {
+		const makeLogger = () => ({
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			debug: vi.fn(),
+			withContext: vi.fn().mockReturnThis(),
+		});
+
+		const usageOf = (log: ReturnType<typeof makeLogger>) =>
+			log.info.mock.calls.find(
+				([message]) => message === "Gemini token usage",
+			)?.[1];
+
+		it("logs the token breakdown from a non-streaming response", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+				usageMetadata: {
+					promptTokenCount: 110000,
+					cachedContentTokenCount: 88000,
+					thoughtsTokenCount: 800,
+					candidatesTokenCount: 400,
+					totalTokenCount: 111200,
+				},
+			});
+
+			const log = makeLogger();
+			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+
+			expect(usageOf(log)).toMatchObject({
+				mode: "generate",
+				promptTokens: 110000,
+				cachedTokens: 88000,
+				cachedRatio: 0.8,
+				thoughtsTokens: 800,
+				candidatesTokens: 400,
+				totalTokens: 111200,
+			});
+		});
+
+		it("logs usage carried on the final streaming chunk", async () => {
+			const mockStream = (async function* () {
+				yield { candidates: [{ content: { parts: [{ text: "Hello" }] } }] };
+				yield {
+					candidates: [{ content: { parts: [{ text: " world" }] } }],
+					usageMetadata: {
+						promptTokenCount: 1000,
+						cachedContentTokenCount: 250,
+						totalTokenCount: 1200,
+					},
+				};
+			})();
+			mockGenerateContentStream.mockResolvedValue(mockStream);
+
+			const log = makeLogger();
+			await new GeminiClient("test-api-key", [], log).askStream(
+				"q",
+				"s",
+				"d",
+				async () => {},
+			);
+
+			expect(usageOf(log)).toMatchObject({
+				mode: "stream",
+				promptTokens: 1000,
+				cachedTokens: 250,
+				cachedRatio: 0.25,
+			});
+		});
+
+		it("reports a zero cache ratio when nothing was cached", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+				usageMetadata: { promptTokenCount: 500, totalTokenCount: 600 },
+			});
+
+			const log = makeLogger();
+			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+
+			expect(usageOf(log)).toMatchObject({ cachedTokens: 0, cachedRatio: 0 });
+		});
+
+		it("uses a null ratio rather than dividing by zero", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+				usageMetadata: { totalTokenCount: 0 },
+			});
+
+			const log = makeLogger();
+			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+
+			expect(usageOf(log)).toMatchObject({
+				promptTokens: 0,
+				cachedRatio: null,
+			});
+		});
+
+		it("warns instead of throwing when usage metadata is absent", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+			});
+
+			const log = makeLogger();
+			const result = await new GeminiClient("test-api-key", [], log).ask(
+				"q",
+				"s",
+				"d",
+			);
+
+			expect(result).toBe("AI response");
+			expect(usageOf(log)).toBeUndefined();
+			expect(log.warn).toHaveBeenCalledWith("Gemini usage metadata missing", {
+				mode: "generate",
+			});
+		});
+	});
+
 	describe("createGeminiClient", () => {
 		it("creates a new GeminiClient instance", () => {
 			const client = createGeminiClient("test-api-key");
