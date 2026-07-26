@@ -2,6 +2,7 @@ import GoogleAuth, {
 	type GoogleKey,
 } from "cloudflare-workers-and-google-oauth";
 import { GoogleSpreadsheet } from "google-spreadsheet";
+import { compactSheetCsv } from "../utils/compactSheet";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -85,7 +86,14 @@ async function fetchSheetInfo(
 			throw new Error("Sheet returned empty CSV data");
 		}
 
-		return csvContent;
+		// CSVはGeminiへの入力トークンの大半を占めるため、渡す前に圧縮する
+		const compacted = compactSheetCsv(csvContent);
+		log.info("Sheet CSV compacted", {
+			originalChars: csvContent.length,
+			compactedChars: compacted.length,
+		});
+
+		return compacted;
 	} catch (error) {
 		log.error("Failed to download sheet as CSV", {
 			error: getErrorMessage(error),
