@@ -60,12 +60,16 @@ vi.mock("../clients/spreadSheet", () => ({
 
 const mockGenerateContent = vi.fn();
 
+// vitest 4 は `new` 呼び出し時に実装を Reflect.construct するため、
+// コンストラクタとして使うモックの実装はアロー関数にできない（class 式で代用）
 vi.mock("@google/genai", () => ({
-	GoogleGenAI: vi.fn().mockImplementation(() => ({
-		models: {
-			generateContent: mockGenerateContent,
+	GoogleGenAI: vi.fn(
+		class {
+			models = {
+				generateContent: mockGenerateContent,
+			};
 		},
-	})),
+	),
 }));
 
 import { createGeminiClient } from "../clients/gemini";

@@ -7,17 +7,23 @@ const mockDownloadAsCSV = vi.fn();
 const mockLoadCells = vi.fn();
 const mockGetCellByA1 = vi.fn();
 
+// vitest 4 は `new` 呼び出し時に実装を Reflect.construct するため、
+// コンストラクタとして使うモックの実装はアロー関数にできない（class 式で代用）
 vi.mock("cloudflare-workers-and-google-oauth", () => ({
-	default: vi.fn().mockImplementation(() => ({
-		getGoogleAuthToken: mockGetGoogleAuthToken,
-	})),
+	default: vi.fn(
+		class {
+			getGoogleAuthToken = mockGetGoogleAuthToken;
+		},
+	),
 }));
 
 vi.mock("google-spreadsheet", () => ({
-	GoogleSpreadsheet: vi.fn().mockImplementation(() => ({
-		loadInfo: mockLoadInfo,
-		sheetsByTitle: {},
-	})),
+	GoogleSpreadsheet: vi.fn(
+		class {
+			loadInfo = mockLoadInfo;
+			sheetsByTitle = {};
+		},
+	),
 }));
 
 import { GoogleSpreadsheet } from "google-spreadsheet";
@@ -68,11 +74,14 @@ function setupSheets(options?: {
 	mockDownloadAsCSV.mockResolvedValue(new TextEncoder().encode(csvContent));
 	mockGetCellByA1.mockReturnValue({ value: descValue });
 
+	const sheets = sheetsByTitle;
 	// biome-ignore lint/suspicious/noExplicitAny: overriding mock property
-	(GoogleSpreadsheet as any).mockImplementation(() => ({
-		loadInfo: mockLoadInfo,
-		sheetsByTitle,
-	}));
+	(GoogleSpreadsheet as any).mockImplementation(
+		class {
+			loadInfo = mockLoadInfo;
+			sheetsByTitle = sheets;
+		},
+	);
 }
 
 describe("spreadSheet", () => {

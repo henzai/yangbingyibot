@@ -42,10 +42,14 @@ describe("withRetry", () => {
 		it("retries up to maxAttempts times", async () => {
 			const mockFn = vi.fn().mockRejectedValue(new Error("persistent error"));
 
+			// runAllTimersAsync() の実行中に reject するため、先に assertion を
+			// 繋いでハンドラを登録しておく (vitest 4 は未処理の rejection を
+			// Unhandled Error として検出し、テストが通っても exit code 1 になる)
 			const promise = withRetry(mockFn, { maxAttempts: 3 });
+			const assertion = expect(promise).rejects.toThrow("persistent error");
 			await vi.runAllTimersAsync();
+			await assertion;
 
-			await expect(promise).rejects.toThrow("persistent error");
 			expect(mockFn).toHaveBeenCalledTimes(3);
 		});
 
@@ -113,9 +117,10 @@ describe("withRetry", () => {
 			};
 
 			const promise = withRetry(mockFn, { maxAttempts: 3 }, shouldRetry);
+			const assertion = expect(promise).rejects.toThrow("non-retryable error");
 			await vi.runAllTimersAsync();
+			await assertion;
 
-			await expect(promise).rejects.toThrow("non-retryable error");
 			expect(mockFn).toHaveBeenCalledTimes(1);
 		});
 
@@ -189,18 +194,18 @@ describe("withRetry", () => {
 				.mockRejectedValueOnce(error3);
 
 			const promise = withRetry(mockFn, { maxAttempts: 3 });
+			const assertion = expect(promise).rejects.toThrow("final error");
 			await vi.runAllTimersAsync();
-
-			await expect(promise).rejects.toThrow("final error");
+			await assertion;
 		});
 
 		it("converts non-Error values to Error", async () => {
 			const mockFn = vi.fn().mockRejectedValue("string error");
 
 			const promise = withRetry(mockFn, { maxAttempts: 1 });
+			const assertion = expect(promise).rejects.toThrow("string error");
 			await vi.runAllTimersAsync();
-
-			await expect(promise).rejects.toThrow("string error");
+			await assertion;
 		});
 	});
 
