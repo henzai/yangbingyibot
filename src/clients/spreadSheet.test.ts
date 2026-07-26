@@ -90,8 +90,9 @@ describe("spreadSheet", () => {
 
 			const result = await getSheetData(validServiceAccount, mockLogger);
 
+			// sheetInfoはcompactSheetCsvを通るためTSVで返る
 			expect(result).toEqual({
-				sheetInfo: "col1,col2\nval1,val2",
+				sheetInfo: "col1\tcol2\nval1\tval2",
 				description: "Bot description",
 			});
 		});
