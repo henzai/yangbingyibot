@@ -56,7 +56,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.PAT_TOKEN }}
-          claude_args: '--model claude-opus-4-6 --max-turns 30 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(git:*),Bash(gh pr:*)"'
+          claude_args: '--model claude-opus-5 --max-turns 30 --allowedTools "Read,Glob,Grep,Write,Edit,Bash(git:*),Bash(gh pr:*)"'
           prompt: |
             You are a documentation reviewer for README.md. **Your default outcome is to do nothing.**
 
