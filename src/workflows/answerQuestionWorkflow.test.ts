@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bindings, HistoryEntry } from "../contracts";
+import { formatAnswer } from "../discord/formatter";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -363,6 +364,63 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(lastCall?.[0]).toBe("> user question\nfull response");
 		});
 
+		it("delivers a long final answer in ordered chunks without loss", async () => {
+			const response = "a".repeat(4500);
+			mockGeminiInstance.askStream.mockResolvedValue(response);
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+			mockDiscordInstance.postMessage.mockResolvedValue(undefined);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"test-token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			const deliveredChunks = [
+				mockDiscordInstance.editOriginalMessage.mock.calls[0]?.[0] as string,
+				...mockDiscordInstance.postMessage.mock.calls.map(
+					([content]) => content as string,
+				),
+			];
+			expect(deliveredChunks.every((chunk) => chunk.length <= 2000)).toBe(true);
+			expect(deliveredChunks.join("")).toBe(formatAnswer("question", response));
+			expect(result).toMatchObject({
+				editCount: 1,
+				chunkCount: 2,
+				deliveryStatus: "success",
+				failedChunks: [],
+			});
+		});
+
+		it("returns an empty delivery result for an empty Gemini answer", async () => {
+			mockGeminiInstance.askStream.mockResolvedValue("");
+			mockGeminiInstance.getHistory.mockReturnValue([]);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(mockDiscordInstance.editOriginalMessage).not.toHaveBeenCalled();
+			expect(mockDiscordInstance.postMessage).not.toHaveBeenCalled();
+			expect(result).toMatchObject({
+				editCount: 0,
+				chunkCount: 0,
+				deliveryStatus: "empty",
+				failedChunks: [],
+			});
+		});
+
 		it("displays summarized thinking content with thought balloon", async () => {
 			mockGenerateContent.mockResolvedValue({
 				candidates: [
@@ -702,7 +760,15 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
 				"> user question\nAI answer",
 			);
-			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
+			expect(result).toEqual({
+				success: true,
+				statusCode: 200,
+				retryCount: 0,
+				editCount: 0,
+				chunkCount: 1,
+				deliveryStatus: "success",
+				failedChunks: [],
+			});
 		});
 
 		it("sends error response when AI fails", async () => {
@@ -720,7 +786,15 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
 				"> question\n:rotating_light: エラーが発生しました: Some error occurred",
 			);
-			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 0 });
+			expect(result).toEqual({
+				success: true,
+				statusCode: 200,
+				retryCount: 0,
+				editCount: 0,
+				chunkCount: 1,
+				deliveryStatus: "success",
+				failedChunks: [],
+			});
 		});
 
 		it("retries on failure", async () => {
@@ -740,7 +814,15 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			const result = await promise;
 
 			expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(2);
-			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 1 });
+			expect(result).toEqual({
+				success: true,
+				statusCode: 200,
+				retryCount: 1,
+				editCount: 0,
+				chunkCount: 1,
+				deliveryStatus: "success",
+				failedChunks: [],
+			});
 		});
 
 		it("returns failure after all retries exhausted", async () => {
@@ -764,6 +846,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				success: false,
 				statusCode: 500,
 				retryCount: 2,
+				editCount: 0,
+				chunkCount: 0,
+				deliveryStatus: "failed",
+				failedChunks: [0],
 			});
 		});
 
@@ -787,6 +873,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					success: false,
 					statusCode: status,
 					retryCount: 0,
+					editCount: 0,
+					chunkCount: 0,
+					deliveryStatus: "failed",
+					failedChunks: [0],
 				});
 			},
 		);
@@ -812,6 +902,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				success: true,
 				statusCode: 200,
 				retryCount: 1,
+				editCount: 0,
+				chunkCount: 1,
+				deliveryStatus: "success",
+				failedChunks: [],
 			});
 			expect(mockLogger.warn).toHaveBeenCalledWith(
 				"Retrying external service request",

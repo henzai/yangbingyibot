@@ -212,14 +212,17 @@ describe("MetricsClient", () => {
 				durationMs: 200,
 				retryCount: 0,
 				statusCode: 200,
+				editCount: 2,
+				chunkCount: 3,
+				deliveryStatus: "success",
 			};
 
 			metrics.recordDiscordWebhook(data);
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_discord"],
-				blobs: ["discord_webhook", "req_discord"],
-				doubles: [200, 1, 0, 200],
+				blobs: ["discord_webhook", "req_discord", "success"],
+				doubles: [200, 1, 0, 200, 2, 3],
 			});
 		});
 
@@ -230,14 +233,17 @@ describe("MetricsClient", () => {
 				durationMs: 3000,
 				retryCount: 2,
 				statusCode: 500,
+				editCount: 1,
+				chunkCount: 2,
+				deliveryStatus: "partial",
 			};
 
 			metrics.recordDiscordWebhook(data);
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_discord_fail"],
-				blobs: ["discord_webhook", "req_discord_fail"],
-				doubles: [3000, 0, 2, 500],
+				blobs: ["discord_webhook", "req_discord_fail", "partial"],
+				doubles: [3000, 0, 2, 500, 1, 2],
 			});
 		});
 
@@ -253,8 +259,8 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_no_status"],
-				blobs: ["discord_webhook", "req_no_status"],
-				doubles: [1000, 0, 2, 0],
+				blobs: ["discord_webhook", "req_no_status", "unknown"],
+				doubles: [1000, 0, 2, 0, 0, 0],
 			});
 		});
 	});
