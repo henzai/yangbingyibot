@@ -1,5 +1,6 @@
 import type { HistoryEntry } from "../contracts";
 import type { DeliveryStatus } from "../discord/delivery";
+import type { GeminiUsage } from "../gemini/types";
 
 export type { WorkflowParams } from "../contracts";
 
@@ -17,6 +18,7 @@ export interface HistoryOutput {
 export interface StreamingGeminiOutput {
 	response: string;
 	updatedHistory: HistoryEntry[];
+	usage: GeminiUsage | null;
 	editCount: number;
 	chunkCount: number;
 	deliveryStatus: DeliveryStatus;

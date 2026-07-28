@@ -3,9 +3,7 @@ import {
 	type WorkflowEvent,
 	type WorkflowStep,
 } from "cloudflare:workers";
-import { GoogleGenAI } from "@google/genai";
 import { createDiscordWebhookClient } from "../clients/discord";
-import { createGeminiClient } from "../clients/gemini";
 import { createGitHubIssueClient, type ErrorReport } from "../clients/github";
 import {
 	createMetricsClient,
@@ -13,7 +11,7 @@ import {
 	NoOpMetricsClient,
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
-import { DEFAULT_RUNTIME_CONFIG, loadConfig } from "../config";
+import { loadConfig } from "../config";
 import type { Bindings, HistoryEntry } from "../contracts";
 import { createDiscordDeliveryService } from "../discord/delivery";
 import {
@@ -21,14 +19,18 @@ import {
 	formatError,
 	formatThinking,
 } from "../discord/formatter";
+import { createGeminiGateway } from "../gemini/gateway";
+import { buildAnswerPrompt } from "../gemini/promptBuilder";
+import { StreamCoordinator } from "../gemini/streamCoordinator";
+import { createThinkingSummarizer } from "../gemini/thinkingSummarizer";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
 import {
+	ExternalServiceError,
 	getErrorMessage,
 	getExternalErrorLogContext,
 	getUserMessage,
-	normalizeExternalServiceError,
 } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
 import type {
@@ -144,52 +146,6 @@ export async function saveHistoryStep(
 	}
 }
 
-// Buffering constants for Discord PATCH throttling
-const DISCORD_EDIT_INTERVAL_MS = 1500;
-const MIN_CHUNK_SIZE = 50;
-
-// Thinking phase uses more aggressive intervals since updates are summarized
-const THINKING_EDIT_INTERVAL_MS = 1000;
-const THINKING_MIN_CHUNK_SIZE = 200;
-
-const THINKING_FALLBACK = "考え中...";
-
-export async function summarizeThinking(
-	client: GoogleGenAI,
-	thinkingText: string,
-	log: Logger,
-	modelName: string = DEFAULT_RUNTIME_CONFIG.geminiSummaryModel,
-): Promise<string> {
-	try {
-		const result = await client.models.generateContent({
-			model: modelName,
-			contents:
-				"以下のAIの思考過程を日本語の1文（50文字以内）に要約してください。要約文のみを出力してください。\n\n" +
-				thinkingText,
-			config: {
-				temperature: 0,
-				maxOutputTokens: 128,
-			},
-		});
-		const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-		if (text) {
-			return text;
-		}
-		log.warn("Empty summarization result, using fallback");
-		return THINKING_FALLBACK;
-	} catch (error) {
-		const normalized = normalizeExternalServiceError(error, {
-			service: "gemini",
-			operation: "summarize thinking",
-			userMessage: "思考要約の生成に失敗しました。",
-		});
-		log.warn("Thinking summarization failed (non-fatal)", {
-			...getExternalErrorLogContext(normalized),
-		});
-		return THINKING_FALLBACK;
-	}
-}
-
 // Step 3+5 combined: Stream Gemini response + progressively edit Discord message
 export async function streamGeminiWithDiscordEditsStep(
 	env: Bindings,
@@ -207,110 +163,70 @@ export async function streamGeminiWithDiscordEditsStep(
 		log,
 	);
 	const delivery = createDiscordDeliveryService(discord, log);
-	const gemini = createGeminiClient(
-		config.geminiApiKey,
-		historyOutput.history,
+	const gateway = createGeminiGateway(config.geminiApiKey, log);
+	const summarizer = createThinkingSummarizer(
+		gateway,
+		config.geminiSummaryModel,
 		log,
-		config.geminiModel,
 	);
-	const summarizer = new GoogleGenAI({ apiKey: config.geminiApiKey });
+	const coordinator = new StreamCoordinator();
+	const prompt = buildAnswerPrompt({
+		description: sheetData.description,
+		knowledge: sheetData.sheetInfo,
+		history: historyOutput.history,
+		question: message,
+	});
 
-	let lastEditTime = 0;
-	let lastThinkingEditLength = 0;
-	let lastResponseEditLength = 0;
 	let editCount = 0;
 	let retryCount = 0;
 	let deliveryDurationMs = 0;
-	let currentPhase: "thinking" | "response" = "thinking";
-	let accumulatedThinking = "";
-
-	const onChunk = async (
-		accumulatedText: string,
-		phase: "thinking" | "response",
-	) => {
-		const now = Date.now();
-		const timeSinceLastEdit = now - lastEditTime;
-
-		// Force an immediate edit on phase transition from thinking to response
-		const isPhaseTransition =
-			phase === "response" && currentPhase === "thinking";
-		currentPhase = phase;
-
-		// Accumulate thinking text from individual chunks
-		const isFirstThinking = phase === "thinking" && accumulatedThinking === "";
-		if (phase === "thinking") {
-			accumulatedThinking += accumulatedText;
-		}
-
-		// Use phase-specific throttling constants
-		const editInterval =
-			phase === "thinking"
-				? THINKING_EDIT_INTERVAL_MS
-				: DISCORD_EDIT_INTERVAL_MS;
-		const minChunkSize =
-			phase === "thinking" ? THINKING_MIN_CHUNK_SIZE : MIN_CHUNK_SIZE;
-
-		const lastLen =
-			phase === "thinking" ? lastThinkingEditLength : lastResponseEditLength;
-		const textLength =
-			phase === "thinking"
-				? accumulatedThinking.length
-				: accumulatedText.length;
-		const newCharsCount = textLength - lastLen;
-
-		if (
-			isFirstThinking ||
-			isPhaseTransition ||
-			(timeSinceLastEdit >= editInterval && newCharsCount >= minChunkSize)
-		) {
-			const content =
-				phase === "thinking"
-					? formatThinking(
-							question,
-							await summarizeThinking(
-								summarizer,
-								accumulatedThinking,
-								log,
-								config.geminiSummaryModel,
-							),
-						)
-					: formatAnswer(question, accumulatedText);
-
-			const deliveryStartTime = Date.now();
-			const result = await delivery.deliverPreview(content);
-			deliveryDurationMs += Date.now() - deliveryStartTime;
-			editCount += result.editCount;
-			retryCount += result.retryCount;
-
-			if (result.success) {
-				lastEditTime = now;
-				if (phase === "thinking") {
-					lastThinkingEditLength = accumulatedThinking.length;
-				} else {
-					lastResponseEditLength = accumulatedText.length;
-				}
-				log.debug("Discord message edited", {
-					editCount,
-					phase,
-					contentLength: textLength,
-				});
-			} else {
-				log.warn("Intermediate Discord edit failed (non-fatal)", {
-					deliveryStatus: result.status,
-					failedChunks: result.failedChunks,
-					statusCode: result.statusCode,
-				});
-			}
-		}
-	};
 
 	log.info("Starting Gemini streaming with Discord edits");
-	const response = await gemini.askStream(
-		message,
-		sheetData.sheetInfo,
-		sheetData.description,
-		onChunk,
-	);
+	for await (const event of gateway.generateStream({
+		model: config.geminiModel,
+		prompt,
+	})) {
+		const decision = coordinator.handle(event, Date.now());
+		if (!decision) {
+			continue;
+		}
+
+		const content =
+			decision.phase === "thinking"
+				? formatThinking(question, await summarizer.summarize(decision.text))
+				: formatAnswer(question, decision.text);
+		const deliveryStartTime = Date.now();
+		const result = await delivery.deliverPreview(content);
+		deliveryDurationMs += Date.now() - deliveryStartTime;
+		editCount += result.editCount;
+		retryCount += result.retryCount;
+
+		if (result.success) {
+			coordinator.markDelivered(decision);
+			log.debug("Discord message edited", {
+				editCount,
+				phase: decision.phase,
+				contentLength: decision.textLength,
+			});
+		} else {
+			log.warn("Intermediate Discord edit failed (non-fatal)", {
+				deliveryStatus: result.status,
+				failedChunks: result.failedChunks,
+				statusCode: result.statusCode,
+			});
+		}
+	}
+
+	const streamResult = coordinator.getResult();
+	const response = streamResult.response;
+	if (!response.trim()) {
+		throw new ExternalServiceError({
+			service: "gemini",
+			operation: "validate streamed response",
+			retryable: false,
+			userMessage: "AIから有効な応答が得られませんでした。",
+		});
+	}
 
 	const finalDeliveryStartTime = Date.now();
 	const finalDelivery = await delivery.deliverFinal(
@@ -330,7 +246,12 @@ export async function streamGeminiWithDiscordEditsStep(
 
 	return {
 		response,
-		updatedHistory: gemini.getHistory(),
+		updatedHistory: [
+			...historyOutput.history,
+			{ role: "user", text: `質問: ${message}` },
+			{ role: "model", text: response },
+		],
+		usage: streamResult.usage,
 		editCount,
 		chunkCount: finalDelivery.chunkCount,
 		deliveryStatus: finalDelivery.status,
@@ -490,6 +411,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			// Step 3: Stream Gemini response + progressively edit Discord message
 			const geminiStartTime = Date.now();
 			let geminiSuccess = false;
+			let geminiUsage: StreamingGeminiOutput["usage"] = null;
 			let streamResult: StreamingGeminiOutput;
 			try {
 				streamResult = await step.do(
@@ -514,6 +436,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 						);
 					},
 				);
+				geminiUsage = streamResult.usage;
 				geminiSuccess = true;
 				stepCount++;
 			} finally {
@@ -521,6 +444,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 					requestId,
 					success: geminiSuccess,
 					durationMs: Date.now() - geminiStartTime,
+					usage: geminiUsage,
 				});
 			}
 

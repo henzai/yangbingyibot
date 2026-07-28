@@ -1,4 +1,5 @@
 import type { DeliveryStatus } from "../discord/delivery";
+import type { GeminiUsage } from "../gemini/types";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -27,6 +28,7 @@ export interface MetricData {
  */
 export interface GeminiMetricData extends MetricData {
 	retryCount?: number;
+	usage?: GeminiUsage | null;
 }
 
 /**
@@ -97,13 +99,24 @@ export class MetricsClient implements IMetricsClient {
 
 	/**
 	 * Record Gemini API call metrics
-	 * doubles: [durationMs, success, retryCount]
+	 * doubles: [durationMs, success, retryCount, promptTokens, cachedTokens,
+	 *   thoughtsTokens, candidatesTokens, totalTokens]
 	 */
 	recordGeminiCall(data: GeminiMetricData): void {
+		const usage = data.usage;
 		this.writeDataPoint("gemini_api_call", {
 			indexes: [data.requestId.substring(0, 96)],
 			blobs: [data.requestId],
-			doubles: [data.durationMs, data.success ? 1 : 0, data.retryCount ?? 0],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.retryCount ?? 0,
+				usage?.promptTokens ?? 0,
+				usage?.cachedTokens ?? 0,
+				usage?.thoughtsTokens ?? 0,
+				usage?.candidatesTokens ?? 0,
+				usage?.totalTokens ?? 0,
+			],
 		});
 	}
 
