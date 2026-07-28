@@ -1,0 +1,4 @@
+interface:
+  display_name: "Yangbingyibot Discord /ask E2E"
+  short_description: "Discordのtestチャンネルで/askを実行し応答を検証"
+  default_prompt: "Use $yangbingyibot-discord-ask-e2e to run the Discord /ask end-to-end check."

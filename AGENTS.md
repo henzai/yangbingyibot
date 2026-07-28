@@ -45,6 +45,18 @@
 - Never print or commit `.dev.vars`, API tokens, service-account credentials,
   Discord credentials, cookies, or other secrets.
 
+## Repository skills
+
+- Use `$yangbingyibot-discord-ask-e2e` for the production Discord `/ask`
+  end-to-end check after deployment or whenever the user asks to verify the
+  deployed Discord interaction flow.
+- Follow the skill's authenticated Chrome and `#test` workflow. Do not
+  substitute a fabricated Interaction request, plain Discord message, bot-token
+  command invocation, or Discord user-token/internal API call.
+- Obtain action-time confirmation immediately before submitting `/ask`, then
+  verify the application response rather than treating command submission alone
+  as success.
+
 ## Pull requests and release verification
 
 - Create a draft pull request when the task has no existing pull request.
@@ -62,4 +74,3 @@
 - Confirm the next scheduled health check reports no KV, Gemini, or Google
   service-account failure. Ask before any production rollback or other
   destructive recovery action.
-
