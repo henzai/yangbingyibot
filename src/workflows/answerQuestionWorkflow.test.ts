@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bindings, HistoryEntry } from "../types";
+import type { Bindings, HistoryEntry } from "../contracts";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
 
@@ -150,6 +150,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(getSheetData).toHaveBeenCalledWith(
 				mockEnv.GOOGLE_SERVICE_ACCOUNT,
 				mockLogger,
+				{
+					id: "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg",
+					dataSheetName: "test",
+					descriptionSheetName: "description",
+				},
 			);
 		});
 
@@ -446,6 +451,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockEnv.GEMINI_API_KEY,
 				existingHistory,
 				mockLogger,
+				"gemini-3.6-flash",
 			);
 		});
 	});
@@ -462,9 +468,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				client,
 				"long thinking text here",
 				mockLogger,
+				"configured-summary-model",
 			);
 
 			expect(result).toBe("要約結果テスト");
+			expect(mockGenerateContent).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "configured-summary-model" }),
+			);
 		});
 
 		it("returns fallback on empty response", async () => {

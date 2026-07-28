@@ -2,20 +2,12 @@ import GoogleAuth, {
 	type GoogleKey,
 } from "cloudflare-workers-and-google-oauth";
 import { GoogleSpreadsheet } from "google-spreadsheet";
+import { DEFAULT_RUNTIME_CONFIG, type SpreadsheetConfig } from "../config";
 import { compactSheetCsv } from "../utils/compactSheet";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
-// スプレッドシートのID
-const DOC_ID = "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg";
-
-// 定数を上部にまとめる
 const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const SHEET_NAME = "test";
-
-// スプレッドシートの情報を取得するためのシート
-// A1セルにスプレッドシートの説明が入っている
-const DESCRIPTION_SHEET_NAME = "description";
 
 // Helper to parse and validate service account JSON
 function parseServiceAccount(serviceAccountJson: string): GoogleKey {
@@ -70,11 +62,12 @@ export interface SheetData {
 // Helper to fetch sheet info from a loaded document
 async function fetchSheetInfo(
 	doc: GoogleSpreadsheet,
+	sheetName: string,
 	log: Logger,
 ): Promise<string> {
-	const sheet = doc.sheetsByTitle[SHEET_NAME];
+	const sheet = doc.sheetsByTitle[sheetName];
 	if (!sheet) {
-		throw new Error(`Sheet "${SHEET_NAME}" not found in spreadsheet`);
+		throw new Error(`Sheet "${sheetName}" not found in spreadsheet`);
 	}
 
 	try {
@@ -105,12 +98,13 @@ async function fetchSheetInfo(
 // Helper to fetch description from a loaded document
 async function fetchSheetDescription(
 	doc: GoogleSpreadsheet,
+	sheetName: string,
 	log: Logger,
 ): Promise<string> {
-	const sheet = doc.sheetsByTitle[DESCRIPTION_SHEET_NAME];
+	const sheet = doc.sheetsByTitle[sheetName];
 	if (!sheet) {
 		log.warn(
-			`Description sheet "${DESCRIPTION_SHEET_NAME}" not found, using empty description`,
+			`Description sheet "${sheetName}" not found, using empty description`,
 		);
 		return "";
 	}
@@ -131,12 +125,13 @@ async function fetchSheetDescription(
 export async function getSheetData(
 	serviceAccountJson: string,
 	log?: Logger,
+	source: SpreadsheetConfig = DEFAULT_RUNTIME_CONFIG.spreadsheet,
 ): Promise<SheetData> {
 	const logger = log ?? defaultLogger;
 	try {
 		// Authenticate once
 		const token = await authenticateGoogle(serviceAccountJson, logger);
-		const doc = new GoogleSpreadsheet(DOC_ID, { token });
+		const doc = new GoogleSpreadsheet(source.id, { token });
 
 		// Load document info
 		try {
@@ -152,8 +147,8 @@ export async function getSheetData(
 
 		// Fetch both sheets in parallel using the same authenticated token
 		const [sheetInfo, description] = await Promise.all([
-			fetchSheetInfo(doc, logger),
-			fetchSheetDescription(doc, logger),
+			fetchSheetInfo(doc, source.dataSheetName, logger),
+			fetchSheetDescription(doc, source.descriptionSheetName, logger),
 		]);
 
 		return { sheetInfo, description };

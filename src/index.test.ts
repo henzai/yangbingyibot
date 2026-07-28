@@ -22,8 +22,8 @@ vi.mock("discord-api-types/v10", () => ({
 	},
 }));
 
+import type { Bindings } from "./contracts";
 import { app } from "./index";
-import type { Bindings } from "./types";
 
 const mockWorkflowCreate = vi.fn();
 

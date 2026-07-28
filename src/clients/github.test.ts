@@ -100,6 +100,26 @@ describe("GitHubIssueClient", () => {
 			expect(body.body).toContain("req-123");
 		});
 
+		it("uses the configured repository", async () => {
+			const mockFetch = vi.fn().mockResolvedValue({
+				ok: true,
+				status: 201,
+			});
+			globalThis.fetch = mockFetch;
+			const client = new GitHubIssueClient("test-token", undefined, {
+				owner: "octo-org",
+				name: "bot",
+				fullName: "octo-org/bot",
+			});
+
+			await client.createIssue(sampleReport, "fingerprint");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://api.github.com/repos/octo-org/bot/issues",
+				expect.any(Object),
+			);
+		});
+
 		it("truncates long error messages in the title", async () => {
 			globalThis.fetch = vi.fn().mockResolvedValue({
 				ok: true,

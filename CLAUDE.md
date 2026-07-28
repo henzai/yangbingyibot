@@ -28,6 +28,13 @@ Required in Cloudflare Workers secrets or `.dev.vars` for local development:
 - `GOOGLE_SERVICE_ACCOUNT` - Google Service Account credentials (JSON string)
 - `GITHUB_TOKEN` (optional) - GitHub PAT for auto-reporting errors and health check failures as Issues
 
+Optional runtime configuration (current production values are used when omitted):
+
+- `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL` - Answer and thinking-summary models
+- `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DATA_SHEET_NAME`, `GOOGLE_DESCRIPTION_SHEET_NAME` - Google Sheets source
+- `GITHUB_REPOSITORY` - Error-report destination in `owner/repository` format
+- `HISTORY_TTL_SECONDS` - Conversation history TTL (60–86400 seconds, default: 300)
+
 ## Git Workflow
 
 - 新しいブランチは、明確に既存ブランチの作業を引き継ぐ場合を除き、必ず `main` から作成すること。作成前に `git fetch origin` を実行し、`origin/main` から作成すること

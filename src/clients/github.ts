@@ -1,9 +1,8 @@
+import { DEFAULT_RUNTIME_CONFIG, type GitHubRepositoryConfig } from "../config";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const GITHUB_API_BASE = "https://api.github.com";
-const REPO_OWNER = "henzai";
-const REPO_NAME = "yangbingyibot";
 
 export interface ErrorReport {
 	errorMessage: string;
@@ -31,10 +30,16 @@ export interface HealthCheckReport {
 export class GitHubIssueClient {
 	private token: string;
 	private log: Logger;
+	private repository: GitHubRepositoryConfig;
 
-	constructor(token: string, log?: Logger) {
+	constructor(
+		token: string,
+		log?: Logger,
+		repository: GitHubRepositoryConfig = DEFAULT_RUNTIME_CONFIG.githubRepository,
+	) {
 		this.token = token;
 		this.log = log ?? defaultLogger;
+		this.repository = repository;
 	}
 
 	/**
@@ -59,7 +64,7 @@ export class GitHubIssueClient {
 	async isDuplicate(fingerprint: string): Promise<boolean> {
 		try {
 			const query = encodeURIComponent(
-				`repo:${REPO_OWNER}/${REPO_NAME} is:issue is:open label:auto-reported "${fingerprint}"`,
+				`repo:${this.repository.fullName} is:issue is:open label:auto-reported "${fingerprint}"`,
 			);
 			const res = await fetch(
 				`${GITHUB_API_BASE}/search/issues?q=${query}&per_page=1`,
@@ -141,7 +146,7 @@ export class GitHubIssueClient {
 			].join("\n");
 
 			const res = await fetch(
-				`${GITHUB_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/issues`,
+				`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
 				{
 					method: "POST",
 					headers: {
@@ -208,7 +213,7 @@ export class GitHubIssueClient {
 			].join("\n");
 
 			const res = await fetch(
-				`${GITHUB_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/issues`,
+				`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
 				{
 					method: "POST",
 					headers: {
@@ -246,6 +251,7 @@ export class GitHubIssueClient {
 export const createGitHubIssueClient = (
 	token: string,
 	log?: Logger,
+	repository: GitHubRepositoryConfig = DEFAULT_RUNTIME_CONFIG.githubRepository,
 ): GitHubIssueClient => {
-	return new GitHubIssueClient(token, log);
+	return new GitHubIssueClient(token, log, repository);
 };

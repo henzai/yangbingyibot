@@ -7,7 +7,8 @@ import {
 	type IMetricsClient,
 	NoOpMetricsClient,
 } from "./clients/metrics";
-import type { Bindings } from "./types";
+import { loadConfig } from "./config";
+import type { Bindings } from "./contracts";
 import { getErrorMessage } from "./utils/errors";
 import type { Logger } from "./utils/logger";
 
@@ -97,12 +98,17 @@ async function reportHealthCheckToGitHub(
 	log: Logger,
 ): Promise<void> {
 	try {
-		if (!env.GITHUB_TOKEN) {
+		const config = loadConfig(env);
+		if (!config.githubToken) {
 			log.debug("GITHUB_TOKEN not set, skipping health check report");
 			return;
 		}
 
-		const github = createGitHubIssueClient(env.GITHUB_TOKEN, log);
+		const github = createGitHubIssueClient(
+			config.githubToken,
+			log,
+			config.githubRepository,
+		);
 		const failedNames = failedChecks
 			.map((c) => c.name)
 			.sort()
@@ -162,6 +168,7 @@ export async function runHealthCheck(
 	env: Bindings,
 	log: Logger,
 ): Promise<HealthCheckResult> {
+	const config = loadConfig(env);
 	const metrics: IMetricsClient = env.METRICS
 		? createMetricsClient(env.METRICS, log)
 		: new NoOpMetricsClient();
@@ -169,8 +176,8 @@ export async function runHealthCheck(
 	// Run all checks in parallel
 	const results = await Promise.allSettled([
 		checkKV(env.sushanshan_bot),
-		checkGemini(env.GEMINI_API_KEY),
-		Promise.resolve(checkGoogleSA(env.GOOGLE_SERVICE_ACCOUNT)),
+		checkGemini(config.geminiApiKey),
+		Promise.resolve(checkGoogleSA(config.googleServiceAccount)),
 	]);
 
 	const checks: CheckResult[] = results.map((result) => {

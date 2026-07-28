@@ -1,9 +1,10 @@
 import { InteractionResponseType, InteractionType } from "discord-interactions";
 import { Hono } from "hono";
+import { loadConfig } from "./config";
+import type { Bindings, DiscordInteractionPayload } from "./contracts";
 import { runHealthCheck } from "./health";
 import { verifyDiscordInteraction } from "./middleware/verifyDiscordInteraction";
 import { errorResponse } from "./responses/errorResponse";
-import type { Bindings } from "./types";
 import { logger } from "./utils/logger";
 import { generateRequestId } from "./utils/requestId";
 
@@ -13,8 +14,9 @@ export { AnswerQuestionWorkflow } from "./workflows/answerQuestionWorkflow";
 const app = new Hono<{ Bindings: Bindings }>();
 
 // Validate Discord command payload structure
-// biome-ignore lint/suspicious/noExplicitAny: Discord interaction body is dynamically typed and validated at runtime
-function validateDiscordCommand(body: any): { question: string } {
+function validateDiscordCommand(body: DiscordInteractionPayload): {
+	question: string;
+} {
 	if (!body?.data) {
 		throw new Error("Invalid Discord interaction: missing data");
 	}
@@ -36,7 +38,7 @@ function validateDiscordCommand(body: any): { question: string } {
 app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 
 app.post("/", verifyDiscordInteraction, async (c) => {
-	const body = await c.req.json();
+	const body = (await c.req.json()) as DiscordInteractionPayload;
 	const requestId = generateRequestId();
 	const log = logger.withContext({ requestId });
 
@@ -50,6 +52,8 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 			case InteractionType.PING:
 				return c.json({ type: InteractionResponseType.PONG });
 			case InteractionType.APPLICATION_COMMAND: {
+				// Fail fast at the request boundary before creating a Workflow.
+				loadConfig(c.env);
 				// Validate payload structure
 				const { question } = validateDiscordCommand(body);
 

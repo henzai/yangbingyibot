@@ -14,7 +14,8 @@ import {
 	NoOpMetricsClient,
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
-import type { Bindings, HistoryEntry } from "../types";
+import { DEFAULT_RUNTIME_CONFIG, loadConfig } from "../config";
+import type { Bindings, HistoryEntry } from "../contracts";
 import { getErrorMessage } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
@@ -42,7 +43,8 @@ export async function getSheetDataStep(
 	env: Bindings,
 	log: Logger,
 ): Promise<SheetDataOutput> {
-	const kv = createKV(env.sushanshan_bot, log);
+	const config = loadConfig(env);
+	const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
 
 	const cache = await kv.getCache();
 	if (cache) {
@@ -55,7 +57,11 @@ export async function getSheetDataStep(
 	}
 
 	log.info("Fetching sheet data from Google Sheets");
-	const data = await getSheetData(env.GOOGLE_SERVICE_ACCOUNT, log);
+	const data = await getSheetData(
+		config.googleServiceAccount,
+		log,
+		config.spreadsheet,
+	);
 
 	// Save to cache (best effort)
 	try {
@@ -79,7 +85,8 @@ export async function getHistoryStep(
 	env: Bindings,
 	log: Logger,
 ): Promise<HistoryOutput> {
-	const kv = createKV(env.sushanshan_bot, log);
+	const config = loadConfig(env);
+	const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
 	const history = await kv.getHistory();
 	log.info("History loaded", { historyLength: history.length });
 	return { history };
@@ -92,7 +99,8 @@ export async function saveHistoryStep(
 	log: Logger,
 ): Promise<SaveHistoryOutput> {
 	try {
-		const kv = createKV(env.sushanshan_bot, log);
+		const config = loadConfig(env);
+		const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
 		await kv.saveHistory(history);
 		log.info("History saved", { historyLength: history.length });
 		return { success: true };
@@ -112,17 +120,17 @@ const MIN_CHUNK_SIZE = 50;
 const THINKING_EDIT_INTERVAL_MS = 1000;
 const THINKING_MIN_CHUNK_SIZE = 200;
 
-const SUMMARIZE_MODEL = "gemini-2.5-flash-lite";
 const THINKING_FALLBACK = "考え中...";
 
 export async function summarizeThinking(
 	client: GoogleGenAI,
 	thinkingText: string,
 	log: Logger,
+	modelName: string = DEFAULT_RUNTIME_CONFIG.geminiSummaryModel,
 ): Promise<string> {
 	try {
 		const result = await client.models.generateContent({
-			model: SUMMARIZE_MODEL,
+			model: modelName,
 			contents:
 				"以下のAIの思考過程を日本語の1文（50文字以内）に要約してください。要約文のみを出力してください。\n\n" +
 				thinkingText,
@@ -155,17 +163,19 @@ export async function streamGeminiWithDiscordEditsStep(
 	historyOutput: HistoryOutput,
 	log: Logger,
 ): Promise<StreamingGeminiOutput> {
+	const config = loadConfig(env);
 	const discord = createDiscordWebhookClient(
-		env.DISCORD_APPLICATION_ID,
+		config.discordApplicationId,
 		token,
 		log,
 	);
 	const gemini = createGeminiClient(
-		env.GEMINI_API_KEY,
+		config.geminiApiKey,
 		historyOutput.history,
 		log,
+		config.geminiModel,
 	);
-	const summarizer = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+	const summarizer = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 	let lastEditTime = 0;
 	let lastThinkingEditLength = 0;
@@ -220,7 +230,12 @@ export async function streamGeminiWithDiscordEditsStep(
 			const content =
 				phase === "thinking"
 					? formatThinkingContent(
-							await summarizeThinking(summarizer, accumulatedThinking, log),
+							await summarizeThinking(
+								summarizer,
+								accumulatedThinking,
+								log,
+								config.geminiSummaryModel,
+							),
 						)
 					: formatContent(accumulatedText);
 
@@ -274,8 +289,9 @@ export async function sendDiscordResponseStep(
 	log: Logger,
 	errorMessage?: string,
 ): Promise<DiscordResponseOutput> {
+	const config = loadConfig(env);
 	const discord = createDiscordWebhookClient(
-		env.DISCORD_APPLICATION_ID,
+		config.discordApplicationId,
 		token,
 		log,
 	);
@@ -337,12 +353,17 @@ export async function reportErrorToGitHub(
 	log: Logger,
 ): Promise<void> {
 	try {
-		if (!env.GITHUB_TOKEN) {
+		const config = loadConfig(env);
+		if (!config.githubToken) {
 			log.debug("GITHUB_TOKEN not set, skipping error report");
 			return;
 		}
 
-		const github = createGitHubIssueClient(env.GITHUB_TOKEN, log);
+		const github = createGitHubIssueClient(
+			config.githubToken,
+			log,
+			config.githubRepository,
+		);
 		const fingerprint = github.generateFingerprint(report.errorMessage);
 		const kvKey = `error_reported:${fingerprint}`;
 
