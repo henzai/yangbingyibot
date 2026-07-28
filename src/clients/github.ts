@@ -1,8 +1,18 @@
 import { DEFAULT_RUNTIME_CONFIG, type GitHubRepositoryConfig } from "../config";
-import { getErrorMessage } from "../utils/errors";
+import {
+	externalServiceErrorFromResponse,
+	normalizeExternalServiceError,
+} from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
+import { withRetry } from "../utils/retry";
 
 const GITHUB_API_BASE = "https://api.github.com";
+const GITHUB_RETRY_CONFIG = {
+	maxAttempts: 3,
+	initialDelayMs: 500,
+	maxDelayMs: 5000,
+	backoffMultiplier: 2,
+};
 
 export interface ErrorReport {
 	errorMessage: string;
@@ -42,6 +52,47 @@ export class GitHubIssueClient {
 		this.repository = repository;
 	}
 
+	private async request(
+		operation: string,
+		url: string,
+		init: RequestInit,
+		retry: boolean,
+	): Promise<Response> {
+		const execute = async () => {
+			try {
+				const response = await fetch(url, init);
+				if (!response.ok) {
+					throw externalServiceErrorFromResponse(
+						"github",
+						operation,
+						response,
+						"GitHubへの障害報告に失敗しました。",
+					);
+				}
+				return response;
+			} catch (error) {
+				throw normalizeExternalServiceError(error, {
+					service: "github",
+					operation,
+					userMessage: "GitHubへの障害報告に失敗しました。",
+				});
+			}
+		};
+
+		return retry
+			? withRetry(execute, GITHUB_RETRY_CONFIG, undefined, this.log)
+			: execute();
+	}
+
+	private headers(contentType = false): Record<string, string> {
+		return {
+			Authorization: `Bearer ${this.token}`,
+			Accept: "application/vnd.github+json",
+			"User-Agent": "yangbingyibot-error-reporter",
+			...(contentType ? { "Content-Type": "application/json" } : {}),
+		};
+	}
+
 	/**
 	 * Generate a fingerprint from an error message by removing dynamic elements.
 	 * This allows grouping similar errors together for deduplication.
@@ -59,192 +110,150 @@ export class GitHubIssueClient {
 
 	/**
 	 * Check if a GitHub Issue with the same fingerprint already exists (open).
-	 * Fail-open: returns false on any error so that a new issue is created.
+	 * Read-only requests use the shared retry policy.
 	 */
 	async isDuplicate(fingerprint: string): Promise<boolean> {
 		try {
 			const query = encodeURIComponent(
 				`repo:${this.repository.fullName} is:issue is:open label:auto-reported "${fingerprint}"`,
 			);
-			const res = await fetch(
+			const res = await this.request(
+				"search issues",
 				`${GITHUB_API_BASE}/search/issues?q=${query}&per_page=1`,
 				{
-					headers: {
-						Authorization: `Bearer ${this.token}`,
-						Accept: "application/vnd.github+json",
-						"User-Agent": "yangbingyibot-error-reporter",
-					},
+					headers: this.headers(),
 				},
+				true,
 			);
 
-			if (!res.ok) {
-				this.log.warn("GitHub issue search failed", {
-					statusCode: res.status,
-				});
-				return false;
-			}
-
 			const data = (await res.json()) as { total_count: number };
+			if (typeof data.total_count !== "number") {
+				throw new Error("Invalid GitHub search response");
+			}
 			return data.total_count > 0;
 		} catch (error) {
-			this.log.warn("GitHub issue search error (fail-open)", {
-				error: getErrorMessage(error),
+			throw normalizeExternalServiceError(error, {
+				service: "github",
+				operation: "parse issue search response",
+				retryable: false,
+				userMessage: "GitHubへの障害報告に失敗しました。",
 			});
-			return false;
 		}
 	}
 
 	/**
 	 * Create a GitHub Issue for a health check failure.
-	 * Non-fatal: logs warnings but does not throw on failure.
+	 * POST is attempted once because retrying an ambiguous network failure could
+	 * create duplicate issues. Callers keep this operation non-fatal.
 	 */
 	async createHealthCheckIssue(
 		report: HealthCheckReport,
 		fingerprint: string,
-	): Promise<boolean> {
-		try {
-			const failedNames = report.failedChecks.map((c) => c.name).join(", ");
-			const title = `[Health Check] ${failedNames} 異常検知`;
+	): Promise<void> {
+		const failedNames = report.failedChecks.map((c) => c.name).join(", ");
+		const title = `[Health Check] ${failedNames} 異常検知`;
 
-			const allChecks = [
-				...report.failedChecks.map((c) => ({
-					name: c.name,
-					status: "❌ 異常",
-					durationMs: c.durationMs,
-					detail: c.error,
-				})),
-				...report.passedChecks.map((c) => ({
-					name: c.name,
-					status: "✅ 正常",
-					durationMs: c.durationMs,
-					detail: "-",
-				})),
-			];
+		const allChecks = [
+			...report.failedChecks.map((c) => ({
+				name: c.name,
+				status: "❌ 異常",
+				durationMs: c.durationMs,
+				detail: c.error,
+			})),
+			...report.passedChecks.map((c) => ({
+				name: c.name,
+				status: "✅ 正常",
+				durationMs: c.durationMs,
+				detail: "-",
+			})),
+		];
 
-			const tableRows = allChecks
-				.map(
-					(c) =>
-						`| ${c.name} | ${c.status} | ${c.durationMs}ms | ${c.detail} |`,
-				)
-				.join("\n");
+		const tableRows = allChecks
+			.map(
+				(c) => `| ${c.name} | ${c.status} | ${c.durationMs}ms | ${c.detail} |`,
+			)
+			.join("\n");
 
-			const body = [
-				"## ヘルスチェック結果",
-				"",
-				"| チェック | 状態 | レイテンシ | 詳細 |",
-				"| --- | --- | --- | --- |",
-				tableRows,
-				"",
-				"## Fingerprint",
-				"",
-				`\`${fingerprint}\``,
-				"",
-				`**検知時刻:** ${report.timestamp}`,
-				"",
-				"---",
-				"*This issue was automatically created by the health check monitoring system.*",
-			].join("\n");
+		const body = [
+			"## ヘルスチェック結果",
+			"",
+			"| チェック | 状態 | レイテンシ | 詳細 |",
+			"| --- | --- | --- | --- |",
+			tableRows,
+			"",
+			"## Fingerprint",
+			"",
+			`\`${fingerprint}\``,
+			"",
+			`**検知時刻:** ${report.timestamp}`,
+			"",
+			"---",
+			"*This issue was automatically created by the health check monitoring system.*",
+		].join("\n");
 
-			const res = await fetch(
-				`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
-				{
-					method: "POST",
-					headers: {
-						Authorization: `Bearer ${this.token}`,
-						Accept: "application/vnd.github+json",
-						"User-Agent": "yangbingyibot-error-reporter",
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						title,
-						body,
-						labels: ["health-check", "auto-reported"],
-					}),
-				},
-			);
+		await this.request(
+			"create health check issue",
+			`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
+			{
+				method: "POST",
+				headers: this.headers(true),
+				body: JSON.stringify({
+					title,
+					body,
+					labels: ["health-check", "auto-reported"],
+				}),
+			},
+			false,
+		);
 
-			if (!res.ok) {
-				this.log.warn("GitHub health check issue creation failed", {
-					statusCode: res.status,
-				});
-				return false;
-			}
-
-			this.log.info("GitHub health check issue created successfully");
-			return true;
-		} catch (error) {
-			this.log.warn("GitHub health check issue creation error", {
-				error: getErrorMessage(error),
-			});
-			return false;
-		}
+		this.log.info("GitHub health check issue created successfully");
 	}
 
 	/**
 	 * Create a GitHub Issue for an error report.
-	 * Non-fatal: logs warnings but does not throw on failure.
+	 * POST is attempted once because retrying an ambiguous network failure could
+	 * create duplicate issues. Callers keep this operation non-fatal.
 	 */
-	async createIssue(
-		report: ErrorReport,
-		fingerprint: string,
-	): Promise<boolean> {
-		try {
-			const title = `[Auto] Worker Error: ${report.errorMessage.slice(0, 80)}`;
+	async createIssue(report: ErrorReport, fingerprint: string): Promise<void> {
+		const title = `[Auto] Worker Error: ${report.errorMessage.slice(0, 80)}`;
 
-			const body = [
-				"## Error Details",
-				"",
-				"| Field | Value |",
-				"| --- | --- |",
-				`| **Error** | \`${report.errorMessage}\` |`,
-				`| **Request ID** | \`${report.requestId}\` |`,
-				`| **Workflow ID** | \`${report.workflowId}\` |`,
-				...(report.step ? [`| **Step** | \`${report.step}\` |`] : []),
-				`| **Duration** | ${report.durationMs}ms |`,
-				`| **Steps Completed** | ${report.stepCount} |`,
-				`| **Timestamp** | ${report.timestamp} |`,
-				"",
-				"## Fingerprint",
-				"",
-				`\`${fingerprint}\``,
-				"",
-				"---",
-				"*This issue was automatically created by the error monitoring system.*",
-			].join("\n");
+		const body = [
+			"## Error Details",
+			"",
+			"| Field | Value |",
+			"| --- | --- |",
+			`| **Error** | \`${report.errorMessage}\` |`,
+			`| **Request ID** | \`${report.requestId}\` |`,
+			`| **Workflow ID** | \`${report.workflowId}\` |`,
+			...(report.step ? [`| **Step** | \`${report.step}\` |`] : []),
+			`| **Duration** | ${report.durationMs}ms |`,
+			`| **Steps Completed** | ${report.stepCount} |`,
+			`| **Timestamp** | ${report.timestamp} |`,
+			"",
+			"## Fingerprint",
+			"",
+			`\`${fingerprint}\``,
+			"",
+			"---",
+			"*This issue was automatically created by the error monitoring system.*",
+		].join("\n");
 
-			const res = await fetch(
-				`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
-				{
-					method: "POST",
-					headers: {
-						Authorization: `Bearer ${this.token}`,
-						Accept: "application/vnd.github+json",
-						"User-Agent": "yangbingyibot-error-reporter",
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						title,
-						body,
-						labels: ["bug", "auto-reported"],
-					}),
-				},
-			);
+		await this.request(
+			"create issue",
+			`${GITHUB_API_BASE}/repos/${this.repository.fullName}/issues`,
+			{
+				method: "POST",
+				headers: this.headers(true),
+				body: JSON.stringify({
+					title,
+					body,
+					labels: ["bug", "auto-reported"],
+				}),
+			},
+			false,
+		);
 
-			if (!res.ok) {
-				this.log.warn("GitHub issue creation failed", {
-					statusCode: res.status,
-				});
-				return false;
-			}
-
-			this.log.info("GitHub issue created successfully");
-			return true;
-		} catch (error) {
-			this.log.warn("GitHub issue creation error", {
-				error: getErrorMessage(error),
-			});
-			return false;
-		}
+		this.log.info("GitHub issue created successfully");
 	}
 }
 

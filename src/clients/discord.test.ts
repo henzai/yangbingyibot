@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ExternalServiceError } from "../utils/errors";
 import { createDiscordWebhookClient, DiscordWebhookClient } from "./discord";
 
 describe("DiscordWebhookClient", () => {
@@ -14,13 +15,13 @@ describe("DiscordWebhookClient", () => {
 
 	describe("editOriginalMessage", () => {
 		it("sends PATCH to correct endpoint", async () => {
-			const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
 			globalThis.fetch = mockFetch;
 
 			const client = new DiscordWebhookClient("app-id", "test-token");
 			const result = await client.editOriginalMessage("hello");
 
-			expect(result).toBe(true);
+			expect(result).toBeUndefined();
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://discord.com/api/v10/webhooks/app-id/test-token/messages/@original",
 				{
@@ -31,54 +32,74 @@ describe("DiscordWebhookClient", () => {
 			);
 		});
 
-		it("returns false on non-ok response", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue({
-				ok: false,
+		it("throws a typed error on non-ok response", async () => {
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValue(new Response("secret body", { status: 500 }));
+
+			const client = new DiscordWebhookClient("app-id", "token");
+			const error = await client
+				.editOriginalMessage("content")
+				.catch((caught) => caught);
+
+			expect(error).toBeInstanceOf(ExternalServiceError);
+			expect(error).toMatchObject({
+				service: "discord",
+				operation: "edit original message",
 				status: 500,
-				headers: new Headers(),
+				retryable: true,
 			});
-
-			const client = new DiscordWebhookClient("app-id", "token");
-			const result = await client.editOriginalMessage("content");
-
-			expect(result).toBe(false);
+			expect(error.message).not.toContain("secret body");
 		});
 
-		it("waits on 429 rate limit with Retry-After header", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue({
-				ok: false,
+		it("carries Retry-After on a 429 without sleeping in the client", async () => {
+			globalThis.fetch = vi.fn().mockResolvedValue(
+				new Response(null, {
+					status: 429,
+					headers: { "Retry-After": "0.1" },
+				}),
+			);
+
+			const client = new DiscordWebhookClient("app-id", "token");
+			const error = await client
+				.editOriginalMessage("content")
+				.catch((caught) => caught);
+
+			expect(error).toMatchObject({
 				status: 429,
-				headers: new Headers({ "Retry-After": "0.1" }),
+				retryable: true,
+				retryAfterMs: 100,
 			});
-
-			const client = new DiscordWebhookClient("app-id", "token");
-			const start = Date.now();
-			const result = await client.editOriginalMessage("content");
-			const elapsed = Date.now() - start;
-
-			expect(result).toBe(false);
-			expect(elapsed).toBeGreaterThanOrEqual(80);
 		});
 
-		it("returns false on fetch error", async () => {
-			globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+		it("normalizes network errors without exposing their message", async () => {
+			globalThis.fetch = vi
+				.fn()
+				.mockRejectedValue(new Error("Network error with test-token"));
 
 			const client = new DiscordWebhookClient("app-id", "token");
-			const result = await client.editOriginalMessage("content");
+			const error = await client
+				.editOriginalMessage("content")
+				.catch((caught) => caught);
 
-			expect(result).toBe(false);
+			expect(error).toMatchObject({
+				service: "discord",
+				status: undefined,
+				retryable: true,
+			});
+			expect(error.message).not.toContain("test-token");
 		});
 	});
 
 	describe("postMessage", () => {
 		it("sends POST to correct endpoint", async () => {
-			const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
 			globalThis.fetch = mockFetch;
 
 			const client = new DiscordWebhookClient("app-id", "test-token");
 			const result = await client.postMessage("hello world");
 
-			expect(result).toBe(true);
+			expect(result).toBeUndefined();
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://discord.com/api/v10/webhooks/app-id/test-token",
 				{
@@ -89,25 +110,47 @@ describe("DiscordWebhookClient", () => {
 			);
 		});
 
-		it("throws error on non-ok response", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue({
-				ok: false,
-				status: 500,
-			});
+		it.each([
+			[400, false],
+			[401, false],
+			[403, false],
+			[404, false],
+			[408, true],
+			[429, true],
+			[500, true],
+			[503, true],
+		])("classifies status %s with retryable=%s", async (status, retryable) => {
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValue(new Response(null, { status }));
 
 			const client = new DiscordWebhookClient("app-id", "token");
-			await expect(client.postMessage("content")).rejects.toThrow(
-				"Discord POST failed with status 500",
-			);
+			const error = await client
+				.postMessage("content")
+				.catch((caught) => caught);
+
+			expect(error).toMatchObject({
+				service: "discord",
+				operation: "post message",
+				status,
+				retryable,
+			});
 		});
 
-		it("throws error on fetch error", async () => {
+		it("normalizes a fetch error", async () => {
 			globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
 			const client = new DiscordWebhookClient("app-id", "token");
-			await expect(client.postMessage("content")).rejects.toThrow(
-				"Network error",
-			);
+			const error = await client
+				.postMessage("content")
+				.catch((caught) => caught);
+
+			expect(error).toBeInstanceOf(ExternalServiceError);
+			expect(error).toMatchObject({
+				service: "discord",
+				operation: "post message",
+				retryable: true,
+			});
 		});
 	});
 

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bindings, HistoryEntry } from "../contracts";
+import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
 
@@ -130,6 +131,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		mockDeduplicationStore.isMarked.mockResolvedValue(false);
 		// Reset fetch mock
 		globalThis.fetch = vi.fn();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	describe("getSheetDataStep", () => {
@@ -491,7 +496,17 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 			mockGeminiInstance.getHistory.mockReturnValue([]);
 			// Intermediate edits may fail, but final edit succeeds
-			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			mockDiscordInstance.editOriginalMessage
+				.mockRejectedValueOnce(
+					new ExternalServiceError({
+						service: "discord",
+						operation: "edit original message",
+						status: 400,
+						retryable: false,
+						userMessage: "Discordへの応答送信に失敗しました。",
+					}),
+				)
+				.mockResolvedValueOnce(undefined);
 
 			const result = await streamGeminiWithDiscordEditsStep(
 				mockEnv,
@@ -504,6 +519,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 
 			expect(result.response).toBe("response text");
+			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledTimes(2);
 		});
 
 		it("passes existing history to GeminiClient", async () => {
@@ -659,6 +675,19 @@ describe("AnswerQuestionWorkflow Steps", () => {
 	});
 
 	describe("sendDiscordResponseStep", () => {
+		const discordError = (
+			status: number,
+			options: { retryable: boolean; retryAfterMs?: number },
+		) =>
+			new ExternalServiceError({
+				service: "discord",
+				operation: "post message",
+				status,
+				retryable: options.retryable,
+				userMessage: "Discordへのメッセージ送信に失敗しました。",
+				retryAfterMs: options.retryAfterMs,
+			});
+
 		it("sends successful response to Discord webhook", async () => {
 			mockDiscordInstance.postMessage.mockResolvedValue(true);
 
@@ -695,34 +724,40 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("retries on failure", async () => {
+			vi.useFakeTimers();
 			mockDiscordInstance.postMessage
-				.mockRejectedValueOnce(new Error("Discord POST failed with status 500"))
-				.mockResolvedValueOnce(true);
+				.mockRejectedValueOnce(discordError(500, { retryable: true }))
+				.mockResolvedValueOnce(undefined);
 
-			const result = await sendDiscordResponseStep(
+			const promise = sendDiscordResponseStep(
 				mockEnv,
 				"token",
 				"question",
 				"answer",
 				mockLogger,
 			);
+			await vi.runAllTimersAsync();
+			const result = await promise;
 
 			expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(2);
 			expect(result).toEqual({ success: true, statusCode: 200, retryCount: 1 });
 		});
 
 		it("returns failure after all retries exhausted", async () => {
+			vi.useFakeTimers();
 			mockDiscordInstance.postMessage.mockRejectedValue(
-				new Error("Discord POST failed with status 500"),
+				discordError(500, { retryable: true }),
 			);
 
-			const result = await sendDiscordResponseStep(
+			const promise = sendDiscordResponseStep(
 				mockEnv,
 				"token",
 				"question",
 				"answer",
 				mockLogger,
 			);
+			await vi.runAllTimersAsync();
+			const result = await promise;
 
 			expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(3); // Initial + 2 retries
 			expect(result).toEqual({
@@ -730,6 +765,58 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				statusCode: 500,
 				retryCount: 2,
 			});
+		});
+
+		it.each([400, 401, 403, 404])(
+			"does not retry permanent status %s",
+			async (status) => {
+				mockDiscordInstance.postMessage.mockRejectedValue(
+					discordError(status, { retryable: false }),
+				);
+
+				const result = await sendDiscordResponseStep(
+					mockEnv,
+					"token",
+					"question",
+					"answer",
+					mockLogger,
+				);
+
+				expect(mockDiscordInstance.postMessage).toHaveBeenCalledTimes(1);
+				expect(result).toEqual({
+					success: false,
+					statusCode: status,
+					retryCount: 0,
+				});
+			},
+		);
+
+		it("uses Retry-After for status 429", async () => {
+			vi.useFakeTimers();
+			mockDiscordInstance.postMessage
+				.mockRejectedValueOnce(
+					discordError(429, { retryable: true, retryAfterMs: 2500 }),
+				)
+				.mockResolvedValueOnce(undefined);
+
+			const promise = sendDiscordResponseStep(
+				mockEnv,
+				"token",
+				"question",
+				"answer",
+				mockLogger,
+			);
+			await vi.runAllTimersAsync();
+
+			await expect(promise).resolves.toEqual({
+				success: true,
+				statusCode: 200,
+				retryCount: 1,
+			});
+			expect(mockLogger.warn).toHaveBeenCalledWith(
+				"Retrying external service request",
+				expect.objectContaining({ delayMs: 2500, status: 429 }),
+			);
 		});
 	});
 });

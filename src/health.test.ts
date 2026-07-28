@@ -73,6 +73,13 @@ describe("health check", () => {
 			expect(env.METRICS.writeDataPoint).toHaveBeenCalledTimes(3);
 			// No GitHub issue creation (fetch called only for Gemini models.list)
 			expect(mockFetch).toHaveBeenCalledTimes(1);
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://generativelanguage.googleapis.com/v1beta/models",
+				{ headers: { "x-goog-api-key": "test-gemini-key" } },
+			);
+			expect(JSON.stringify(mockFetch.mock.calls)).not.toContain(
+				"?key=test-gemini-key",
+			);
 		});
 	});
 
@@ -143,7 +150,10 @@ describe("health check", () => {
 				(c: CheckResult) => c.name === "gemini",
 			);
 			expect(geminiCheck?.ok).toBe(false);
-			expect(geminiCheck?.error).toBe("HTTP 500");
+			expect(geminiCheck?.error).toBe(
+				"gemini health check failed (status 500)",
+			);
+			expect(geminiCheck?.error).not.toContain("Internal Server Error");
 		});
 
 		it("reports failure on HTTP 401 (invalid key)", async () => {
@@ -166,14 +176,16 @@ describe("health check", () => {
 				(c: CheckResult) => c.name === "gemini",
 			);
 			expect(geminiCheck?.ok).toBe(false);
-			expect(geminiCheck?.error).toBe("HTTP 401");
+			expect(geminiCheck?.error).toBe(
+				"gemini health check failed (status 401)",
+			);
 		});
 	});
 
 	describe("Google SA failure", () => {
 		it("reports failure on invalid JSON", async () => {
 			const env = createMockEnv({
-				GOOGLE_SERVICE_ACCOUNT: "not-json",
+				GOOGLE_SERVICE_ACCOUNT: "not-json PRIVATE_KEY_SECRET",
 			});
 
 			mockFetch.mockResolvedValueOnce(
@@ -187,7 +199,8 @@ describe("health check", () => {
 				(c: CheckResult) => c.name === "google_sa",
 			);
 			expect(saCheck?.ok).toBe(false);
-			expect(saCheck?.error).toBeDefined();
+			expect(saCheck?.error).toBe("Invalid service account JSON format");
+			expect(saCheck?.error).not.toContain("PRIVATE_KEY_SECRET");
 		});
 
 		it("reports failure when required fields are missing", async () => {
@@ -283,8 +296,8 @@ describe("health check", () => {
 			mockFetch.mockResolvedValueOnce(
 				new Response(JSON.stringify({ models: [] }), { status: 200 }),
 			);
-			// GitHub isDuplicate - fails
-			mockFetch.mockRejectedValueOnce(new Error("Network error"));
+			// GitHub isDuplicate - permanent failure
+			mockFetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
 
 			const result = await runHealthCheck(env, log);
 

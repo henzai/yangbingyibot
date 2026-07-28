@@ -1,4 +1,7 @@
-import { getErrorMessage } from "../utils/errors";
+import {
+	externalServiceErrorFromResponse,
+	normalizeExternalServiceError,
+} from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
@@ -15,9 +18,8 @@ export class DiscordWebhookClient {
 	/**
 	 * Edit the original deferred response message (PATCH).
 	 * Used for streaming updates.
-	 * Non-fatal: logs warnings but does not throw on failure.
 	 */
-	async editOriginalMessage(content: string): Promise<boolean> {
+	async editOriginalMessage(content: string): Promise<void> {
 		try {
 			const res = await fetch(`${this.endpoint}/messages/@original`, {
 				method: "PATCH",
@@ -26,24 +28,21 @@ export class DiscordWebhookClient {
 			});
 
 			if (res.ok) {
-				return true;
+				return;
 			}
 
-			if (res.status === 429) {
-				const retryAfter = res.headers.get("Retry-After");
-				const waitMs = retryAfter ? Number.parseFloat(retryAfter) * 1000 : 2000;
-				this.log.warn("Discord rate limited, waiting", { waitMs });
-				await new Promise((resolve) => setTimeout(resolve, waitMs));
-			} else {
-				this.log.warn("Discord PATCH failed", { statusCode: res.status });
-			}
-
-			return false;
+			throw externalServiceErrorFromResponse(
+				"discord",
+				"edit original message",
+				res,
+				"Discordへの応答送信に失敗しました。",
+			);
 		} catch (error) {
-			this.log.warn("Discord PATCH error", {
-				error: getErrorMessage(error),
+			throw normalizeExternalServiceError(error, {
+				service: "discord",
+				operation: "edit original message",
+				userMessage: "Discordへの応答送信に失敗しました。",
 			});
-			return false;
 		}
 	}
 
@@ -52,19 +51,31 @@ export class DiscordWebhookClient {
 	 * Used for sending responses (e.g., error messages).
 	 * Throws on failure.
 	 */
-	async postMessage(content: string): Promise<boolean> {
-		const res = await fetch(this.endpoint, {
-			method: "POST",
-			body: JSON.stringify({ content }),
-			headers: { "Content-Type": "application/json" },
-		});
+	async postMessage(content: string): Promise<void> {
+		try {
+			const res = await fetch(this.endpoint, {
+				method: "POST",
+				body: JSON.stringify({ content }),
+				headers: { "Content-Type": "application/json" },
+			});
 
-		if (!res.ok) {
-			throw new Error(`Discord POST failed with status ${res.status}`);
+			if (!res.ok) {
+				throw externalServiceErrorFromResponse(
+					"discord",
+					"post message",
+					res,
+					"Discordへのメッセージ送信に失敗しました。",
+				);
+			}
+
+			this.log.info("Discord POST succeeded", { statusCode: res.status });
+		} catch (error) {
+			throw normalizeExternalServiceError(error, {
+				service: "discord",
+				operation: "post message",
+				userMessage: "Discordへのメッセージ送信に失敗しました。",
+			});
 		}
-
-		this.log.info("Discord POST succeeded", { statusCode: res.status });
-		return true;
 	}
 }
 

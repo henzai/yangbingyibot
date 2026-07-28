@@ -10,7 +10,12 @@ import {
 import { loadConfig } from "./config";
 import type { Bindings } from "./contracts";
 import { createDeduplicationStore } from "./repositories/deduplicationStore";
-import { getErrorMessage } from "./utils/errors";
+import {
+	externalServiceErrorFromResponse,
+	getErrorMessage,
+	getExternalErrorLogContext,
+	normalizeExternalServiceError,
+} from "./utils/errors";
 import type { Logger } from "./utils/logger";
 
 type CheckName = "kv" | "gemini" | "google_sa";
@@ -49,22 +54,29 @@ async function checkKV(kv: KVNamespace): Promise<CheckResult> {
 async function checkGemini(apiKey: string): Promise<CheckResult> {
 	const start = Date.now();
 	try {
-		const res = await fetch(`${GEMINI_MODELS_URL}?key=${apiKey}`);
-		if (res.ok) {
-			return { name: "gemini", ok: true, durationMs: Date.now() - start };
+		const res = await fetch(GEMINI_MODELS_URL, {
+			headers: { "x-goog-api-key": apiKey },
+		});
+		if (!res.ok) {
+			throw externalServiceErrorFromResponse(
+				"gemini",
+				"health check",
+				res,
+				"Gemini APIのヘルスチェックに失敗しました。",
+			);
 		}
-		return {
-			name: "gemini",
-			ok: false,
-			durationMs: Date.now() - start,
-			error: `HTTP ${res.status}`,
-		};
+		return { name: "gemini", ok: true, durationMs: Date.now() - start };
 	} catch (error) {
+		const normalized = normalizeExternalServiceError(error, {
+			service: "gemini",
+			operation: "health check",
+			userMessage: "Gemini APIのヘルスチェックに失敗しました。",
+		});
 		return {
 			name: "gemini",
 			ok: false,
 			durationMs: Date.now() - start,
-			error: getErrorMessage(error),
+			error: normalized.message,
 		};
 	}
 }
@@ -82,12 +94,12 @@ function checkGoogleSA(saJson: string): CheckResult {
 			};
 		}
 		return { name: "google_sa", ok: true, durationMs: Date.now() - start };
-	} catch (error) {
+	} catch {
 		return {
 			name: "google_sa",
 			ok: false,
 			durationMs: Date.now() - start,
-			error: getErrorMessage(error),
+			error: "Invalid service account JSON format",
 		};
 	}
 }
@@ -149,14 +161,12 @@ async function reportHealthCheckToGitHub(
 			timestamp: new Date().toISOString(),
 		};
 
-		const created = await github.createHealthCheckIssue(report, fingerprint);
-		if (created) {
-			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
-			log.info("Health check reported to GitHub Issues", { fingerprint });
-		}
+		await github.createHealthCheckIssue(report, fingerprint);
+		await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
+		log.info("Health check reported to GitHub Issues", { fingerprint });
 	} catch (error) {
 		log.warn("Failed to report health check to GitHub (non-fatal)", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(error),
 		});
 	}
 }

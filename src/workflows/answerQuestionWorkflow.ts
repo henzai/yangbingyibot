@@ -18,7 +18,13 @@ import type { Bindings, HistoryEntry } from "../contracts";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
-import { getErrorMessage } from "../utils/errors";
+import {
+	ExternalServiceError,
+	getErrorMessage,
+	getExternalErrorLogContext,
+	getUserMessage,
+	normalizeExternalServiceError,
+} from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 import type {
@@ -143,6 +149,12 @@ const THINKING_EDIT_INTERVAL_MS = 1000;
 const THINKING_MIN_CHUNK_SIZE = 200;
 
 const THINKING_FALLBACK = "考え中...";
+const DISCORD_RETRY_CONFIG = {
+	maxAttempts: 3,
+	initialDelayMs: 1000,
+	maxDelayMs: 10_000,
+	backoffMultiplier: 2,
+};
 
 export async function summarizeThinking(
 	client: GoogleGenAI,
@@ -168,8 +180,13 @@ export async function summarizeThinking(
 		log.warn("Empty summarization result, using fallback");
 		return THINKING_FALLBACK;
 	} catch (error) {
+		const normalized = normalizeExternalServiceError(error, {
+			service: "gemini",
+			operation: "summarize thinking",
+			userMessage: "思考要約の生成に失敗しました。",
+		});
 		log.warn("Thinking summarization failed (non-fatal)", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(normalized),
 		});
 		return THINKING_FALLBACK;
 	}
@@ -261,8 +278,13 @@ export async function streamGeminiWithDiscordEditsStep(
 						)
 					: formatContent(accumulatedText);
 
-			const success = await discord.editOriginalMessage(content);
-			if (success) {
+			try {
+				await withRetry(
+					async () => await discord.editOriginalMessage(content),
+					DISCORD_RETRY_CONFIG,
+					undefined,
+					log,
+				);
 				lastEditTime = now;
 				if (phase === "thinking") {
 					lastThinkingEditLength = accumulatedThinking.length;
@@ -274,6 +296,10 @@ export async function streamGeminiWithDiscordEditsStep(
 					editCount,
 					phase,
 					contentLength: textLength,
+				});
+			} catch (error) {
+				log.warn("Intermediate Discord edit failed (non-fatal)", {
+					...getExternalErrorLogContext(error),
 				});
 			}
 		}
@@ -288,7 +314,12 @@ export async function streamGeminiWithDiscordEditsStep(
 	);
 
 	// Final edit to ensure complete response is shown (response only, no thinking)
-	await discord.editOriginalMessage(formatContent(response));
+	await withRetry(
+		async () => await discord.editOriginalMessage(formatContent(response)),
+		DISCORD_RETRY_CONFIG,
+		undefined,
+		log,
+	);
 	editCount++;
 	log.info("Final Discord edit sent", {
 		editCount,
@@ -337,7 +368,7 @@ export async function sendDiscordResponseStep(
 				initialDelayMs: 1000,
 				backoffMultiplier: 2,
 			},
-			() => true, // Retry all errors
+			undefined,
 			log,
 		);
 
@@ -347,11 +378,8 @@ export async function sendDiscordResponseStep(
 			retryCount: attemptCount - 1, // retryCount = attempts - 1
 		};
 	} catch (error) {
-		// Extract status code from error message if available
-		const errorMsg = getErrorMessage(error);
-		const match = errorMsg.match(/status (\d+)/);
-		if (match) {
-			statusCode = Number.parseInt(match[1], 10);
+		if (error instanceof ExternalServiceError) {
+			statusCode = error.status;
 		}
 
 		return {
@@ -408,14 +436,12 @@ export async function reportErrorToGitHub(
 		}
 
 		// Create the issue
-		const created = await github.createIssue(report, fingerprint);
-		if (created) {
-			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
-			log.info("Error reported to GitHub Issues", { fingerprint });
-		}
+		await github.createIssue(report, fingerprint);
+		await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
+		log.info("Error reported to GitHub Issues", { fingerprint });
 	} catch (error) {
 		log.warn("Failed to report error to GitHub (non-fatal)", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(error),
 		});
 	}
 }
@@ -486,7 +512,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 					"streamGeminiAndEditDiscord",
 					{
 						retries: {
-							limit: 2,
+							limit: 0,
 							delay: "1 second",
 							backoff: "exponential",
 						},
@@ -541,9 +567,10 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 		} catch (error) {
 			// Send error response to Discord
 			const errorMessage = getErrorMessage(error);
+			const userMessage = getUserMessage(error);
 			const failureDurationMs = Date.now() - workflowStartTime;
 			log.error("Workflow error", {
-				error: errorMessage,
+				...getExternalErrorLogContext(error),
 				durationMs: failureDurationMs,
 			});
 
@@ -581,7 +608,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 						message,
 						null,
 						log.withContext({ step: "sendErrorResponse" }),
-						errorMessage,
+						userMessage,
 					);
 				},
 			);

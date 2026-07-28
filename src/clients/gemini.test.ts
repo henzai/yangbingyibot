@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryEntry } from "../contracts";
+import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 
 const mockGenerateContent = vi.fn();
@@ -23,6 +24,10 @@ import { createGeminiClient, GeminiClient } from "./gemini";
 describe("GeminiClient", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	describe("constructor", () => {
@@ -105,9 +110,10 @@ describe("GeminiClient", () => {
 
 			const client = new GeminiClient("test-api-key");
 
-			await expect(client.ask("q", "s", "d")).rejects.toThrow(
-				"AIからの応答形式が不正です。",
-			);
+			await expect(client.ask("q", "s", "d")).rejects.toMatchObject({
+				userMessage: "AIからの応答形式が不正です。",
+				retryable: false,
+			});
 		});
 
 		it("throws error when response has empty candidates array", async () => {
@@ -117,9 +123,10 @@ describe("GeminiClient", () => {
 
 			const client = new GeminiClient("test-api-key");
 
-			await expect(client.ask("q", "s", "d")).rejects.toThrow(
-				"AIからの応答形式が不正です。",
-			);
+			await expect(client.ask("q", "s", "d")).rejects.toMatchObject({
+				userMessage: "AIからの応答形式が不正です。",
+				retryable: false,
+			});
 		});
 
 		it("throws error when response has no text", async () => {
@@ -135,9 +142,10 @@ describe("GeminiClient", () => {
 
 			const client = new GeminiClient("test-api-key");
 
-			await expect(client.ask("q", "s", "d")).rejects.toThrow(
-				"AIから有効な応答が得られませんでした。",
-			);
+			await expect(client.ask("q", "s", "d")).rejects.toMatchObject({
+				userMessage: "AIから有効な応答が得られませんでした。",
+				retryable: false,
+			});
 		});
 
 		it("includes conversation history in subsequent calls", async () => {
@@ -267,7 +275,10 @@ describe("GeminiClient", () => {
 			const client = new GeminiClient("test-api-key");
 			await expect(
 				client.askStream("q", "s", "d", async () => {}),
-			).rejects.toThrow("AIから有効な応答が得られませんでした。");
+			).rejects.toMatchObject({
+				userMessage: "AIから有効な応答が得られませんでした。",
+				retryable: false,
+			});
 		});
 
 		it("throws on thinking-only response with no response text", async () => {
@@ -279,7 +290,10 @@ describe("GeminiClient", () => {
 			const client = new GeminiClient("test-api-key");
 			await expect(
 				client.askStream("q", "s", "d", async () => {}),
-			).rejects.toThrow("AIから有効な応答が得られませんでした。");
+			).rejects.toMatchObject({
+				userMessage: "AIから有効な応答が得られませんでした。",
+				retryable: false,
+			});
 		});
 
 		it("does not update history if stream fails mid-way", async () => {
@@ -292,7 +306,10 @@ describe("GeminiClient", () => {
 			const client = new GeminiClient("test-api-key");
 			await expect(
 				client.askStream("q", "s", "d", async () => {}),
-			).rejects.toThrow("AI APIへのリクエストに失敗しました。");
+			).rejects.toMatchObject({
+				userMessage: "AI APIへのリクエストに失敗しました。",
+				retryable: true,
+			});
 			expect(client.getHistory()).toEqual([]);
 		});
 
@@ -355,37 +372,38 @@ describe("GeminiClient", () => {
 		});
 	});
 
-	describe("handleUnexpectedError (outer catch)", () => {
+	describe("typed error boundary", () => {
 		describe("ask", () => {
-			it("re-throws errors containing 'API' in message", async () => {
+			it("preserves typed validation errors", async () => {
 				mockGenerateContent.mockResolvedValue({
 					candidates: null,
 				});
 
 				const client = new GeminiClient("test-api-key");
 
-				// "AIからの応答形式が不正です。" thrown in validation, re-thrown by handleUnexpectedError
-				// because it contains "AI"
-				await expect(client.ask("q", "s", "d")).rejects.toThrow(
-					"AIからの応答形式が不正です。",
-				);
+				await expect(client.ask("q", "s", "d")).rejects.toMatchObject({
+					service: "gemini",
+					operation: "validate response",
+					userMessage: "AIからの応答形式が不正です。",
+				});
 			});
 
-			it("converts non-API/AI errors to generic message", async () => {
+			it("converts local errors without message matching", async () => {
 				// Pass null in history to cause a TypeError in buildPrompt's map()
-				// TypeError message doesn't contain "API" or "AI"
 				const client = new GeminiClient("test-api-key", [
 					null as unknown as HistoryEntry,
 				]);
 
-				await expect(client.ask("q", "s", "d")).rejects.toThrow(
-					"AI処理中に予期しないエラーが発生しました。",
-				);
+				await expect(client.ask("q", "s", "d")).rejects.toMatchObject({
+					service: "gemini",
+					retryable: false,
+					userMessage: "AI処理中に予期しないエラーが発生しました。",
+				});
 			});
 		});
 
 		describe("askStream", () => {
-			it("re-throws errors containing 'AI' in message", async () => {
+			it("preserves typed validation errors", async () => {
 				const mockStream = (async function* () {
 					// yields nothing
 				})();
@@ -393,23 +411,89 @@ describe("GeminiClient", () => {
 
 				const client = new GeminiClient("test-api-key");
 
-				// Empty stream triggers "AIから有効な応答が得られませんでした。" which contains "AI"
 				await expect(
 					client.askStream("q", "s", "d", async () => {}),
-				).rejects.toThrow("AIから有効な応答が得られませんでした。");
+				).rejects.toMatchObject({
+					service: "gemini",
+					operation: "validate streamed response",
+					userMessage: "AIから有効な応答が得られませんでした。",
+				});
 			});
 
-			it("converts non-API/AI errors to generic message", async () => {
+			it("converts local errors without message matching", async () => {
 				// Pass null in history to cause a TypeError in buildPrompt's map()
-				// TypeError message doesn't contain "API" or "AI"
 				const client = new GeminiClient("test-api-key", [
 					null as unknown as HistoryEntry,
 				]);
 
 				await expect(
 					client.askStream("q", "s", "d", async () => {}),
-				).rejects.toThrow("AI処理中に予期しないエラーが発生しました。");
+				).rejects.toMatchObject({
+					service: "gemini",
+					retryable: false,
+					userMessage: "AI処理中に予期しないエラーが発生しました。",
+				});
 			});
+		});
+	});
+
+	describe("retry policy", () => {
+		const apiError = (status: number, message: string) =>
+			Object.assign(new Error(message), { name: "ApiError", status });
+
+		it("retries a structured 503 without inspecting its message", async () => {
+			vi.useFakeTimers();
+			mockGenerateContent
+				.mockRejectedValueOnce(
+					apiError(503, "response body without retry keywords"),
+				)
+				.mockResolvedValueOnce({
+					candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+				});
+
+			const promise = new GeminiClient("test-api-key").ask("q", "s", "d");
+			await vi.runAllTimersAsync();
+
+			await expect(promise).resolves.toBe("AI response");
+			expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+		});
+
+		it.each([400, 401, 403, 404])(
+			"does not retry a structured permanent status %s",
+			async (status) => {
+				mockGenerateContent.mockRejectedValue(
+					apiError(status, "rate limit words do not control policy"),
+				);
+
+				const error = await new GeminiClient("test-api-key")
+					.ask("q", "s", "d")
+					.catch((caught) => caught);
+
+				expect(error).toBeInstanceOf(ExternalServiceError);
+				expect(error).toMatchObject({
+					status,
+					retryable: false,
+				});
+				expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+			},
+		);
+
+		it("maps status 429 to a stable user message without exposing the SDK body", async () => {
+			mockGenerateContent.mockRejectedValue(
+				apiError(429, "secret response body"),
+			);
+
+			const error = await new GeminiClient("test-api-key")
+				.ask("q", "s", "d")
+				.catch((caught) => caught);
+
+			expect(error).toMatchObject({
+				status: 429,
+				retryable: true,
+				userMessage:
+					"API使用制限に達しました。しばらく待ってから再度お試しください。",
+			});
+			expect(error.message).not.toContain("secret response body");
 		});
 	});
 
