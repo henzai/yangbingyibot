@@ -17,12 +17,18 @@ vi.mock("./utils/requestId", () => ({
 }));
 
 vi.mock("discord-api-types/v10", () => ({
+	ApplicationCommandOptionType: {
+		String: 3,
+	},
+	InteractionType: {
+		ApplicationCommand: 2,
+	},
 	InteractionResponseType: {
 		ChannelMessageWithSource: 4,
 	},
 }));
 
-import type { Bindings } from "./contracts";
+import type { Bindings, WorkflowParams } from "./contracts";
 import { app } from "./index";
 
 const mockWorkflowCreate = vi.fn();
@@ -34,8 +40,9 @@ const mockEnv: Bindings = {
 	GEMINI_API_KEY: "test-gemini-key",
 	GOOGLE_SERVICE_ACCOUNT: '{"type":"service_account"}',
 	sushanshan_bot: {} as KVNamespace,
-	// biome-ignore lint/suspicious/noExplicitAny: mock binding for test
-	ANSWER_QUESTION_WORKFLOW: { create: mockWorkflowCreate } as any,
+	ANSWER_QUESTION_WORKFLOW: {
+		create: mockWorkflowCreate,
+	} as unknown as Workflow<WorkflowParams>,
 };
 
 const mockExecutionCtx = {
@@ -61,6 +68,27 @@ function postRequest(body: unknown) {
 		},
 		body: JSON.stringify(body),
 	});
+}
+
+function guildAskInteraction(question = "What is this?") {
+	return {
+		type: 2,
+		token: "interaction-token",
+		guild_id: "guild-123",
+		channel_id: "channel-123",
+		member: {
+			user: {
+				id: "user-123",
+			},
+		},
+		data: {
+			name: "ask",
+			options: [
+				{ name: "ignored", type: 3, value: "not the question" },
+				{ name: "question", type: 3, value: question },
+			],
+		},
+	};
 }
 
 describe("index", () => {
@@ -96,13 +124,7 @@ describe("index", () => {
 			mockWorkflowCreate.mockResolvedValue(undefined);
 
 			const res = await app.fetch(
-				postRequest({
-					type: 2,
-					token: "interaction-token",
-					data: {
-						options: [{ value: "What is this?" }],
-					},
-				}),
+				postRequest(guildAskInteraction()),
 				mockEnv,
 				mockExecutionCtx,
 			);
@@ -114,44 +136,19 @@ describe("index", () => {
 					token: "interaction-token",
 					message: "What is this?",
 					requestId: "req_test_123",
+					conversationKey: expect.stringMatching(/^[0-9a-f]{64}$/),
 				},
 			});
+			expect(
+				JSON.stringify(mockWorkflowCreate.mock.calls[0]?.[0]?.params),
+			).not.toContain("user-123");
 		});
 
-		it("returns error response when body.data is missing", async () => {
-			const res = await app.fetch(
-				postRequest({ type: 2, token: "t" }),
-				mockEnv,
-				mockExecutionCtx,
-			);
-
-			expect(res.status).toBe(200);
-			const json = (await res.json()) as ErrorResponseBody;
-			expect(json.data.embeds[0].description).toBe(
-				"Invalid Discord interaction: missing data",
-			);
-		});
-
-		it("returns error response when options are missing", async () => {
-			const res = await app.fetch(
-				postRequest({ type: 2, token: "t", data: {} }),
-				mockEnv,
-				mockExecutionCtx,
-			);
-
-			expect(res.status).toBe(200);
-			const json = (await res.json()) as ErrorResponseBody;
-			expect(json.data.embeds[0].description).toBe(
-				"Invalid Discord interaction: missing options",
-			);
-		});
-
-		it("returns error response when question is empty", async () => {
+		it("returns error response for an invalid command payload", async () => {
 			const res = await app.fetch(
 				postRequest({
-					type: 2,
-					token: "t",
-					data: { options: [{ value: "   " }] },
+					...guildAskInteraction(),
+					data: { name: "other", options: [] },
 				}),
 				mockEnv,
 				mockExecutionCtx,
@@ -160,7 +157,7 @@ describe("index", () => {
 			expect(res.status).toBe(200);
 			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe(
-				"Invalid Discord interaction: question must be a non-empty string",
+				"Invalid Discord interaction: invalid command",
 			);
 		});
 
@@ -168,11 +165,7 @@ describe("index", () => {
 			mockWorkflowCreate.mockRejectedValue(new Error("workflow error"));
 
 			const res = await app.fetch(
-				postRequest({
-					type: 2,
-					token: "t",
-					data: { options: [{ value: "question" }] },
-				}),
+				postRequest(guildAskInteraction("question")),
 				mockEnv,
 				mockExecutionCtx,
 			);

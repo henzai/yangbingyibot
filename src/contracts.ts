@@ -3,24 +3,10 @@ export type HistoryEntry = {
 	text: string;
 };
 
-export type DiscordCommandOption = {
-	name?: string;
-	value?: unknown;
-};
-
-/**
- * Discord's untrusted request payload at the HTTP boundary.
- * Refactor 03 will validate and narrow every field before use.
- */
-export type DiscordInteractionPayload = {
-	type: number;
+export type ParsedDiscordAskCommand = {
 	token: string;
-	guild_id?: string;
-	channel_id?: string;
-	data?: {
-		name?: string;
-		options?: DiscordCommandOption[];
-	};
+	question: string;
+	conversationKey: string;
 };
 
 // Workflow event payload shared by the Worker boundary and Workflow entrypoint.
@@ -28,6 +14,7 @@ export interface WorkflowParams {
 	token: string;
 	message: string;
 	requestId: string;
+	conversationKey: string;
 }
 
 /**

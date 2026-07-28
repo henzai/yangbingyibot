@@ -12,6 +12,7 @@ const WEN_COMMAND = {
 			name: "question",
 			description: "The question you want to ask",
 			required: true,
+			max_length: 6000,
 		},
 	],
 };

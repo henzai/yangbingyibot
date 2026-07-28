@@ -1,7 +1,11 @@
 import { InteractionResponseType, InteractionType } from "discord-interactions";
 import { Hono } from "hono";
 import { loadConfig } from "./config";
-import type { Bindings, DiscordInteractionPayload } from "./contracts";
+import type { Bindings } from "./contracts";
+import {
+	getInteractionType,
+	parseDiscordAskCommand,
+} from "./discord/interaction";
 import { runHealthCheck } from "./health";
 import { verifyDiscordInteraction } from "./middleware/verifyDiscordInteraction";
 import { errorResponse } from "./responses/errorResponse";
@@ -13,37 +17,15 @@ export { AnswerQuestionWorkflow } from "./workflows/answerQuestionWorkflow";
 
 const app = new Hono<{ Bindings: Bindings }>();
 
-// Validate Discord command payload structure
-function validateDiscordCommand(body: DiscordInteractionPayload): {
-	question: string;
-} {
-	if (!body?.data) {
-		throw new Error("Invalid Discord interaction: missing data");
-	}
-
-	if (!Array.isArray(body.data.options) || body.data.options.length === 0) {
-		throw new Error("Invalid Discord interaction: missing options");
-	}
-
-	const question = body.data.options[0]?.value;
-	if (typeof question !== "string" || !question.trim()) {
-		throw new Error(
-			"Invalid Discord interaction: question must be a non-empty string",
-		);
-	}
-
-	return { question: question.trim() };
-}
-
 app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 
 app.post("/", verifyDiscordInteraction, async (c) => {
-	const body = (await c.req.json()) as DiscordInteractionPayload;
 	const requestId = generateRequestId();
 	const log = logger.withContext({ requestId });
 
 	try {
-		switch (body.type) {
+		const body: unknown = await c.req.json();
+		switch (getInteractionType(body)) {
 			// CRITICAL: Discord Interactions Endpoint Requirement
 			// DO NOT REMOVE: Discord sends PING (type=1) requests to verify endpoint availability
 			// and requires PONG (type=1) response for successful verification.
@@ -54,8 +36,8 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 			case InteractionType.APPLICATION_COMMAND: {
 				// Fail fast at the request boundary before creating a Workflow.
 				loadConfig(c.env);
-				// Validate payload structure
-				const { question } = validateDiscordCommand(body);
+				const { token, question, conversationKey } =
+					await parseDiscordAskCommand(body);
 
 				// Start the workflow
 				log.info("Starting AnswerQuestionWorkflow", {
@@ -65,9 +47,10 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 				try {
 					await c.env.ANSWER_QUESTION_WORKFLOW.create({
 						params: {
-							token: body.token,
+							token,
 							message: question,
 							requestId,
+							conversationKey,
 						},
 					});
 				} catch (workflowError) {
