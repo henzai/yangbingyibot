@@ -8,7 +8,7 @@ Google SheetsのナレッジベースとGoogle Gemini AIを使用してDiscord�
 - Google Sheetsからナレッジベースを取得
 - Google Gemini AIでストリーミング回答（リアルタイムでDiscordメッセージを段階的更新）
 - Gemini思考過程の表示（💭 AI要約で表示）
-- 会話履歴とシートデータをKVに5分間保持
+- 利用者＋チャンネル単位の会話履歴と、接続先別のシートデータをKVに保持
 - Analytics Engineでメトリクス収集
 - Cronヘルスチェック（5分間隔でKV・Gemini API・サービスアカウントを監視）
 - エラー・障害の自動GitHub Issues報告（重複排除付き）
@@ -98,6 +98,7 @@ npm run deploy
 
 - `src/index.ts` — Honoアプリのエントリーポイント。Cloudflareに Workflow クラスを発見させるため、`AnswerQuestionWorkflow` をここから再エクスポートしている
 - `src/workflows/answerQuestionWorkflow.ts` — 回答生成の本体（上記リクエストフローの Step 1〜4）
+- `src/repositories/` — 会話履歴、シートキャッシュ、Issue重複排除の用途別KVアクセス
 - `src/health.ts` — Cronトリガーから呼ばれるヘルスチェック
 
 ## ライセンス

@@ -7,7 +7,6 @@ import { GoogleGenAI } from "@google/genai";
 import { createDiscordWebhookClient } from "../clients/discord";
 import { createGeminiClient } from "../clients/gemini";
 import { createGitHubIssueClient, type ErrorReport } from "../clients/github";
-import { createKV } from "../clients/kv";
 import {
 	createMetricsClient,
 	type IMetricsClient,
@@ -16,6 +15,9 @@ import {
 import { getSheetData } from "../clients/spreadSheet";
 import { DEFAULT_RUNTIME_CONFIG, loadConfig } from "../config";
 import type { Bindings, HistoryEntry } from "../contracts";
+import { createConversationHistoryRepository } from "../repositories/conversationHistory";
+import { createDeduplicationStore } from "../repositories/deduplicationStore";
+import { createSheetCacheRepository } from "../repositories/sheetCache";
 import { getErrorMessage } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
@@ -44,14 +46,14 @@ export async function getSheetDataStep(
 	log: Logger,
 ): Promise<SheetDataOutput> {
 	const config = loadConfig(env);
-	const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
+	const cache = createSheetCacheRepository(env.sushanshan_bot, log);
 
-	const cache = await kv.getCache();
-	if (cache) {
+	const cachedData = await cache.get(config.spreadsheet);
+	if (cachedData) {
 		log.info("Sheet data loaded from cache");
 		return {
-			sheetInfo: cache.sheetInfo,
-			description: cache.description,
+			sheetInfo: cachedData.sheetInfo,
+			description: cachedData.description,
 			fromCache: true,
 		};
 	}
@@ -65,7 +67,7 @@ export async function getSheetDataStep(
 
 	// Save to cache (best effort)
 	try {
-		await kv.saveCache(data.sheetInfo, data.description);
+		await cache.save(config.spreadsheet, data.sheetInfo, data.description);
 		log.info("Sheet data cached");
 	} catch (error) {
 		log.warn("Failed to save cache (non-fatal)", {
@@ -83,11 +85,21 @@ export async function getSheetDataStep(
 // Step 2: Get conversation history from KV
 export async function getHistoryStep(
 	env: Bindings,
+	conversationKey: string | undefined,
 	log: Logger,
 ): Promise<HistoryOutput> {
+	if (!conversationKey) {
+		log.warn("Conversation key missing, skipping history read");
+		return { history: [] };
+	}
+
 	const config = loadConfig(env);
-	const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
-	const history = await kv.getHistory();
+	const historyRepository = createConversationHistoryRepository(
+		env.sushanshan_bot,
+		config.historyTtlSeconds,
+		log,
+	);
+	const history = await historyRepository.get(conversationKey);
 	log.info("History loaded", { historyLength: history.length });
 	return { history };
 }
@@ -95,13 +107,23 @@ export async function getHistoryStep(
 // Step 4: Save conversation history to KV
 export async function saveHistoryStep(
 	env: Bindings,
+	conversationKey: string | undefined,
 	history: HistoryEntry[],
 	log: Logger,
 ): Promise<SaveHistoryOutput> {
+	if (!conversationKey) {
+		log.warn("Conversation key missing, skipping history save");
+		return { success: false };
+	}
+
 	try {
 		const config = loadConfig(env);
-		const kv = createKV(env.sushanshan_bot, log, config.historyTtlSeconds);
-		await kv.saveHistory(history);
+		const historyRepository = createConversationHistoryRepository(
+			env.sushanshan_bot,
+			config.historyTtlSeconds,
+			log,
+		);
+		await historyRepository.save(conversationKey, history);
 		log.info("History saved", { historyLength: history.length });
 		return { success: true };
 	} catch (error) {
@@ -366,11 +388,10 @@ export async function reportErrorToGitHub(
 		);
 		const fingerprint = github.generateFingerprint(report.errorMessage);
 		const kvKey = `error_reported:${fingerprint}`;
+		const deduplicationStore = createDeduplicationStore(env.sushanshan_bot);
 
 		// Layer 1: KV deduplication
-		const kv = env.sushanshan_bot;
-		const existing = await kv.get(kvKey);
-		if (existing) {
+		if (await deduplicationStore.isMarked(kvKey)) {
 			log.debug("Error already reported (KV cache hit)", { fingerprint });
 			return;
 		}
@@ -382,14 +403,14 @@ export async function reportErrorToGitHub(
 				fingerprint,
 			});
 			// Cache in KV to avoid repeated searches
-			await kv.put(kvKey, "1", { expirationTtl: ERROR_REPORTED_TTL_SECONDS });
+			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
 			return;
 		}
 
 		// Create the issue
 		const created = await github.createIssue(report, fingerprint);
 		if (created) {
-			await kv.put(kvKey, "1", { expirationTtl: ERROR_REPORTED_TTL_SECONDS });
+			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
 			log.info("Error reported to GitHub Issues", { fingerprint });
 		}
 	} catch (error) {
@@ -405,7 +426,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 	WorkflowParams
 > {
 	async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep) {
-		const { token, message, requestId } = event.payload;
+		const { token, message, requestId, conversationKey } = event.payload;
 		const log = logger.withContext({ requestId, workflowId: event.instanceId });
 		const metrics = getMetricsClient(this.env, log);
 
@@ -450,6 +471,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			const historyOutput = await step.do("getHistory", async () => {
 				return getHistoryStep(
 					this.env,
+					conversationKey,
 					log.withContext({ step: "getHistory" }),
 				);
 			});
@@ -496,6 +518,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			await step.do("saveHistory", async () => {
 				return saveHistoryStep(
 					this.env,
+					conversationKey,
 					streamResult.updatedHistory,
 					log.withContext({ step: "saveHistory" }),
 				);

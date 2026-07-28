@@ -13,12 +13,20 @@ const mockLogger: Logger = {
 	withContext: vi.fn(() => mockLogger),
 } as unknown as Logger;
 
-// Mock the clients
-const mockKVInstance = {
-	getCache: vi.fn(),
-	getHistory: vi.fn(),
-	saveCache: vi.fn(),
-	saveHistory: vi.fn(),
+// Mock the repositories and clients
+const mockSheetCacheRepository = {
+	get: vi.fn(),
+	save: vi.fn(),
+};
+
+const mockHistoryRepository = {
+	get: vi.fn(),
+	save: vi.fn(),
+};
+
+const mockDeduplicationStore = {
+	isMarked: vi.fn(),
+	mark: vi.fn(),
 };
 
 const mockGeminiInstance = {
@@ -27,8 +35,16 @@ const mockGeminiInstance = {
 	getHistory: vi.fn(),
 };
 
-vi.mock("../clients/kv", () => ({
-	createKV: vi.fn(() => mockKVInstance),
+vi.mock("../repositories/sheetCache", () => ({
+	createSheetCacheRepository: vi.fn(() => mockSheetCacheRepository),
+}));
+
+vi.mock("../repositories/conversationHistory", () => ({
+	createConversationHistoryRepository: vi.fn(() => mockHistoryRepository),
+}));
+
+vi.mock("../repositories/deduplicationStore", () => ({
+	createDeduplicationStore: vi.fn(() => mockDeduplicationStore),
 }));
 
 vi.mock("../clients/gemini", () => ({
@@ -74,6 +90,7 @@ vi.mock("@google/genai", () => ({
 
 import { createGeminiClient } from "../clients/gemini";
 import { getSheetData } from "../clients/spreadSheet";
+import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import {
 	getHistoryStep,
 	getSheetDataStep,
@@ -89,11 +106,9 @@ const mockAnalyticsDataset = {
 	writeDataPoint: vi.fn(),
 };
 
-const mockKVGet = vi.fn<() => Promise<string | null>>();
-const mockKVPut = vi.fn();
 const mockKVNamespace = {
-	get: mockKVGet,
-	put: mockKVPut,
+	get: vi.fn(),
+	put: vi.fn(),
 } as unknown as KVNamespace;
 
 const mockEnv: Bindings = {
@@ -112,13 +127,14 @@ const mockEnv: Bindings = {
 describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockDeduplicationStore.isMarked.mockResolvedValue(false);
 		// Reset fetch mock
 		globalThis.fetch = vi.fn();
 	});
 
 	describe("getSheetDataStep", () => {
 		it("returns cached data when cache is available", async () => {
-			mockKVInstance.getCache.mockResolvedValue({
+			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
 			});
@@ -131,10 +147,15 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				fromCache: true,
 			});
 			expect(getSheetData).not.toHaveBeenCalled();
+			expect(mockSheetCacheRepository.get).toHaveBeenCalledWith({
+				id: "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg",
+				dataSheetName: "test",
+				descriptionSheetName: "description",
+			});
 		});
 
 		it("fetches from Google Sheets when cache is empty", async () => {
-			mockKVInstance.getCache.mockResolvedValue(null);
+			mockSheetCacheRepository.get.mockResolvedValue(null);
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
@@ -159,7 +180,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("saves cache after fetching fresh data", async () => {
-			mockKVInstance.getCache.mockResolvedValue(null);
+			mockSheetCacheRepository.get.mockResolvedValue(null);
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
@@ -167,21 +188,26 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			await getSheetDataStep(mockEnv, mockLogger);
 
-			expect(mockKVInstance.saveCache).toHaveBeenCalledWith(
+			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
+				{
+					id: "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg",
+					dataSheetName: "test",
+					descriptionSheetName: "description",
+				},
 				"fresh sheet",
 				"fresh desc",
 			);
 		});
 
 		it("does not save cache when using cached data", async () => {
-			mockKVInstance.getCache.mockResolvedValue({
+			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
 
-			expect(mockKVInstance.saveCache).not.toHaveBeenCalled();
+			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
 		});
 	});
 
@@ -191,19 +217,53 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				{ role: "user", text: "old question" },
 				{ role: "model", text: "old answer" },
 			];
-			mockKVInstance.getHistory.mockResolvedValue(existingHistory);
+			mockHistoryRepository.get.mockResolvedValue(existingHistory);
 
-			const result = await getHistoryStep(mockEnv, mockLogger);
+			const result = await getHistoryStep(
+				mockEnv,
+				"conversation-key",
+				mockLogger,
+			);
 
 			expect(result).toEqual({ history: existingHistory });
+			expect(mockHistoryRepository.get).toHaveBeenCalledWith(
+				"conversation-key",
+			);
 		});
 
 		it("returns empty array when no history exists", async () => {
-			mockKVInstance.getHistory.mockResolvedValue([]);
+			mockHistoryRepository.get.mockResolvedValue([]);
 
-			const result = await getHistoryStep(mockEnv, mockLogger);
+			const result = await getHistoryStep(
+				mockEnv,
+				"conversation-key",
+				mockLogger,
+			);
 
 			expect(result).toEqual({ history: [] });
+		});
+
+		it("uses the configured history TTL", async () => {
+			mockHistoryRepository.get.mockResolvedValue([]);
+
+			await getHistoryStep(
+				{ ...mockEnv, HISTORY_TTL_SECONDS: "900" },
+				"conversation-key",
+				mockLogger,
+			);
+
+			expect(createConversationHistoryRepository).toHaveBeenCalledWith(
+				mockEnv.sushanshan_bot,
+				900,
+				mockLogger,
+			);
+		});
+
+		it("skips history for an in-flight workflow without a conversation key", async () => {
+			const result = await getHistoryStep(mockEnv, undefined, mockLogger);
+
+			expect(result).toEqual({ history: [] });
+			expect(mockHistoryRepository.get).not.toHaveBeenCalled();
 		});
 	});
 
@@ -214,18 +274,38 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				{ role: "model", text: "answer" },
 			];
 
-			const result = await saveHistoryStep(mockEnv, updatedHistory, mockLogger);
+			const result = await saveHistoryStep(
+				mockEnv,
+				"conversation-key",
+				updatedHistory,
+				mockLogger,
+			);
 
-			expect(mockKVInstance.saveHistory).toHaveBeenCalledWith(updatedHistory);
+			expect(mockHistoryRepository.save).toHaveBeenCalledWith(
+				"conversation-key",
+				updatedHistory,
+			);
 			expect(result).toEqual({ success: true });
 		});
 
 		it("returns success false on error", async () => {
-			mockKVInstance.saveHistory.mockRejectedValue(new Error("KV error"));
+			mockHistoryRepository.save.mockRejectedValue(new Error("KV error"));
 
-			const result = await saveHistoryStep(mockEnv, [], mockLogger);
+			const result = await saveHistoryStep(
+				mockEnv,
+				"conversation-key",
+				[],
+				mockLogger,
+			);
 
 			expect(result).toEqual({ success: false });
+		});
+
+		it("skips save for an in-flight workflow without a conversation key", async () => {
+			const result = await saveHistoryStep(mockEnv, undefined, [], mockLogger);
+
+			expect(result).toEqual({ success: false });
+			expect(mockHistoryRepository.save).not.toHaveBeenCalled();
 		});
 	});
 
@@ -528,7 +608,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("skips when KV cache indicates already reported", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-1");
-			mockKVGet.mockResolvedValue("1");
+			mockDeduplicationStore.isMarked.mockResolvedValue(true);
 
 			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
 
@@ -538,23 +618,20 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("skips when GitHub search finds duplicate", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-2");
-			mockKVGet.mockResolvedValue(null);
 			mockGitHubInstance.isDuplicate.mockResolvedValue(true);
 
 			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
 
 			expect(mockGitHubInstance.createIssue).not.toHaveBeenCalled();
 			// Should cache in KV to avoid future searches
-			expect(mockKVNamespace.put).toHaveBeenCalledWith(
+			expect(mockDeduplicationStore.mark).toHaveBeenCalledWith(
 				"error_reported:fingerprint-2",
-				"1",
-				{ expirationTtl: 3600 },
+				3600,
 			);
 		});
 
 		it("creates issue and caches in KV on new error", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-3");
-			mockKVGet.mockResolvedValue(null);
 			mockGitHubInstance.isDuplicate.mockResolvedValue(false);
 			mockGitHubInstance.createIssue.mockResolvedValue(true);
 
@@ -564,10 +641,9 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sampleReport,
 				"fingerprint-3",
 			);
-			expect(mockKVNamespace.put).toHaveBeenCalledWith(
+			expect(mockDeduplicationStore.mark).toHaveBeenCalledWith(
 				"error_reported:fingerprint-3",
-				"1",
-				{ expirationTtl: 3600 },
+				3600,
 			);
 		});
 
