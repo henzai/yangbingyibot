@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry } from "../contracts";
 import { createKV, KV } from "./kv";
 
 const createMockKVNamespace = () =>
@@ -43,6 +43,18 @@ describe("KV class", () => {
 			const savedData = JSON.parse((mockKV.put as Mock).mock.calls[0][1]);
 			expect(savedData[0]).toEqual({ role: "user", text: "hello" });
 			expect(savedData[0]).not.toHaveProperty("extra");
+		});
+
+		it("uses the configured history TTL", async () => {
+			const configuredKV = new KV(mockKV, undefined, 600);
+
+			await configuredKV.saveHistory([{ role: "user", text: "hello" }]);
+
+			expect(mockKV.put).toHaveBeenCalledWith(
+				"chat_history",
+				expect.any(String),
+				{ expirationTtl: 600 },
+			);
 		});
 	});
 

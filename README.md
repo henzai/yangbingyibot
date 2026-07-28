@@ -62,6 +62,13 @@ GOOGLE_SERVICE_ACCOUNT=<Google Service Account credentials (JSON文字列)>
 GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動報告用）>
 ```
 
+以下は任意設定です。未設定時は現在の本番値へフォールバックします。
+
+- `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`
+- `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DATA_SHEET_NAME`, `GOOGLE_DESCRIPTION_SHEET_NAME`
+- `GITHUB_REPOSITORY`（`owner/repository`形式）
+- `HISTORY_TTL_SECONDS`（60〜86400秒、既定値300秒）
+
 本番環境では `wrangler secret` でシークレットを設定してください。
 
 ### 起動

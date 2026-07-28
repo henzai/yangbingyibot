@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry } from "../contracts";
 import type { Logger } from "../utils/logger";
 
 const mockGenerateContent = vi.fn();
@@ -37,6 +37,24 @@ describe("GeminiClient", () => {
 			];
 			const client = new GeminiClient("test-api-key", history);
 			expect(client.getHistory()).toEqual(history);
+		});
+
+		it("uses a configured model", async () => {
+			mockGenerateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "AI response" }] } }],
+			});
+
+			const client = new GeminiClient(
+				"test-api-key",
+				[],
+				undefined,
+				"configured-model",
+			);
+			await client.ask("question", "sheet", "description");
+
+			expect(mockGenerateContent).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "configured-model" }),
+			);
 		});
 	});
 

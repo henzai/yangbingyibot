@@ -3,17 +3,17 @@ import {
 	type GenerateContentResponseUsageMetadata,
 	GoogleGenAI,
 } from "@google/genai";
-import type { HistoryEntry } from "../types";
+import { DEFAULT_RUNTIME_CONFIG } from "../config";
+import type { HistoryEntry } from "../contracts";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
 export class GeminiClient {
-	private static readonly MODEL_NAME = "gemini-3.6-flash";
-
 	private client: GoogleGenAI;
 	private history: HistoryEntry[];
 	private log: Logger;
+	private modelName: string;
 
 	private readonly RETRY_CONFIG = {
 		maxAttempts: 2,
@@ -25,10 +25,12 @@ export class GeminiClient {
 		apiKey: string,
 		initialHistory: HistoryEntry[] = [],
 		log?: Logger,
+		modelName: string = DEFAULT_RUNTIME_CONFIG.geminiModel,
 	) {
 		this.client = new GoogleGenAI({ apiKey });
 		this.history = initialHistory;
 		this.log = log ?? defaultLogger;
+		this.modelName = modelName;
 	}
 
 	private buildPrompt(
@@ -113,7 +115,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 
 		this.log.info("Gemini token usage", {
 			mode,
-			model: GeminiClient.MODEL_NAME,
+			model: this.modelName,
 			promptTokens,
 			cachedTokens,
 			// 暗黙キャッシュが効いているかはこの比率で判断する
@@ -154,7 +156,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				result = await withRetry(
 					async () => {
 						return await this.client.models.generateContent({
-							model: GeminiClient.MODEL_NAME,
+							model: this.modelName,
 							contents: fullPrompt,
 							config: generationConfig,
 						});
@@ -222,7 +224,7 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				const stream = await withRetry(
 					async () => {
 						return await this.client.models.generateContentStream({
-							model: GeminiClient.MODEL_NAME,
+							model: this.modelName,
 							contents: fullPrompt,
 							config: streamGenerationConfig,
 						});
@@ -282,8 +284,9 @@ export const createGeminiClient = (
 	apiKey: string,
 	initialHistory: HistoryEntry[] = [],
 	log?: Logger,
+	modelName: string = DEFAULT_RUNTIME_CONFIG.geminiModel,
 ): GeminiClient => {
-	return new GeminiClient(apiKey, initialHistory, log);
+	return new GeminiClient(apiKey, initialHistory, log, modelName);
 };
 
 const generationConfig = {

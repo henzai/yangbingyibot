@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type { Bindings } from "./contracts";
 import type { CheckResult } from "./health";
 import { runHealthCheck } from "./health";
-import type { Bindings } from "./types";
 
 // Mock fetch globally
 const mockFetch = vi.fn();

@@ -48,25 +48,29 @@ function setupSheets(options?: {
 	hasDescSheet?: boolean;
 	csvContent?: string;
 	descValue?: string | null;
+	dataSheetName?: string;
+	descriptionSheetName?: string;
 }) {
 	const {
 		hasTestSheet = true,
 		hasDescSheet = true,
 		csvContent = "col1,col2\nval1,val2",
 		descValue = "Bot description",
+		dataSheetName = "test",
+		descriptionSheetName = "description",
 	} = options ?? {};
 
 	const sheetsByTitle: Record<string, unknown> = {};
 
 	if (hasTestSheet) {
-		sheetsByTitle.test = {
+		sheetsByTitle[dataSheetName] = {
 			loadHeaderRow: mockLoadHeaderRow,
 			downloadAsCSV: mockDownloadAsCSV,
 		};
 	}
 
 	if (hasDescSheet) {
-		sheetsByTitle.description = {
+		sheetsByTitle[descriptionSheetName] = {
 			loadCells: mockLoadCells,
 			getCellByA1: mockGetCellByA1,
 		};
@@ -124,6 +128,24 @@ describe("spreadSheet", () => {
 			const result = await getSheetData(validServiceAccount, mockLogger);
 
 			expect(result.description).toBe("");
+		});
+
+		it("uses the configured spreadsheet and sheet names", async () => {
+			setupSheets({
+				dataSheetName: "configured-data",
+				descriptionSheetName: "configured-description",
+			});
+
+			const result = await getSheetData(validServiceAccount, mockLogger, {
+				id: "configured-spreadsheet",
+				dataSheetName: "configured-data",
+				descriptionSheetName: "configured-description",
+			});
+
+			expect(GoogleSpreadsheet).toHaveBeenCalledWith("configured-spreadsheet", {
+				token: "mock-token",
+			});
+			expect(result.description).toBe("Bot description");
 		});
 	});
 

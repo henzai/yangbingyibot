@@ -1,14 +1,6 @@
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry } from "../contracts";
 
-// Workflow event payload
-export interface WorkflowParams {
-	// Discord interaction token for webhook response
-	token: string;
-	// User's question message
-	message: string;
-	// Request ID for distributed tracing
-	requestId: string;
-}
+export type { WorkflowParams } from "../contracts";
 
 // Step outputs (must be JSON serializable)
 export interface SheetDataOutput {

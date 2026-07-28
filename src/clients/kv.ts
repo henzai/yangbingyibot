@@ -1,4 +1,5 @@
-import type { HistoryEntry } from "../types";
+import { DEFAULT_RUNTIME_CONFIG } from "../config";
+import type { HistoryEntry } from "../contracts";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -7,7 +8,7 @@ const SHEET_INFO = "sheet_info";
 const HISTORY_KEY = "chat_history";
 
 // キャッシュの持続時間（秒）- KVネイティブTTLで使用
-const CACHE_TTL_SECONDS = 5 * 60; // 5分
+const SHEET_CACHE_TTL_SECONDS = 5 * 60; // 5分
 
 // キャッシュの型
 type SheetInfo = {
@@ -18,10 +19,16 @@ type SheetInfo = {
 export class KV {
 	private kv: KVNamespace;
 	private log: Logger;
+	private historyTtlSeconds: number;
 
-	constructor(kv: KVNamespace, log?: Logger) {
+	constructor(
+		kv: KVNamespace,
+		log?: Logger,
+		historyTtlSeconds: number = DEFAULT_RUNTIME_CONFIG.historyTtlSeconds,
+	) {
 		this.kv = kv;
 		this.log = log ?? defaultLogger;
+		this.historyTtlSeconds = historyTtlSeconds;
 	}
 
 	async saveHistory(history: HistoryEntry[]): Promise<void> {
@@ -32,7 +39,7 @@ export class KV {
 			}));
 
 			await this.kv.put(HISTORY_KEY, JSON.stringify(newHistory), {
-				expirationTtl: CACHE_TTL_SECONDS,
+				expirationTtl: this.historyTtlSeconds,
 			});
 		} catch (error) {
 			this.log.error("Failed to save history to KV", {
@@ -105,7 +112,7 @@ export class KV {
 			};
 
 			await this.kv.put(SHEET_INFO, JSON.stringify(newCacheData), {
-				expirationTtl: CACHE_TTL_SECONDS,
+				expirationTtl: SHEET_CACHE_TTL_SECONDS,
 			});
 		} catch (error) {
 			this.log.error("Failed to save cache to KV", {
@@ -116,6 +123,10 @@ export class KV {
 	}
 }
 
-export const createKV = (kv: KVNamespace, log?: Logger): KV => {
-	return new KV(kv, log);
+export const createKV = (
+	kv: KVNamespace,
+	log?: Logger,
+	historyTtlSeconds: number = DEFAULT_RUNTIME_CONFIG.historyTtlSeconds,
+): KV => {
+	return new KV(kv, log, historyTtlSeconds);
 };
