@@ -213,7 +213,7 @@ export class NoOpMetricsClient implements IMetricsClient {
 }
 
 /**
- * Factory function following existing patterns (createKV, createGeminiClient)
+ * Factory function following existing client creation patterns
  */
 export function createMetricsClient(
 	dataset: AnalyticsEngineDataset,

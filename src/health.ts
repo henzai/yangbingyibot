@@ -9,6 +9,7 @@ import {
 } from "./clients/metrics";
 import { loadConfig } from "./config";
 import type { Bindings } from "./contracts";
+import { createDeduplicationStore } from "./repositories/deduplicationStore";
 import { getErrorMessage } from "./utils/errors";
 import type { Logger } from "./utils/logger";
 
@@ -115,10 +116,10 @@ async function reportHealthCheckToGitHub(
 			.join(",");
 		const fingerprint = `health_check:${failedNames}`;
 		const kvKey = `error_reported:${fingerprint}`;
+		const deduplicationStore = createDeduplicationStore(env.sushanshan_bot);
 
 		// Layer 1: KV deduplication
-		const existing = await env.sushanshan_bot.get(kvKey);
-		if (existing) {
+		if (await deduplicationStore.isMarked(kvKey)) {
 			log.debug("Health check already reported (KV cache hit)", {
 				fingerprint,
 			});
@@ -131,9 +132,7 @@ async function reportHealthCheckToGitHub(
 			log.debug("Health check already reported (GitHub search hit)", {
 				fingerprint,
 			});
-			await env.sushanshan_bot.put(kvKey, "1", {
-				expirationTtl: ERROR_REPORTED_TTL_SECONDS,
-			});
+			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
 			return;
 		}
 
@@ -152,9 +151,7 @@ async function reportHealthCheckToGitHub(
 
 		const created = await github.createHealthCheckIssue(report, fingerprint);
 		if (created) {
-			await env.sushanshan_bot.put(kvKey, "1", {
-				expirationTtl: ERROR_REPORTED_TTL_SECONDS,
-			});
+			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
 			log.info("Health check reported to GitHub Issues", { fingerprint });
 		}
 	} catch (error) {
