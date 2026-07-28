@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bindings } from "../types";
+import type { Bindings, HistoryEntry } from "../types";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
 
@@ -89,9 +89,11 @@ const mockAnalyticsDataset = {
 	writeDataPoint: vi.fn(),
 };
 
+const mockKVGet = vi.fn<() => Promise<string | null>>();
+const mockKVPut = vi.fn();
 const mockKVNamespace = {
-	get: vi.fn(),
-	put: vi.fn(),
+	get: mockKVGet,
+	put: mockKVPut,
 } as unknown as KVNamespace;
 
 const mockEnv: Bindings = {
@@ -202,7 +204,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 	describe("saveHistoryStep", () => {
 		it("saves history to KV", async () => {
-			const updatedHistory = [
+			const updatedHistory: HistoryEntry[] = [
 				{ role: "user", text: "question" },
 				{ role: "model", text: "answer" },
 			];
@@ -231,7 +233,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		const history: HistoryOutput = { history: [] };
 
 		it("streams Gemini response and edits Discord message", async () => {
-			const updatedHistory = [
+			const updatedHistory: HistoryEntry[] = [
 				{ role: "user", text: "質問: test message" },
 				{ role: "model", text: "full response" },
 			];
@@ -420,7 +422,9 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("passes existing history to GeminiClient", async () => {
-			const existingHistory = [{ role: "user", text: "previous" }];
+			const existingHistory: HistoryEntry[] = [
+				{ role: "user", text: "previous" },
+			];
 			const historyWithExisting: HistoryOutput = {
 				history: existingHistory,
 			};
@@ -514,7 +518,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("skips when KV cache indicates already reported", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-1");
-			vi.mocked(mockKVNamespace.get).mockResolvedValue("1");
+			mockKVGet.mockResolvedValue("1");
 
 			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
 
@@ -524,7 +528,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("skips when GitHub search finds duplicate", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-2");
-			vi.mocked(mockKVNamespace.get).mockResolvedValue(null);
+			mockKVGet.mockResolvedValue(null);
 			mockGitHubInstance.isDuplicate.mockResolvedValue(true);
 
 			await reportErrorToGitHub(mockEnv, sampleReport, mockLogger);
@@ -540,7 +544,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("creates issue and caches in KV on new error", async () => {
 			mockGitHubInstance.generateFingerprint.mockReturnValue("fingerprint-3");
-			vi.mocked(mockKVNamespace.get).mockResolvedValue(null);
+			mockKVGet.mockResolvedValue(null);
 			mockGitHubInstance.isDuplicate.mockResolvedValue(false);
 			mockGitHubInstance.createIssue.mockResolvedValue(true);
 

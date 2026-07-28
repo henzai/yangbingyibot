@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import type { HistoryEntry } from "../types";
 import { createKV, KV } from "./kv";
 
 const createMockKVNamespace = () =>
@@ -22,7 +23,7 @@ describe("KV class", () => {
 
 	describe("saveHistory", () => {
 		it("saves history with expirationTtl", async () => {
-			const history = [{ role: "user", text: "hello" }];
+			const history: HistoryEntry[] = [{ role: "user", text: "hello" }];
 
 			await kv.saveHistory(history);
 

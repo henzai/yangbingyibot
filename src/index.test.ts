@@ -43,6 +43,14 @@ const mockExecutionCtx = {
 	passThroughOnException: () => {},
 } as unknown as ExecutionContext;
 
+type ErrorResponseBody = {
+	data: {
+		embeds: Array<{
+			description?: string;
+		}>;
+	};
+};
+
 function postRequest(body: unknown) {
 	return new Request("http://localhost/", {
 		method: "POST",
@@ -118,7 +126,7 @@ describe("index", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const json = await res.json();
+			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe(
 				"Invalid Discord interaction: missing data",
 			);
@@ -132,7 +140,7 @@ describe("index", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const json = await res.json();
+			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe(
 				"Invalid Discord interaction: missing options",
 			);
@@ -150,7 +158,7 @@ describe("index", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const json = await res.json();
+			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe(
 				"Invalid Discord interaction: question must be a non-empty string",
 			);
@@ -170,7 +178,7 @@ describe("index", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const json = await res.json();
+			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe(
 				"Failed to start processing",
 			);
@@ -186,7 +194,7 @@ describe("index", () => {
 			);
 
 			expect(res.status).toBe(200);
-			const json = await res.json();
+			const json = (await res.json()) as ErrorResponseBody;
 			expect(json.data.embeds[0].description).toBe("Invalid interaction type");
 		});
 	});
