@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ExternalServiceError } from "../utils/errors";
 import {
 	createGitHubIssueClient,
 	type ErrorReport,
@@ -14,6 +15,7 @@ describe("GitHubIssueClient", () => {
 
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
+		vi.useRealTimers();
 	});
 
 	const sampleReport: ErrorReport = {
@@ -82,7 +84,7 @@ describe("GitHubIssueClient", () => {
 			const client = new GitHubIssueClient("test-token");
 			const result = await client.createIssue(sampleReport, "test-fingerprint");
 
-			expect(result).toBe(true);
+			expect(result).toBeUndefined();
 			expect(mockFetch).toHaveBeenCalledTimes(1);
 
 			const [url, options] = mockFetch.mock.calls[0];
@@ -142,25 +144,41 @@ describe("GitHubIssueClient", () => {
 			);
 		});
 
-		it("returns false on API error", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue({
-				ok: false,
-				status: 403,
-			});
+		it("throws a typed non-retryable API error", async () => {
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValue(new Response("secret body", { status: 403 }));
 
 			const client = new GitHubIssueClient("test-token");
-			const result = await client.createIssue(sampleReport, "fp");
+			const error = await client
+				.createIssue(sampleReport, "fp")
+				.catch((caught) => caught);
 
-			expect(result).toBe(false);
+			expect(error).toBeInstanceOf(ExternalServiceError);
+			expect(error).toMatchObject({
+				service: "github",
+				operation: "create issue",
+				status: 403,
+				retryable: false,
+			});
+			expect(error.message).not.toContain("secret body");
+			expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		});
 
-		it("returns false on network error", async () => {
+		it("does not retry an ambiguous POST network error", async () => {
 			globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
 			const client = new GitHubIssueClient("test-token");
-			const result = await client.createIssue(sampleReport, "fp");
+			const error = await client
+				.createIssue(sampleReport, "fp")
+				.catch((caught) => caught);
 
-			expect(result).toBe(false);
+			expect(error).toMatchObject({
+				service: "github",
+				operation: "create issue",
+				retryable: true,
+			});
+			expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		});
 
 		it("omits step row from body when step is undefined", async () => {
@@ -211,25 +229,39 @@ describe("GitHubIssueClient", () => {
 			expect(result).toBe(false);
 		});
 
-		it("returns false (fail-open) on API error", async () => {
-			globalThis.fetch = vi.fn().mockResolvedValue({
-				ok: false,
-				status: 403,
-			});
+		it("throws without retrying a permanent API error", async () => {
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValue(new Response(null, { status: 403 }));
 
 			const client = new GitHubIssueClient("test-token");
-			const result = await client.isDuplicate("test-fingerprint");
+			const error = await client
+				.isDuplicate("test-fingerprint")
+				.catch((caught) => caught);
 
-			expect(result).toBe(false);
+			expect(error).toMatchObject({
+				status: 403,
+				retryable: false,
+			});
+			expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		});
 
-		it("returns false (fail-open) on network error", async () => {
-			globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+		it("retries a network error before succeeding", async () => {
+			vi.useFakeTimers();
+			globalThis.fetch = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("Network error"))
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({ total_count: 0 }),
+				});
 
 			const client = new GitHubIssueClient("test-token");
-			const result = await client.isDuplicate("test-fingerprint");
+			const promise = client.isDuplicate("test-fingerprint");
+			await vi.runAllTimersAsync();
 
-			expect(result).toBe(false);
+			await expect(promise).resolves.toBe(false);
+			expect(globalThis.fetch).toHaveBeenCalledTimes(2);
 		});
 	});
 

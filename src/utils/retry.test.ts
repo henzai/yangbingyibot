@@ -1,264 +1,176 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ExternalServiceError } from "./errors";
 import { withRetry } from "./retry";
 
+function serviceError(
+	status: number | undefined,
+	options: { retryable?: boolean; retryAfterMs?: number } = {},
+) {
+	return new ExternalServiceError({
+		service: "discord",
+		operation: "post message",
+		status,
+		retryable: options.retryable ?? true,
+		userMessage: "Discordへの送信に失敗しました。",
+		retryAfterMs: options.retryAfterMs,
+	});
+}
+
 describe("withRetry", () => {
-	beforeEach(() => {
-		vi.clearAllMocks();
-		vi.useFakeTimers();
+	it("returns a successful result without sleeping", async () => {
+		const fn = vi.fn().mockResolvedValue("success");
+		const sleep = vi.fn();
+
+		await expect(withRetry(fn, { sleep })).resolves.toBe("success");
+		expect(fn).toHaveBeenCalledTimes(1);
+		expect(sleep).not.toHaveBeenCalled();
 	});
 
-	afterEach(() => {
-		vi.useRealTimers();
+	it.each([undefined, 408, 429, 500, 503])(
+		"retries a retryable status %s",
+		async (status) => {
+			const fn = vi
+				.fn()
+				.mockRejectedValueOnce(serviceError(status))
+				.mockResolvedValueOnce("success");
+			const sleep = vi.fn().mockResolvedValue(undefined);
+
+			await expect(withRetry(fn, { sleep, random: () => 0.5 })).resolves.toBe(
+				"success",
+			);
+			expect(fn).toHaveBeenCalledTimes(2);
+			expect(sleep).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it.each([400, 401, 403, 404])(
+		"does not retry a permanent status %s",
+		async (status) => {
+			const error = serviceError(status, { retryable: false });
+			const fn = vi.fn().mockRejectedValue(error);
+			const sleep = vi.fn();
+
+			await expect(withRetry(fn, { sleep })).rejects.toBe(error);
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(sleep).not.toHaveBeenCalled();
+		},
+	);
+
+	it("does not retry generic errors by default", async () => {
+		const fn = vi.fn().mockRejectedValue(new Error("local failure"));
+
+		await expect(withRetry(fn, { sleep: vi.fn() })).rejects.toThrow(
+			"local failure",
+		);
+		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
-	describe("successful execution", () => {
-		it("returns result on first attempt", async () => {
-			const mockFn = vi.fn().mockResolvedValue("success");
+	it("uses Retry-After instead of exponential backoff", async () => {
+		const fn = vi
+			.fn()
+			.mockRejectedValueOnce(serviceError(429, { retryAfterMs: 4200 }))
+			.mockResolvedValueOnce("success");
+		const sleep = vi.fn().mockResolvedValue(undefined);
 
-			const promise = withRetry(mockFn);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-			expect(mockFn).toHaveBeenCalledTimes(1);
+		await withRetry(fn, {
+			initialDelayMs: 1000,
+			sleep,
+			random: () => 0.25,
 		});
 
-		it("returns result after retry", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("temporary error"))
-				.mockResolvedValueOnce("success");
-
-			const promise = withRetry(mockFn);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-			expect(mockFn).toHaveBeenCalledTimes(2);
-		});
+		expect(sleep).toHaveBeenCalledWith(4200);
 	});
 
-	describe("retry behavior", () => {
-		it("retries up to maxAttempts times", async () => {
-			const mockFn = vi.fn().mockRejectedValue(new Error("persistent error"));
+	it("uses capped exponential backoff with full jitter", async () => {
+		const fn = vi
+			.fn()
+			.mockRejectedValueOnce(serviceError(500))
+			.mockRejectedValueOnce(serviceError(503))
+			.mockRejectedValueOnce(serviceError(408))
+			.mockResolvedValueOnce("success");
+		const sleep = vi.fn().mockResolvedValue(undefined);
+		const random = vi
+			.fn()
+			.mockReturnValueOnce(0.5)
+			.mockReturnValueOnce(0.25)
+			.mockReturnValueOnce(1);
 
-			// runAllTimersAsync() の実行中に reject するため、先に assertion を
-			// 繋いでハンドラを登録しておく (vitest 4 は未処理の rejection を
-			// Unhandled Error として検出し、テストが通っても exit code 1 になる)
-			const promise = withRetry(mockFn, { maxAttempts: 3 });
-			const assertion = expect(promise).rejects.toThrow("persistent error");
-			await vi.runAllTimersAsync();
-			await assertion;
-
-			expect(mockFn).toHaveBeenCalledTimes(3);
+		await withRetry(fn, {
+			maxAttempts: 4,
+			initialDelayMs: 1000,
+			backoffMultiplier: 3,
+			maxDelayMs: 5000,
+			sleep,
+			random,
 		});
 
-		it("uses exponential backoff", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("error 1"))
-				.mockRejectedValueOnce(new Error("error 2"))
-				.mockResolvedValueOnce("success");
-
-			const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-			const promise = withRetry(mockFn, {
-				initialDelayMs: 1000,
-				backoffMultiplier: 2,
-			});
-
-			// Fast-forward through all timers
-			await vi.runAllTimersAsync();
-			await promise;
-
-			// Verify delays: 1000ms, 2000ms (logged as JSON)
-			const calls = consoleSpy.mock.calls.map((call) => call[0]);
-			expect(calls.some((c) => c.includes('"delayMs":1000'))).toBe(true);
-			expect(calls.some((c) => c.includes('"delayMs":2000'))).toBe(true);
-
-			consoleSpy.mockRestore();
-		});
-
-		it("caps delay at maxDelayMs", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("error 1"))
-				.mockRejectedValueOnce(new Error("error 2"))
-				.mockResolvedValueOnce("success");
-
-			const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-			const promise = withRetry(mockFn, {
-				initialDelayMs: 5000,
-				backoffMultiplier: 3,
-				maxDelayMs: 8000,
-			});
-
-			await vi.runAllTimersAsync();
-			await promise;
-
-			// First retry: 5000ms, second retry: min(15000, 8000) = 8000ms (logged as JSON)
-			const calls = consoleSpy.mock.calls.map((call) => call[0]);
-			expect(calls.some((c) => c.includes('"delayMs":5000'))).toBe(true);
-			expect(calls.some((c) => c.includes('"delayMs":8000'))).toBe(true);
-
-			consoleSpy.mockRestore();
-		});
+		expect(sleep.mock.calls).toEqual([[500], [750], [5000]]);
 	});
 
-	describe("shouldRetry callback", () => {
-		it("stops retrying when shouldRetry returns false", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValue(new Error("non-retryable error"));
+	it("throws the last error after maxAttempts", async () => {
+		const first = serviceError(500);
+		const last = serviceError(503);
+		const fn = vi.fn().mockRejectedValueOnce(first).mockRejectedValueOnce(last);
 
-			const shouldRetry = (error: Error) => {
-				return error.message !== "non-retryable error";
-			};
-
-			const promise = withRetry(mockFn, { maxAttempts: 3 }, shouldRetry);
-			const assertion = expect(promise).rejects.toThrow("non-retryable error");
-			await vi.runAllTimersAsync();
-			await assertion;
-
-			expect(mockFn).toHaveBeenCalledTimes(1);
-		});
-
-		it("continues retrying for retryable errors", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("retryable error"))
-				.mockResolvedValueOnce("success");
-
-			const shouldRetry = (error: Error) => {
-				return error.message.includes("retryable");
-			};
-
-			const promise = withRetry(mockFn, {}, shouldRetry);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-			expect(mockFn).toHaveBeenCalledTimes(2);
-		});
-
-		it("classifies rate limit errors as retryable", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("rate limit exceeded"))
-				.mockResolvedValueOnce("success");
-
-			const shouldRetry = (error: Error) => {
-				const msg = error.message.toLowerCase();
-				return msg.includes("quota") || msg.includes("rate limit");
-			};
-
-			const promise = withRetry(mockFn, {}, shouldRetry);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-			expect(mockFn).toHaveBeenCalledTimes(2);
-		});
-
-		it("classifies network errors as retryable", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("network timeout"))
-				.mockResolvedValueOnce("success");
-
-			const shouldRetry = (error: Error) => {
-				const msg = error.message.toLowerCase();
-				return msg.includes("network") || msg.includes("timeout");
-			};
-
-			const promise = withRetry(mockFn, {}, shouldRetry);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-			expect(mockFn).toHaveBeenCalledTimes(2);
-		});
+		await expect(
+			withRetry(fn, {
+				maxAttempts: 2,
+				sleep: vi.fn().mockResolvedValue(undefined),
+				random: () => 0,
+			}),
+		).rejects.toBe(last);
+		expect(fn).toHaveBeenCalledTimes(2);
 	});
 
-	describe("error handling", () => {
-		it("throws last error after all retries exhausted", async () => {
-			const error1 = new Error("error 1");
-			const error2 = new Error("error 2");
-			const error3 = new Error("final error");
+	it("allows an explicit retry predicate for non-service operations", async () => {
+		const fn = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("retry me"))
+			.mockResolvedValueOnce("success");
 
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(error1)
-				.mockRejectedValueOnce(error2)
-				.mockRejectedValueOnce(error3);
-
-			const promise = withRetry(mockFn, { maxAttempts: 3 });
-			const assertion = expect(promise).rejects.toThrow("final error");
-			await vi.runAllTimersAsync();
-			await assertion;
-		});
-
-		it("converts non-Error values to Error", async () => {
-			const mockFn = vi.fn().mockRejectedValue("string error");
-
-			const promise = withRetry(mockFn, { maxAttempts: 1 });
-			const assertion = expect(promise).rejects.toThrow("string error");
-			await vi.runAllTimersAsync();
-			await assertion;
-		});
+		await expect(
+			withRetry(
+				fn,
+				{ sleep: vi.fn().mockResolvedValue(undefined), random: () => 0 },
+				() => true,
+			),
+		).resolves.toBe("success");
 	});
 
-	describe("configuration", () => {
-		it("uses default configuration when not provided", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("error"))
-				.mockResolvedValueOnce("success");
-
-			const promise = withRetry(mockFn);
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
+	it("logs structured fields without the cause message", async () => {
+		const log = {
+			warn: vi.fn(),
+		};
+		const error = new ExternalServiceError({
+			service: "gemini",
+			operation: "generate content",
+			status: 500,
+			retryable: true,
+			userMessage: "AIへの接続に失敗しました。",
+			cause: new Error("secret response body"),
 		});
+		const fn = vi
+			.fn()
+			.mockRejectedValueOnce(error)
+			.mockResolvedValueOnce("success");
 
-		it("merges partial config with defaults", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("error"))
-				.mockResolvedValueOnce("success");
+		await withRetry(
+			fn,
+			{ sleep: vi.fn().mockResolvedValue(undefined), random: () => 0 },
+			undefined,
+			log as never,
+		);
 
-			const promise = withRetry(mockFn, { maxAttempts: 2 });
-			await vi.runAllTimersAsync();
-			const result = await promise;
-
-			expect(result).toBe("success");
-		});
-	});
-
-	describe("logging", () => {
-		it("logs retry attempts", async () => {
-			const mockFn = vi
-				.fn()
-				.mockRejectedValueOnce(new Error("temporary error"))
-				.mockResolvedValueOnce("success");
-
-			const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-			const promise = withRetry(mockFn);
-			await vi.runAllTimersAsync();
-			await promise;
-
-			// Logs are now JSON formatted
-			const calls = consoleSpy.mock.calls.map((call) => call[0]);
-			expect(
-				calls.some(
-					(c) => c.includes("Retry attempt") && c.includes("temporary error"),
-				),
-			).toBe(true);
-
-			consoleSpy.mockRestore();
-		});
+		expect(log.warn).toHaveBeenCalledWith(
+			"Retrying external service request",
+			expect.objectContaining({
+				service: "gemini",
+				operation: "generate content",
+				status: 500,
+			}),
+		);
+		expect(JSON.stringify(log.warn.mock.calls)).not.toContain(
+			"secret response body",
+		);
 	});
 });

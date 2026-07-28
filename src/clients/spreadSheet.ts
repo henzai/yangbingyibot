@@ -4,10 +4,45 @@ import GoogleAuth, {
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { DEFAULT_RUNTIME_CONFIG, type SpreadsheetConfig } from "../config";
 import { compactSheetCsv } from "../utils/compactSheet";
-import { getErrorMessage } from "../utils/errors";
+import {
+	ExternalServiceError,
+	getExternalErrorLogContext,
+	normalizeExternalServiceError,
+} from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
+import { withRetry } from "../utils/retry";
 
 const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+const SHEETS_RETRY_CONFIG = {
+	maxAttempts: 3,
+	initialDelayMs: 500,
+	maxDelayMs: 5000,
+	backoffMultiplier: 2,
+};
+
+async function executeSheetsRequest<T>(
+	operation: string,
+	userMessage: string,
+	log: Logger,
+	request: () => Promise<T>,
+): Promise<T> {
+	return withRetry(
+		async () => {
+			try {
+				return await request();
+			} catch (error) {
+				throw normalizeExternalServiceError(error, {
+					service: "sheets",
+					operation,
+					userMessage,
+				});
+			}
+		},
+		SHEETS_RETRY_CONFIG,
+		undefined,
+		log,
+	);
+}
 
 // Helper to parse and validate service account JSON
 function parseServiceAccount(serviceAccountJson: string): GoogleKey {
@@ -16,17 +51,26 @@ function parseServiceAccount(serviceAccountJson: string): GoogleKey {
 
 		// Validate required fields
 		if (!parsed.client_email || !parsed.private_key) {
-			throw new Error(
-				"Service account JSON missing required fields (client_email, private_key)",
-			);
+			throw new ExternalServiceError({
+				service: "sheets",
+				operation: "validate service account",
+				retryable: false,
+				userMessage: "Google認証設定が不正です。",
+			});
 		}
 
 		return parsed as GoogleKey;
 	} catch (error) {
-		if (error instanceof SyntaxError) {
-			throw new Error("Invalid service account JSON format");
+		if (error instanceof ExternalServiceError) {
+			throw error;
 		}
-		throw error;
+		throw new ExternalServiceError({
+			service: "sheets",
+			operation: "parse service account",
+			retryable: false,
+			userMessage: "Google認証設定が不正です。",
+			cause: error,
+		});
 	}
 }
 
@@ -38,18 +82,33 @@ async function authenticateGoogle(
 	try {
 		const googleAuth = parseServiceAccount(serviceAccountJson);
 		const oauth = new GoogleAuth(googleAuth, GOOGLE_SCOPES);
-		const token = await oauth.getGoogleAuthToken();
+		const token = await executeSheetsRequest(
+			"authenticate",
+			"Google認証に失敗しました。",
+			log,
+			async () => await oauth.getGoogleAuthToken(),
+		);
 
 		if (!token) {
-			throw new Error("Failed to obtain Google auth token");
+			throw new ExternalServiceError({
+				service: "sheets",
+				operation: "authenticate",
+				retryable: false,
+				userMessage: "Google認証に失敗しました。",
+			});
 		}
 
 		return token;
 	} catch (error) {
 		log.error("Google authentication error", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(error),
 		});
-		throw new Error(`Google authentication failed: ${getErrorMessage(error)}`);
+		throw normalizeExternalServiceError(error, {
+			service: "sheets",
+			operation: "authenticate",
+			retryable: false,
+			userMessage: "Google認証に失敗しました。",
+		});
 	}
 }
 
@@ -67,16 +126,33 @@ async function fetchSheetInfo(
 ): Promise<string> {
 	const sheet = doc.sheetsByTitle[sheetName];
 	if (!sheet) {
-		throw new Error(`Sheet "${sheetName}" not found in spreadsheet`);
+		throw new ExternalServiceError({
+			service: "sheets",
+			operation: "resolve data sheet",
+			retryable: false,
+			userMessage: "指定されたシートが見つかりません。",
+		});
 	}
 
 	try {
-		await sheet.loadHeaderRow(2);
-		const csvBuffer = await sheet.downloadAsCSV();
+		const csvBuffer = await executeSheetsRequest(
+			"download data sheet",
+			"シートデータのダウンロードに失敗しました。",
+			log,
+			async () => {
+				await sheet.loadHeaderRow(2);
+				return sheet.downloadAsCSV();
+			},
+		);
 		const csvContent = new TextDecoder().decode(csvBuffer);
 
 		if (!csvContent || csvContent.trim().length === 0) {
-			throw new Error("Sheet returned empty CSV data");
+			throw new ExternalServiceError({
+				service: "sheets",
+				operation: "validate data sheet",
+				retryable: false,
+				userMessage: "シートデータが空です。",
+			});
 		}
 
 		// CSVはGeminiへの入力トークンの大半を占めるため、渡す前に圧縮する
@@ -89,9 +165,13 @@ async function fetchSheetInfo(
 		return compacted;
 	} catch (error) {
 		log.error("Failed to download sheet as CSV", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(error),
 		});
-		throw new Error("シートデータのダウンロードに失敗しました。");
+		throw normalizeExternalServiceError(error, {
+			service: "sheets",
+			operation: "download data sheet",
+			userMessage: "シートデータのダウンロードに失敗しました。",
+		});
 	}
 }
 
@@ -110,12 +190,17 @@ async function fetchSheetDescription(
 	}
 
 	try {
-		await sheet.loadCells("A1");
+		await executeSheetsRequest(
+			"load description sheet",
+			"シート説明の取得に失敗しました。",
+			log,
+			async () => await sheet.loadCells("A1"),
+		);
 		const cell = sheet.getCellByA1("A1");
 		return cell.value?.toString() || "";
 	} catch (error) {
 		log.warn("Failed to load description cell", {
-			error: getErrorMessage(error),
+			...getExternalErrorLogContext(error),
 		});
 		return "";
 	}
@@ -134,16 +219,12 @@ export async function getSheetData(
 		const doc = new GoogleSpreadsheet(source.id, { token });
 
 		// Load document info
-		try {
-			await doc.loadInfo();
-		} catch (error) {
-			logger.error("Failed to load spreadsheet info", {
-				error: getErrorMessage(error),
-			});
-			throw new Error(
-				"スプレッドシートへのアクセスに失敗しました。権限を確認してください。",
-			);
-		}
+		await executeSheetsRequest(
+			"load spreadsheet",
+			"スプレッドシートへのアクセスに失敗しました。権限を確認してください。",
+			logger,
+			async () => await doc.loadInfo(),
+		);
 
 		// Fetch both sheets in parallel using the same authenticated token
 		const [sheetInfo, description] = await Promise.all([
@@ -153,18 +234,19 @@ export async function getSheetData(
 
 		return { sheetInfo, description };
 	} catch (error) {
-		// Preserve user-friendly errors, wrap others
-		if (
-			error instanceof Error &&
-			(error.message.includes("スプレッドシート") ||
-				error.message.includes("シート"))
-		) {
+		if (error instanceof ExternalServiceError) {
 			throw error;
 		}
 
-		logger.error("Unexpected error in getSheetData", {
-			error: getErrorMessage(error),
+		const normalized = normalizeExternalServiceError(error, {
+			service: "sheets",
+			operation: "get sheet data",
+			retryable: false,
+			userMessage: "スプレッドシート情報の取得中にエラーが発生しました。",
 		});
-		throw new Error("スプレッドシート情報の取得中にエラーが発生しました。");
+		logger.error("Unexpected Sheets client error", {
+			...getExternalErrorLogContext(normalized),
+		});
+		throw normalized;
 	}
 }

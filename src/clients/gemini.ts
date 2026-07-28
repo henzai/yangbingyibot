@@ -5,7 +5,11 @@ import {
 } from "@google/genai";
 import { DEFAULT_RUNTIME_CONFIG } from "../config";
 import type { HistoryEntry } from "../contracts";
-import { getErrorMessage } from "../utils/errors";
+import {
+	ExternalServiceError,
+	getExternalErrorLogContext,
+	normalizeExternalServiceError,
+} from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { withRetry } from "../utils/retry";
 
@@ -48,55 +52,74 @@ export class GeminiClient {
 ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 	}
 
-	private isRetryableError(error: Error): boolean {
-		const msg = error.message.toLowerCase();
-		return (
-			msg.includes("quota") ||
-			msg.includes("rate limit") ||
-			msg.includes("network") ||
-			msg.includes("timeout") ||
-			msg.includes("500") ||
-			msg.includes("503")
+	private userMessageForStatus(status: number | undefined): string {
+		if (status === 429) {
+			return "API使用制限に達しました。しばらく待ってから再度お試しください。";
+		}
+		if (status === 401 || status === 403) {
+			return "API認証エラーが発生しました。";
+		}
+		return "AI APIへのリクエストに失敗しました。";
+	}
+
+	private normalizeGeminiError(
+		error: unknown,
+		operation: string,
+	): ExternalServiceError {
+		const normalized = normalizeExternalServiceError(error, {
+			service: "gemini",
+			operation,
+			userMessage: "AI APIへのリクエストに失敗しました。",
+		});
+		if (normalized.service !== "gemini") {
+			return normalized;
+		}
+
+		return new ExternalServiceError({
+			service: normalized.service,
+			operation: normalized.operation,
+			status: normalized.status,
+			retryable: normalized.retryable,
+			userMessage: this.userMessageForStatus(normalized.status),
+			retryAfterMs: normalized.retryAfterMs,
+			cause: normalized.cause,
+		});
+	}
+
+	private async executeRequest<T>(
+		operation: string,
+		request: () => Promise<T>,
+	): Promise<T> {
+		return withRetry(
+			async () => {
+				try {
+					return await request();
+				} catch (error) {
+					throw this.normalizeGeminiError(error, operation);
+				}
+			},
+			this.RETRY_CONFIG,
+			undefined,
+			this.log,
 		);
 	}
 
-	private handleGeminiError(error: unknown): never {
-		this.log.error("Gemini API request failed", {
-			error: getErrorMessage(error),
-		});
-
-		if (error instanceof Error) {
-			if (
-				error.message.includes("quota") ||
-				error.message.includes("rate limit")
-			) {
-				throw new Error(
-					"API使用制限に達しました。しばらく待ってから再度お試しください。",
-				);
-			}
-			if (
-				error.message.includes("invalid") ||
-				error.message.includes("API key")
-			) {
-				throw new Error("API認証エラーが発生しました。");
-			}
-		}
-
-		throw new Error("AI APIへのリクエストに失敗しました。");
-	}
-
 	private handleUnexpectedError(error: unknown, context: string): never {
-		if (
-			error instanceof Error &&
-			(error.message.includes("API") || error.message.includes("AI"))
-		) {
+		if (error instanceof ExternalServiceError) {
 			throw error;
 		}
 
-		this.log.error(`Unexpected error in ${context}`, {
-			error: getErrorMessage(error),
+		const normalized = normalizeExternalServiceError(error, {
+			service: "gemini",
+			operation: context,
+			retryable: false,
+			userMessage: "AI処理中に予期しないエラーが発生しました。",
 		});
-		throw new Error("AI処理中に予期しないエラーが発生しました。");
+		this.log.error("Unexpected Gemini client error", {
+			context,
+			...getExternalErrorLogContext(normalized),
+		});
+		throw normalized;
 	}
 
 	// トークン使用量を記録する。入力トークンがコストの大半を占めるため、
@@ -148,50 +171,46 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 		try {
 			const fullPrompt = this.buildPrompt(input, sheet, description);
 
-			let result: GenerateContentResponse;
-			try {
-				// Add retry logic with exponential backoff
-				this.log.info("Gemini API request starting");
-				const startTime = Date.now();
-				result = await withRetry(
-					async () => {
-						return await this.client.models.generateContent({
-							model: this.modelName,
-							contents: fullPrompt,
-							config: generationConfig,
-						});
-					},
-					this.RETRY_CONFIG,
-					this.isRetryableError,
-					this.log,
-				);
-				this.log.info("Gemini API completed", {
-					durationMs: Date.now() - startTime,
-				});
-				this.logUsage(result.usageMetadata, "generate");
-			} catch (error) {
-				this.handleGeminiError(error);
-			}
+			this.log.info("Gemini API request starting");
+			const startTime = Date.now();
+			const result: GenerateContentResponse = await this.executeRequest(
+				"generate content",
+				async () => {
+					return await this.client.models.generateContent({
+						model: this.modelName,
+						contents: fullPrompt,
+						config: generationConfig,
+					});
+				},
+			);
+			this.log.info("Gemini API completed", {
+				durationMs: Date.now() - startTime,
+			});
+			this.logUsage(result.usageMetadata, "generate");
 
 			// Validate response structure
-			if (
-				!result.candidates ||
-				!result.candidates[0] ||
-				!result.candidates[0].content ||
-				!result.candidates[0].content.parts ||
-				!result.candidates[0].content.parts[0]
-			) {
-				this.log.error("Invalid Gemini response structure", {
-					result: JSON.stringify(result),
+			if (!result.candidates?.[0]?.content?.parts?.[0]) {
+				const error = new ExternalServiceError({
+					service: "gemini",
+					operation: "validate response",
+					retryable: false,
+					userMessage: "AIからの応答形式が不正です。",
 				});
-				throw new Error("AIからの応答形式が不正です。");
+				this.log.error("Invalid Gemini response structure", {
+					...getExternalErrorLogContext(error),
+				});
+				throw error;
 			}
 
 			const response = result.candidates[0].content.parts[0].text;
 
 			if (!response || typeof response !== "string" || !response.trim()) {
-				this.log.error("Empty or invalid text in Gemini response");
-				throw new Error("AIから有効な応答が得られませんでした。");
+				throw new ExternalServiceError({
+					service: "gemini",
+					operation: "validate response text",
+					retryable: false,
+					userMessage: "AIから有効な応答が得られませんでした。",
+				});
 			}
 
 			this.addToHistory(input, response);
@@ -217,23 +236,21 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 			let fullText = "";
 			let usage: GenerateContentResponseUsageMetadata | undefined;
 
+			this.log.info("Gemini streaming API request starting");
+			const startTime = Date.now();
+
+			const stream = await this.executeRequest(
+				"start content stream",
+				async () => {
+					return await this.client.models.generateContentStream({
+						model: this.modelName,
+						contents: fullPrompt,
+						config: streamGenerationConfig,
+					});
+				},
+			);
+
 			try {
-				this.log.info("Gemini streaming API request starting");
-				const startTime = Date.now();
-
-				const stream = await withRetry(
-					async () => {
-						return await this.client.models.generateContentStream({
-							model: this.modelName,
-							contents: fullPrompt,
-							config: streamGenerationConfig,
-						});
-					},
-					this.RETRY_CONFIG,
-					this.isRetryableError,
-					this.log,
-				);
-
 				for await (const chunk of stream) {
 					// ストリーミングでは使用量は終盤のチャンクに載るため、最後の値を採用する
 					if (chunk.usageMetadata) {
@@ -259,12 +276,16 @@ ${historyText ? `会話履歴:\n${historyText}\n\n` : ""}質問: ${input}`;
 				});
 				this.logUsage(usage, "stream");
 			} catch (error) {
-				this.handleGeminiError(error);
+				throw this.normalizeGeminiError(error, "consume content stream");
 			}
 
-			if (!fullText || !fullText.trim()) {
-				this.log.error("Empty text from Gemini streaming response");
-				throw new Error("AIから有効な応答が得られませんでした。");
+			if (!fullText?.trim()) {
+				throw new ExternalServiceError({
+					service: "gemini",
+					operation: "validate streamed response",
+					retryable: false,
+					userMessage: "AIから有効な応答が得られませんでした。",
+				});
 			}
 
 			this.addToHistory(input, fullText);
