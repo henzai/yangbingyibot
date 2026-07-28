@@ -1,3 +1,4 @@
+import type { DeliveryStatus } from "../discord/delivery";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -42,6 +43,9 @@ export interface KVCacheMetricData extends MetricData {
 export interface DiscordWebhookMetricData extends MetricData {
 	retryCount: number;
 	statusCode?: number;
+	editCount?: number;
+	chunkCount?: number;
+	deliveryStatus?: DeliveryStatus;
 }
 
 /**
@@ -134,17 +138,19 @@ export class MetricsClient implements IMetricsClient {
 
 	/**
 	 * Record Discord webhook metrics
-	 * doubles: [durationMs, success, retryCount, statusCode]
+	 * doubles: [durationMs, success, retryCount, statusCode, editCount, chunkCount]
 	 */
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void {
 		this.writeDataPoint("discord_webhook", {
 			indexes: [data.requestId.substring(0, 96)],
-			blobs: [data.requestId],
+			blobs: [data.requestId, data.deliveryStatus ?? "unknown"],
 			doubles: [
 				data.durationMs,
 				data.success ? 1 : 0,
 				data.retryCount,
 				data.statusCode ?? 0,
+				data.editCount ?? 0,
+				data.chunkCount ?? 0,
 			],
 		});
 	}

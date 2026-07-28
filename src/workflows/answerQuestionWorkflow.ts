@@ -15,18 +15,22 @@ import {
 import { getSheetData } from "../clients/spreadSheet";
 import { DEFAULT_RUNTIME_CONFIG, loadConfig } from "../config";
 import type { Bindings, HistoryEntry } from "../contracts";
+import { createDiscordDeliveryService } from "../discord/delivery";
+import {
+	formatAnswer,
+	formatError,
+	formatThinking,
+} from "../discord/formatter";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
 import {
-	ExternalServiceError,
 	getErrorMessage,
 	getExternalErrorLogContext,
 	getUserMessage,
 	normalizeExternalServiceError,
 } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
-import { withRetry } from "../utils/retry";
 import type {
 	DiscordResponseOutput,
 	HistoryOutput,
@@ -149,12 +153,6 @@ const THINKING_EDIT_INTERVAL_MS = 1000;
 const THINKING_MIN_CHUNK_SIZE = 200;
 
 const THINKING_FALLBACK = "考え中...";
-const DISCORD_RETRY_CONFIG = {
-	maxAttempts: 3,
-	initialDelayMs: 1000,
-	maxDelayMs: 10_000,
-	backoffMultiplier: 2,
-};
 
 export async function summarizeThinking(
 	client: GoogleGenAI,
@@ -208,6 +206,7 @@ export async function streamGeminiWithDiscordEditsStep(
 		token,
 		log,
 	);
+	const delivery = createDiscordDeliveryService(discord, log);
 	const gemini = createGeminiClient(
 		config.geminiApiKey,
 		historyOutput.history,
@@ -220,12 +219,10 @@ export async function streamGeminiWithDiscordEditsStep(
 	let lastThinkingEditLength = 0;
 	let lastResponseEditLength = 0;
 	let editCount = 0;
+	let retryCount = 0;
+	let deliveryDurationMs = 0;
 	let currentPhase: "thinking" | "response" = "thinking";
 	let accumulatedThinking = "";
-
-	const formatContent = (text: string) => `> ${question}\n${text}`;
-	const formatThinkingContent = (summary: string) =>
-		`> ${question}\n:thought_balloon: ${summary}`;
 
 	const onChunk = async (
 		accumulatedText: string,
@@ -268,7 +265,8 @@ export async function streamGeminiWithDiscordEditsStep(
 		) {
 			const content =
 				phase === "thinking"
-					? formatThinkingContent(
+					? formatThinking(
+							question,
 							await summarizeThinking(
 								summarizer,
 								accumulatedThinking,
@@ -276,30 +274,31 @@ export async function streamGeminiWithDiscordEditsStep(
 								config.geminiSummaryModel,
 							),
 						)
-					: formatContent(accumulatedText);
+					: formatAnswer(question, accumulatedText);
 
-			try {
-				await withRetry(
-					async () => await discord.editOriginalMessage(content),
-					DISCORD_RETRY_CONFIG,
-					undefined,
-					log,
-				);
+			const deliveryStartTime = Date.now();
+			const result = await delivery.deliverPreview(content);
+			deliveryDurationMs += Date.now() - deliveryStartTime;
+			editCount += result.editCount;
+			retryCount += result.retryCount;
+
+			if (result.success) {
 				lastEditTime = now;
 				if (phase === "thinking") {
 					lastThinkingEditLength = accumulatedThinking.length;
 				} else {
 					lastResponseEditLength = accumulatedText.length;
 				}
-				editCount++;
 				log.debug("Discord message edited", {
 					editCount,
 					phase,
 					contentLength: textLength,
 				});
-			} catch (error) {
+			} else {
 				log.warn("Intermediate Discord edit failed (non-fatal)", {
-					...getExternalErrorLogContext(error),
+					deliveryStatus: result.status,
+					failedChunks: result.failedChunks,
+					statusCode: result.statusCode,
 				});
 			}
 		}
@@ -313,16 +312,19 @@ export async function streamGeminiWithDiscordEditsStep(
 		onChunk,
 	);
 
-	// Final edit to ensure complete response is shown (response only, no thinking)
-	await withRetry(
-		async () => await discord.editOriginalMessage(formatContent(response)),
-		DISCORD_RETRY_CONFIG,
-		undefined,
-		log,
+	const finalDeliveryStartTime = Date.now();
+	const finalDelivery = await delivery.deliverFinal(
+		response.length === 0 ? "" : formatAnswer(question, response),
 	);
-	editCount++;
-	log.info("Final Discord edit sent", {
+	deliveryDurationMs += Date.now() - finalDeliveryStartTime;
+	editCount += finalDelivery.editCount;
+	retryCount += finalDelivery.retryCount;
+
+	log.info("Final Discord delivery completed", {
 		editCount,
+		chunkCount: finalDelivery.chunkCount,
+		deliveryStatus: finalDelivery.status,
+		failedChunks: finalDelivery.failedChunks,
 		responseLength: response.length,
 	});
 
@@ -330,6 +332,12 @@ export async function streamGeminiWithDiscordEditsStep(
 		response,
 		updatedHistory: gemini.getHistory(),
 		editCount,
+		chunkCount: finalDelivery.chunkCount,
+		deliveryStatus: finalDelivery.status,
+		failedChunks: finalDelivery.failedChunks,
+		retryCount,
+		statusCode: finalDelivery.statusCode,
+		deliveryDurationMs,
 	};
 }
 
@@ -348,46 +356,22 @@ export async function sendDiscordResponseStep(
 		token,
 		log,
 	);
+	const delivery = createDiscordDeliveryService(discord, log);
 
 	const content = errorMessage
-		? `> ${question}\n:rotating_light: エラーが発生しました: ${errorMessage}`
-		: `> ${question}\n${response}`;
+		? formatError(question, errorMessage)
+		: formatAnswer(question, response ?? "");
 
-	let attemptCount = 0;
-	let statusCode: number | undefined;
-
-	try {
-		await withRetry(
-			async () => {
-				attemptCount++;
-				await discord.postMessage(content);
-				statusCode = 200; // Success status
-			},
-			{
-				maxAttempts: 3, // Initial attempt + 2 retries
-				initialDelayMs: 1000,
-				backoffMultiplier: 2,
-			},
-			undefined,
-			log,
-		);
-
-		return {
-			success: true,
-			statusCode: statusCode ?? 200,
-			retryCount: attemptCount - 1, // retryCount = attempts - 1
-		};
-	} catch (error) {
-		if (error instanceof ExternalServiceError) {
-			statusCode = error.status;
-		}
-
-		return {
-			success: false,
-			statusCode,
-			retryCount: attemptCount > 0 ? attemptCount - 1 : 2, // Max retries is 2
-		};
-	}
+	const result = await delivery.deliverFollowup(content);
+	return {
+		success: result.success,
+		statusCode: result.statusCode,
+		retryCount: result.retryCount,
+		editCount: result.editCount,
+		chunkCount: result.chunkCount,
+		deliveryStatus: result.status,
+		failedChunks: result.failedChunks,
+	};
 }
 
 const ERROR_REPORTED_TTL_SECONDS = 60 * 60; // 1 hour
@@ -540,6 +524,17 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				});
 			}
 
+			metrics.recordDiscordWebhook({
+				requestId,
+				success: streamResult.deliveryStatus === "success",
+				durationMs: streamResult.deliveryDurationMs,
+				retryCount: streamResult.retryCount,
+				statusCode: streamResult.statusCode,
+				editCount: streamResult.editCount,
+				chunkCount: streamResult.chunkCount,
+				deliveryStatus: streamResult.deliveryStatus,
+			});
+
 			// Step 4: Save history
 			await step.do("saveHistory", async () => {
 				return saveHistoryStep(
@@ -619,6 +614,9 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				durationMs: Date.now() - discordErrorStartTime,
 				retryCount: discordErrorResult.retryCount,
 				statusCode: discordErrorResult.statusCode,
+				editCount: discordErrorResult.editCount,
+				chunkCount: discordErrorResult.chunkCount,
+				deliveryStatus: discordErrorResult.deliveryStatus,
 			});
 		}
 	}
