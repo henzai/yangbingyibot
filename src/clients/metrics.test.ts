@@ -53,7 +53,7 @@ describe("MetricsClient", () => {
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_abc123"],
 				blobs: ["gemini_api_call", "req_abc123"],
-				doubles: [1500, 1, 0],
+				doubles: [1500, 1, 0, 0, 0, 0, 0, 0],
 			});
 		});
 
@@ -70,7 +70,7 @@ describe("MetricsClient", () => {
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_xyz789"],
 				blobs: ["gemini_api_call", "req_xyz789"],
-				doubles: [500, 0, 2],
+				doubles: [500, 0, 2, 0, 0, 0, 0, 0],
 			});
 		});
 
@@ -86,7 +86,7 @@ describe("MetricsClient", () => {
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_123"],
 				blobs: ["gemini_api_call", "req_123"],
-				doubles: [100, 1, 0],
+				doubles: [100, 1, 0, 0, 0, 0, 0, 0],
 			});
 		});
 
@@ -103,7 +103,29 @@ describe("MetricsClient", () => {
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: [longRequestId.substring(0, 96)],
 				blobs: ["gemini_api_call", longRequestId],
-				doubles: [100, 1, 0],
+				doubles: [100, 1, 0, 0, 0, 0, 0, 0],
+			});
+		});
+
+		it("records typed token usage in stable appended positions", () => {
+			metrics.recordGeminiCall({
+				requestId: "req_usage",
+				success: true,
+				durationMs: 250,
+				retryCount: 1,
+				usage: {
+					promptTokens: 100,
+					cachedTokens: 50,
+					thoughtsTokens: 10,
+					candidatesTokens: 20,
+					totalTokens: 130,
+				},
+			});
+
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req_usage"],
+				blobs: ["gemini_api_call", "req_usage"],
+				doubles: [250, 1, 1, 100, 50, 10, 20, 130],
 			});
 		});
 	});

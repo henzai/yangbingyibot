@@ -31,10 +31,13 @@ const mockDeduplicationStore = {
 	mark: vi.fn(),
 };
 
-const mockGeminiInstance = {
-	ask: vi.fn(),
-	askStream: vi.fn(),
-	getHistory: vi.fn(),
+const mockGeminiGateway = {
+	generateStream: vi.fn(),
+	generateText: vi.fn(),
+};
+
+const mockThinkingSummarizer = {
+	summarize: vi.fn(),
 };
 
 vi.mock("../repositories/sheetCache", () => ({
@@ -49,8 +52,12 @@ vi.mock("../repositories/deduplicationStore", () => ({
 	createDeduplicationStore: vi.fn(() => mockDeduplicationStore),
 }));
 
-vi.mock("../clients/gemini", () => ({
-	createGeminiClient: vi.fn(() => mockGeminiInstance),
+vi.mock("../gemini/gateway", () => ({
+	createGeminiGateway: vi.fn(() => mockGeminiGateway),
+}));
+
+vi.mock("../gemini/thinkingSummarizer", () => ({
+	createThinkingSummarizer: vi.fn(() => mockThinkingSummarizer),
 }));
 
 const mockDiscordInstance = {
@@ -76,22 +83,9 @@ vi.mock("../clients/spreadSheet", () => ({
 	getSheetData: vi.fn(),
 }));
 
-const mockGenerateContent = vi.fn();
-
-// vitest 4 は `new` 呼び出し時に実装を Reflect.construct するため、
-// コンストラクタとして使うモックの実装はアロー関数にできない（class 式で代用）
-vi.mock("@google/genai", () => ({
-	GoogleGenAI: vi.fn(
-		class {
-			models = {
-				generateContent: mockGenerateContent,
-			};
-		},
-	),
-}));
-
-import { createGeminiClient } from "../clients/gemini";
 import { getSheetData } from "../clients/spreadSheet";
+import { createGeminiGateway } from "../gemini/gateway";
+import { createThinkingSummarizer } from "../gemini/thinkingSummarizer";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import {
 	getHistoryStep,
@@ -100,7 +94,6 @@ import {
 	saveHistoryStep,
 	sendDiscordResponseStep,
 	streamGeminiWithDiscordEditsStep,
-	summarizeThinking,
 } from "./answerQuestionWorkflow";
 
 // Mock Analytics Engine Dataset
@@ -130,6 +123,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockDeduplicationStore.isMarked.mockResolvedValue(false);
+		mockThinkingSummarizer.summarize.mockResolvedValue("思考要約");
 		// Reset fetch mock
 		globalThis.fetch = vi.fn();
 	});
@@ -323,27 +317,56 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		};
 		const history: HistoryOutput = { history: [] };
 
-		it("streams Gemini response and edits Discord message", async () => {
+		const mockStream = (
+			events: Array<
+				| { type: "thinking"; delta: string }
+				| {
+						type: "response";
+						delta: string;
+						accumulated: string;
+				  }
+				| {
+						type: "usage";
+						usage: {
+							promptTokens: number;
+							cachedTokens: number;
+							thoughtsTokens: number;
+							candidatesTokens: number;
+							totalTokens: number;
+						};
+				  }
+			>,
+		) => {
+			mockGeminiGateway.generateStream.mockImplementation(async function* () {
+				for (const event of events) {
+					yield event;
+				}
+			});
+		};
+
+		it("streams typed events, edits Discord, and returns history and usage", async () => {
 			const updatedHistory: HistoryEntry[] = [
 				{ role: "user", text: "質問: test message" },
 				{ role: "model", text: "full response" },
 			];
-			mockGeminiInstance.askStream.mockImplementation(
-				async (
-					_input: string,
-					_sheet: string,
-					_desc: string,
-					onChunk: (
-						text: string,
-						phase: "thinking" | "response",
-					) => Promise<void>,
-				) => {
-					await onChunk("partial", "response");
-					await onChunk("full response", "response");
-					return "full response";
+			mockStream([
+				{ type: "response", delta: "partial", accumulated: "partial" },
+				{
+					type: "response",
+					delta: " response",
+					accumulated: "full response",
 				},
-			);
-			mockGeminiInstance.getHistory.mockReturnValue(updatedHistory);
+				{
+					type: "usage",
+					usage: {
+						promptTokens: 100,
+						cachedTokens: 25,
+						thoughtsTokens: 10,
+						candidatesTokens: 20,
+						totalTokens: 130,
+					},
+				},
+			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
 
 			const result = await streamGeminiWithDiscordEditsStep(
@@ -358,7 +381,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			expect(result.response).toBe("full response");
 			expect(result.updatedHistory).toEqual(updatedHistory);
-			// Final edit should contain only response text (not thinking)
+			expect(result.usage).toEqual({
+				promptTokens: 100,
+				cachedTokens: 25,
+				thoughtsTokens: 10,
+				candidatesTokens: 20,
+				totalTokens: 130,
+			});
 			const lastCall =
 				mockDiscordInstance.editOriginalMessage.mock.calls.at(-1);
 			expect(lastCall?.[0]).toBe("> user question\nfull response");
@@ -366,8 +395,9 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("delivers a long final answer in ordered chunks without loss", async () => {
 			const response = "a".repeat(4500);
-			mockGeminiInstance.askStream.mockResolvedValue(response);
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockStream([
+				{ type: "response", delta: response, accumulated: response },
+			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 			mockDiscordInstance.postMessage.mockResolvedValue(undefined);
 
@@ -390,72 +420,51 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(deliveredChunks.every((chunk) => chunk.length <= 2000)).toBe(true);
 			expect(deliveredChunks.join("")).toBe(formatAnswer("question", response));
 			expect(result).toMatchObject({
-				editCount: 1,
+				editCount: 2,
 				chunkCount: 2,
 				deliveryStatus: "success",
 				failedChunks: [],
 			});
 		});
 
-		it("returns an empty delivery result for an empty Gemini answer", async () => {
-			mockGeminiInstance.askStream.mockResolvedValue("");
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+		it("rejects an empty Gemini answer before persisting history", async () => {
+			mockStream([{ type: "thinking", delta: "thought only" }]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 
-			const result = await streamGeminiWithDiscordEditsStep(
-				mockEnv,
-				"token",
-				"question",
-				"message",
-				sheetData,
-				history,
-				mockLogger,
-			);
-
-			expect(mockDiscordInstance.editOriginalMessage).not.toHaveBeenCalled();
-			expect(mockDiscordInstance.postMessage).not.toHaveBeenCalled();
-			expect(result).toMatchObject({
-				editCount: 0,
-				chunkCount: 0,
-				deliveryStatus: "empty",
-				failedChunks: [],
+			await expect(
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				),
+			).rejects.toMatchObject({
+				service: "gemini",
+				operation: "validate streamed response",
+				retryable: false,
 			});
+
+			expect(mockDiscordInstance.postMessage).not.toHaveBeenCalled();
 		});
 
 		it("displays summarized thinking content with thought balloon", async () => {
-			mockGenerateContent.mockResolvedValue({
-				candidates: [
-					{ content: { parts: [{ text: "問題を多角的に分析中" }] } },
-				],
-			});
-			// Simulate multiple thinking chunks as the real streaming client sends them
-			const thinkingChunk1 =
-				"analyzing the problem in detail here, considering multiple factors";
-			const thinkingChunk2 =
-				" and approaches, weighing pros and cons of each option, looking at historical data for patterns and insights that might help us";
-			const thinkingChunk3 =
-				" and finally synthesizing all findings into a coherent answer strategy";
-			mockGeminiInstance.askStream.mockImplementation(
-				async (
-					_input: string,
-					_sheet: string,
-					_desc: string,
-					onChunk: (
-						text: string,
-						phase: "thinking" | "response",
-					) => Promise<void>,
-				) => {
-					// Individual thinking chunks (not accumulated) — matching gemini.ts behavior
-					await onChunk(thinkingChunk1, "thinking");
-					await onChunk(thinkingChunk2, "thinking");
-					await onChunk(thinkingChunk3, "thinking");
-					await onChunk("final answer", "response");
-					return "final answer";
-				},
+			mockThinkingSummarizer.summarize.mockResolvedValue(
+				"問題を多角的に分析中",
 			);
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockStream([
+				{ type: "thinking", delta: "private thought" },
+				{
+					type: "response",
+					delta: "final answer",
+					accumulated: "final answer",
+				},
+			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
 
-			await streamGeminiWithDiscordEditsStep(
+			const result = await streamGeminiWithDiscordEditsStep(
 				mockEnv,
 				"token",
 				"q",
@@ -471,53 +480,24 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(firstCall).toContain(":thought_balloon:");
 			expect(firstCall).toContain("問題を多角的に分析中");
 			expect(firstCall).not.toContain("```");
-
-			// First summarization fires immediately on the first thinking chunk
-			const firstSummarizeCall = mockGenerateContent.mock.calls[0]?.[0];
-			const firstPrompt = firstSummarizeCall?.contents as string;
-			expect(firstPrompt).toContain(thinkingChunk1);
-
-			// Subsequent summarization calls receive accumulated text
-			if (mockGenerateContent.mock.calls.length > 1) {
-				const laterCall = mockGenerateContent.mock.calls.at(-1)?.[0];
-				const laterPrompt = laterCall?.contents as string;
-				expect(laterPrompt).toContain(thinkingChunk1);
-				expect(laterPrompt).toContain(thinkingChunk2);
-			}
+			expect(mockThinkingSummarizer.summarize).toHaveBeenCalledWith(
+				"private thought",
+			);
+			expect(result.response).toBe("final answer");
+			expect(result.updatedHistory).not.toContainEqual(
+				expect.objectContaining({ text: expect.stringContaining("private") }),
+			);
 		});
 
 		it("forces Discord edit on phase transition from thinking to response", async () => {
-			mockGenerateContent.mockResolvedValue({
-				candidates: [{ content: { parts: [{ text: "思考要約" }] } }],
-			});
-			mockGeminiInstance.askStream.mockImplementation(
-				async (
-					_input: string,
-					_sheet: string,
-					_desc: string,
-					onChunk: (
-						text: string,
-						phase: "thinking" | "response",
-					) => Promise<void>,
-				) => {
-					// Individual thinking chunks (matching gemini.ts behavior)
-					await onChunk(
-						"long thinking text that exceeds minimum chunk size threshold for display",
-						"thinking",
-					);
-					await onChunk(
-						" continued analysis with additional considerations and reasoning steps here",
-						"thinking",
-					);
-					await onChunk(
-						" and more thoughts to accumulate past the threshold value needed",
-						"thinking",
-					);
-					await onChunk("response start", "response");
-					return "response start";
+			mockStream([
+				{ type: "thinking", delta: "thought" },
+				{
+					type: "response",
+					delta: "response start",
+					accumulated: "response start",
 				},
-			);
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
 
 			await streamGeminiWithDiscordEditsStep(
@@ -538,21 +518,13 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("continues streaming when intermediate Discord edit fails", async () => {
-			mockGeminiInstance.askStream.mockImplementation(
-				async (
-					_input: string,
-					_sheet: string,
-					_desc: string,
-					onChunk: (
-						text: string,
-						phase: "thinking" | "response",
-					) => Promise<void>,
-				) => {
-					await onChunk("response text", "response");
-					return "response text";
+			mockStream([
+				{
+					type: "response",
+					delta: "response text",
+					accumulated: "response text",
 				},
-			);
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+			]);
 			// Intermediate edits may fail, but final edit succeeds
 			mockDiscordInstance.editOriginalMessage
 				.mockRejectedValueOnce(
@@ -580,15 +552,16 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledTimes(2);
 		});
 
-		it("passes existing history to GeminiClient", async () => {
+		it("passes structured history and configured models to the AI services", async () => {
 			const existingHistory: HistoryEntry[] = [
 				{ role: "user", text: "previous" },
 			];
 			const historyWithExisting: HistoryOutput = {
 				history: existingHistory,
 			};
-			mockGeminiInstance.askStream.mockResolvedValue("response");
-			mockGeminiInstance.getHistory.mockReturnValue([]);
+			mockStream([
+				{ type: "response", delta: "response", accumulated: "response" },
+			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
 
 			await streamGeminiWithDiscordEditsStep(
@@ -601,64 +574,26 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockLogger,
 			);
 
-			expect(createGeminiClient).toHaveBeenCalledWith(
+			expect(createGeminiGateway).toHaveBeenCalledWith(
 				mockEnv.GEMINI_API_KEY,
-				existingHistory,
-				mockLogger,
-				"gemini-3.6-flash",
-			);
-		});
-	});
-
-	describe("summarizeThinking", () => {
-		it("returns summarized text from LLM", async () => {
-			mockGenerateContent.mockResolvedValue({
-				candidates: [{ content: { parts: [{ text: "要約結果テスト" }] } }],
-			});
-			const { GoogleGenAI } = await import("@google/genai");
-			const client = new GoogleGenAI({ apiKey: "test" });
-
-			const result = await summarizeThinking(
-				client,
-				"long thinking text here",
-				mockLogger,
-				"configured-summary-model",
-			);
-
-			expect(result).toBe("要約結果テスト");
-			expect(mockGenerateContent).toHaveBeenCalledWith(
-				expect.objectContaining({ model: "configured-summary-model" }),
-			);
-		});
-
-		it("returns fallback on empty response", async () => {
-			mockGenerateContent.mockResolvedValue({
-				candidates: [{ content: { parts: [{ text: "" }] } }],
-			});
-			const { GoogleGenAI } = await import("@google/genai");
-			const client = new GoogleGenAI({ apiKey: "test" });
-
-			const result = await summarizeThinking(
-				client,
-				"thinking text",
 				mockLogger,
 			);
-
-			expect(result).toBe("考え中...");
-		});
-
-		it("returns fallback on API error", async () => {
-			mockGenerateContent.mockRejectedValue(new Error("API error"));
-			const { GoogleGenAI } = await import("@google/genai");
-			const client = new GoogleGenAI({ apiKey: "test" });
-
-			const result = await summarizeThinking(
-				client,
-				"thinking text",
+			expect(createThinkingSummarizer).toHaveBeenCalledWith(
+				mockGeminiGateway,
+				"gemini-2.5-flash-lite",
 				mockLogger,
 			);
-
-			expect(result).toBe("考え中...");
+			expect(mockGeminiGateway.generateStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "gemini-3.6-flash",
+					prompt: expect.objectContaining({
+						contents: [
+							{ role: "user", parts: [{ text: "previous" }] },
+							{ role: "user", parts: [{ text: "質問: message" }] },
+						],
+					}),
+				}),
+			);
 		});
 	});
 
