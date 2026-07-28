@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Logger } from "../utils/logger";
 
 const mockGetGoogleAuthToken = vi.fn();
 const mockLoadInfo = vi.fn();
@@ -40,7 +41,7 @@ const mockLogger = {
 	error: vi.fn(),
 	debug: vi.fn(),
 	withContext: vi.fn().mockReturnThis(),
-};
+} as unknown as Logger;
 
 function setupSheets(options?: {
 	hasTestSheet?: boolean;

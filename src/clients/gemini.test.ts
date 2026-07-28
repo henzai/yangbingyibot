@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HistoryEntry } from "../types";
+import type { Logger } from "../utils/logger";
 
 const mockGenerateContent = vi.fn();
 const mockGenerateContentStream = vi.fn();
@@ -30,7 +32,9 @@ describe("GeminiClient", () => {
 		});
 
 		it("initializes with provided history", () => {
-			const history = [{ role: "user", text: "previous question" }];
+			const history: HistoryEntry[] = [
+				{ role: "user", text: "previous question" },
+			];
 			const client = new GeminiClient("test-api-key", history);
 			expect(client.getHistory()).toEqual(history);
 		});
@@ -129,7 +133,7 @@ describe("GeminiClient", () => {
 				],
 			});
 
-			const history = [{ role: "user", text: "previous" }];
+			const history: HistoryEntry[] = [{ role: "user", text: "previous" }];
 			const client = new GeminiClient("test-api-key", history);
 
 			await client.ask("new question", "sheet", "desc");
@@ -320,7 +324,7 @@ describe("GeminiClient", () => {
 			})();
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
-			const history = [{ role: "user", text: "previous" }];
+			const history: HistoryEntry[] = [{ role: "user", text: "previous" }];
 			const client = new GeminiClient("test-api-key", history);
 
 			await client.askStream("new question", "sheet", "desc", async () => {});
@@ -353,7 +357,7 @@ describe("GeminiClient", () => {
 				// Pass null in history to cause a TypeError in buildPrompt's map()
 				// TypeError message doesn't contain "API" or "AI"
 				const client = new GeminiClient("test-api-key", [
-					null as unknown as { role: string; text: string },
+					null as unknown as HistoryEntry,
 				]);
 
 				await expect(client.ask("q", "s", "d")).rejects.toThrow(
@@ -381,7 +385,7 @@ describe("GeminiClient", () => {
 				// Pass null in history to cause a TypeError in buildPrompt's map()
 				// TypeError message doesn't contain "API" or "AI"
 				const client = new GeminiClient("test-api-key", [
-					null as unknown as { role: string; text: string },
+					null as unknown as HistoryEntry,
 				]);
 
 				await expect(
@@ -418,7 +422,11 @@ describe("GeminiClient", () => {
 			});
 
 			const log = makeLogger();
-			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+			await new GeminiClient("test-api-key", [], log as unknown as Logger).ask(
+				"q",
+				"s",
+				"d",
+			);
 
 			expect(usageOf(log)).toMatchObject({
 				mode: "generate",
@@ -446,12 +454,11 @@ describe("GeminiClient", () => {
 			mockGenerateContentStream.mockResolvedValue(mockStream);
 
 			const log = makeLogger();
-			await new GeminiClient("test-api-key", [], log).askStream(
-				"q",
-				"s",
-				"d",
-				async () => {},
-			);
+			await new GeminiClient(
+				"test-api-key",
+				[],
+				log as unknown as Logger,
+			).askStream("q", "s", "d", async () => {});
 
 			expect(usageOf(log)).toMatchObject({
 				mode: "stream",
@@ -468,7 +475,11 @@ describe("GeminiClient", () => {
 			});
 
 			const log = makeLogger();
-			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+			await new GeminiClient("test-api-key", [], log as unknown as Logger).ask(
+				"q",
+				"s",
+				"d",
+			);
 
 			expect(usageOf(log)).toMatchObject({ cachedTokens: 0, cachedRatio: 0 });
 		});
@@ -480,7 +491,11 @@ describe("GeminiClient", () => {
 			});
 
 			const log = makeLogger();
-			await new GeminiClient("test-api-key", [], log).ask("q", "s", "d");
+			await new GeminiClient("test-api-key", [], log as unknown as Logger).ask(
+				"q",
+				"s",
+				"d",
+			);
 
 			expect(usageOf(log)).toMatchObject({
 				promptTokens: 0,
@@ -494,11 +509,11 @@ describe("GeminiClient", () => {
 			});
 
 			const log = makeLogger();
-			const result = await new GeminiClient("test-api-key", [], log).ask(
-				"q",
-				"s",
-				"d",
-			);
+			const result = await new GeminiClient(
+				"test-api-key",
+				[],
+				log as unknown as Logger,
+			).ask("q", "s", "d");
 
 			expect(result).toBe("AI response");
 			expect(usageOf(log)).toBeUndefined();
@@ -515,7 +530,7 @@ describe("GeminiClient", () => {
 		});
 
 		it("creates client with initial history", () => {
-			const history = [{ role: "user", text: "hello" }];
+			const history: HistoryEntry[] = [{ role: "user", text: "hello" }];
 			const client = createGeminiClient("test-api-key", history);
 			expect(client.getHistory()).toEqual(history);
 		});

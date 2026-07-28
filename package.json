@@ -13,7 +13,9 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"check": "biome check --write .",
-		"check:ci": "biome check ."
+		"check:ci": "biome check .",
+		"typecheck": "tsc --noEmit",
+		"verify": "npm run check:ci && npm run typecheck && npm test && wrangler deploy --dry-run --minify src/index.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.5",

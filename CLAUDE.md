@@ -11,6 +11,8 @@ npm test             # Run tests with Vitest
 npm run register     # Register Discord slash commands via Discord API
 npm run check        # Run Biome formatter + linter with auto-fix
 npm run check:ci     # Run Biome check without writing (for CI)
+npm run typecheck    # Run TypeScript type checking without emitting files
+npm run verify       # Run all non-writing checks, tests, and a deploy dry-run
 ```
 
 ## Architecture
