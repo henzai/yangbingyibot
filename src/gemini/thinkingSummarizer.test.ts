@@ -28,16 +28,25 @@ describe("ThinkingSummarizer", () => {
 			gateway as unknown as IGeminiGateway,
 			"summary-model",
 			log,
-		).summarize("long thought");
+		).summarize("前の要約", "new thought");
 
-		expect(result).toBe("要約結果");
+		expect(result).toEqual({ text: "要約結果", usage: null, success: true });
 		expect(gateway.generateText).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: "summary-model",
 				temperature: 0,
 				maxOutputTokens: 128,
 				prompt: expect.objectContaining({
-					contents: [{ role: "user", parts: [{ text: "long thought" }] }],
+					contents: [
+						{
+							role: "user",
+							parts: [
+								{
+									text: "前回の要約:\n前の要約\n\n新しい思考内容:\nnew thought",
+								},
+							],
+						},
+					],
 				}),
 			}),
 		);
@@ -51,8 +60,12 @@ describe("ThinkingSummarizer", () => {
 				gateway as unknown as IGeminiGateway,
 				"model",
 				log,
-			).summarize("thought"),
-		).resolves.toBe(THINKING_FALLBACK);
+			).summarize("", "thought"),
+		).resolves.toEqual({
+			text: THINKING_FALLBACK,
+			usage: null,
+			success: false,
+		});
 	});
 
 	it("returns fallback when summary generation fails", async () => {
@@ -63,8 +76,12 @@ describe("ThinkingSummarizer", () => {
 				gateway as unknown as IGeminiGateway,
 				"model",
 				log,
-			).summarize("thought"),
-		).resolves.toBe(THINKING_FALLBACK);
+			).summarize("", "thought"),
+		).resolves.toEqual({
+			text: THINKING_FALLBACK,
+			usage: null,
+			success: false,
+		});
 		expect(log.warn).toHaveBeenCalledWith(
 			"Thinking summarization failed (non-fatal)",
 			expect.objectContaining({ service: "gemini" }),

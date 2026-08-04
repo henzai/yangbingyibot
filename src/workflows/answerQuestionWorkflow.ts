@@ -23,6 +23,7 @@ import { createGeminiGateway } from "../gemini/gateway";
 import { buildAnswerPrompt } from "../gemini/promptBuilder";
 import { StreamCoordinator } from "../gemini/streamCoordinator";
 import { createThinkingSummarizer } from "../gemini/thinkingSummarizer";
+import { addGeminiUsage } from "../gemini/types";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
@@ -180,6 +181,13 @@ export async function streamGeminiWithDiscordEditsStep(
 	let editCount = 0;
 	let retryCount = 0;
 	let deliveryDurationMs = 0;
+	let thinkingSummary = "";
+	let summarizedThinkingLength = 0;
+	let thinkingSummaryUsage: StreamingGeminiOutput["thinkingSummaryUsage"] =
+		null;
+	let thinkingSummaryCallCount = 0;
+	let thinkingSummarySuccessCount = 0;
+	let thinkingSummaryDurationMs = 0;
 
 	log.info("Starting Gemini streaming with Discord edits");
 	for await (const event of gateway.generateStream({
@@ -191,10 +199,28 @@ export async function streamGeminiWithDiscordEditsStep(
 			continue;
 		}
 
-		const content =
-			decision.phase === "thinking"
-				? formatThinking(question, await summarizer.summarize(decision.text))
-				: formatAnswer(question, decision.text);
+		let content: string;
+		if (decision.phase === "thinking") {
+			const summaryStartTime = Date.now();
+			const summaryResult = await summarizer.summarize(
+				thinkingSummary,
+				decision.text.slice(summarizedThinkingLength),
+			);
+			thinkingSummaryDurationMs += Date.now() - summaryStartTime;
+			thinkingSummaryCallCount++;
+			thinkingSummaryUsage = addGeminiUsage(
+				thinkingSummaryUsage,
+				summaryResult.usage,
+			);
+			if (summaryResult.success) {
+				thinkingSummary = summaryResult.text;
+				summarizedThinkingLength = decision.textLength;
+				thinkingSummarySuccessCount++;
+			}
+			content = formatThinking(question, summaryResult.text);
+		} else {
+			content = formatAnswer(question, decision.text);
+		}
 		const deliveryStartTime = Date.now();
 		const result = await delivery.deliverPreview(content);
 		deliveryDurationMs += Date.now() - deliveryStartTime;
@@ -252,6 +278,10 @@ export async function streamGeminiWithDiscordEditsStep(
 			{ role: "model", text: response },
 		],
 		usage: streamResult.usage,
+		thinkingSummaryUsage,
+		thinkingSummaryCallCount,
+		thinkingSummarySuccessCount,
+		thinkingSummaryDurationMs,
 		editCount,
 		chunkCount: finalDelivery.chunkCount,
 		deliveryStatus: finalDelivery.status,
@@ -360,6 +390,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 		const { token, message, requestId, conversationKey } = event.payload;
 		const log = logger.withContext({ requestId, workflowId: event.instanceId });
 		const metrics = getMetricsClient(this.env, log);
+		const config = loadConfig(this.env);
 
 		log.info("Workflow started", { messageLength: message.length });
 		const workflowStartTime = Date.now();
@@ -445,6 +476,23 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 					success: geminiSuccess,
 					durationMs: Date.now() - geminiStartTime,
 					usage: geminiUsage,
+					model: config.geminiModel,
+					purpose: "answer",
+					callCount: 1,
+				});
+			}
+
+			if (streamResult.thinkingSummaryCallCount > 0) {
+				metrics.recordGeminiCall({
+					requestId,
+					success:
+						streamResult.thinkingSummarySuccessCount ===
+						streamResult.thinkingSummaryCallCount,
+					durationMs: streamResult.thinkingSummaryDurationMs,
+					usage: streamResult.thinkingSummaryUsage,
+					model: config.geminiSummaryModel,
+					purpose: "thinking_summary",
+					callCount: streamResult.thinkingSummaryCallCount,
 				});
 			}
 

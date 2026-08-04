@@ -19,6 +19,10 @@ export interface StreamingGeminiOutput {
 	response: string;
 	updatedHistory: HistoryEntry[];
 	usage: GeminiUsage | null;
+	thinkingSummaryUsage: GeminiUsage | null;
+	thinkingSummaryCallCount: number;
+	thinkingSummarySuccessCount: number;
+	thinkingSummaryDurationMs: number;
 	editCount: number;
 	chunkCount: number;
 	deliveryStatus: DeliveryStatus;

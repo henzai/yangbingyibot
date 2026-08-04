@@ -123,7 +123,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockDeduplicationStore.isMarked.mockResolvedValue(false);
-		mockThinkingSummarizer.summarize.mockResolvedValue("思考要約");
+		mockThinkingSummarizer.summarize.mockResolvedValue({
+			text: "思考要約",
+			usage: null,
+			success: true,
+		});
 		// Reset fetch mock
 		globalThis.fetch = vi.fn();
 	});
@@ -451,9 +455,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("displays summarized thinking content with thought balloon", async () => {
-			mockThinkingSummarizer.summarize.mockResolvedValue(
-				"問題を多角的に分析中",
-			);
+			mockThinkingSummarizer.summarize.mockResolvedValue({
+				text: "問題を多角的に分析中",
+				usage: null,
+				success: true,
+			});
 			mockStream([
 				{ type: "thinking", delta: "private thought" },
 				{
@@ -481,12 +487,85 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(firstCall).toContain("問題を多角的に分析中");
 			expect(firstCall).not.toContain("```");
 			expect(mockThinkingSummarizer.summarize).toHaveBeenCalledWith(
+				"",
 				"private thought",
 			);
 			expect(result.response).toBe("final answer");
 			expect(result.updatedHistory).not.toContainEqual(
 				expect.objectContaining({ text: expect.stringContaining("private") }),
 			);
+		});
+
+		it("summarizes only new thinking and aggregates summary usage", async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(0);
+			const secondThought = "x".repeat(200);
+			mockThinkingSummarizer.summarize
+				.mockResolvedValueOnce({
+					text: "最初の要約",
+					usage: {
+						promptTokens: 10,
+						cachedTokens: 1,
+						thoughtsTokens: 0,
+						candidatesTokens: 2,
+						totalTokens: 12,
+					},
+					success: true,
+				})
+				.mockResolvedValueOnce({
+					text: "更新後の要約",
+					usage: {
+						promptTokens: 20,
+						cachedTokens: 2,
+						thoughtsTokens: 0,
+						candidatesTokens: 3,
+						totalTokens: 23,
+					},
+					success: true,
+				});
+			mockGeminiGateway.generateStream.mockImplementation(async function* () {
+				yield { type: "thinking", delta: "first thought" };
+				vi.setSystemTime(2000);
+				yield { type: "thinking", delta: secondThought };
+				yield {
+					type: "response",
+					delta: "answer",
+					accumulated: "answer",
+				};
+			});
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"message",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(mockThinkingSummarizer.summarize).toHaveBeenNthCalledWith(
+				1,
+				"",
+				"first thought",
+			);
+			expect(mockThinkingSummarizer.summarize).toHaveBeenNthCalledWith(
+				2,
+				"最初の要約",
+				secondThought,
+			);
+			expect(result).toMatchObject({
+				thinkingSummaryCallCount: 2,
+				thinkingSummarySuccessCount: 2,
+				thinkingSummaryUsage: {
+					promptTokens: 30,
+					cachedTokens: 3,
+					thoughtsTokens: 0,
+					candidatesTokens: 5,
+					totalTokens: 35,
+				},
+			});
 		});
 
 		it("forces Discord edit on phase transition from thinking to response", async () => {
@@ -585,7 +664,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 			expect(mockGeminiGateway.generateStream).toHaveBeenCalledWith(
 				expect.objectContaining({
-					model: "gemini-3.6-flash",
+					model: "gemini-3.5-flash-lite",
 					prompt: expect.objectContaining({
 						contents: [
 							{ role: "user", parts: [{ text: "previous" }] },

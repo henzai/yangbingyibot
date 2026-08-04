@@ -4,9 +4,15 @@ import {
 } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { buildThinkingSummaryPrompt } from "./promptBuilder";
-import type { IGeminiGateway } from "./types";
+import type { GeminiUsage, IGeminiGateway } from "./types";
 
 export const THINKING_FALLBACK = "考え中...";
+
+export type ThinkingSummaryResult = {
+	text: string;
+	usage: GeminiUsage | null;
+	success: boolean;
+};
 
 export class ThinkingSummarizer {
 	constructor(
@@ -15,17 +21,20 @@ export class ThinkingSummarizer {
 		private readonly log: Logger = defaultLogger,
 	) {}
 
-	async summarize(thinkingText: string): Promise<string> {
+	async summarize(
+		previousSummary: string,
+		newThinking: string,
+	): Promise<ThinkingSummaryResult> {
 		try {
 			const result = await this.gateway.generateText({
 				model: this.model,
-				prompt: buildThinkingSummaryPrompt(thinkingText),
+				prompt: buildThinkingSummaryPrompt(previousSummary, newThinking),
 				temperature: 0,
 				maxOutputTokens: 128,
 			});
 			const summary = result.text.trim();
 			if (summary) {
-				return summary;
+				return { text: summary, usage: result.usage, success: true };
 			}
 			this.log.warn("Empty summarization result, using fallback");
 		} catch (error) {
@@ -38,7 +47,7 @@ export class ThinkingSummarizer {
 				...getExternalErrorLogContext(normalized),
 			});
 		}
-		return THINKING_FALLBACK;
+		return { text: THINKING_FALLBACK, usage: null, success: false };
 	}
 }
 

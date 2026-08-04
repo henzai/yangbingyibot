@@ -31,14 +31,21 @@ ${input.knowledge}
 	};
 }
 
-export function buildThinkingSummaryPrompt(thinkingText: string): GeminiPrompt {
+export function buildThinkingSummaryPrompt(
+	previousSummary: string,
+	newThinking: string,
+): GeminiPrompt {
 	return {
 		systemInstruction:
-			"AIの思考過程を日本語の1文（50文字以内）に要約し、要約文だけを出力してください。",
+			"前回の要約に新しい思考内容を反映し、AIの思考過程を日本語の1文（50文字以内）に要約してください。要約文だけを出力してください。",
 		contents: [
 			{
 				role: "user",
-				parts: [{ text: thinkingText }],
+				parts: [
+					{
+						text: `前回の要約:\n${previousSummary || "（なし）"}\n\n新しい思考内容:\n${newThinking}`,
+					},
+				],
 			},
 		],
 	};

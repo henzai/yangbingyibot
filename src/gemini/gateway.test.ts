@@ -6,6 +6,7 @@ const mockGenerateContent = vi.fn();
 const mockGenerateContentStream = vi.fn();
 
 vi.mock("@google/genai", () => ({
+	ThinkingLevel: { LOW: "LOW" },
 	GoogleGenAI: vi.fn(
 		class {
 			models = {
@@ -74,9 +75,22 @@ describe("GeminiGateway", () => {
 			contents: prompt.contents,
 			config: expect.objectContaining({
 				systemInstruction: "system",
-				thinkingConfig: { includeThoughts: true },
+				maxOutputTokens: 8192,
+				thinkingConfig: {
+					includeThoughts: true,
+					thinkingLevel: "LOW",
+				},
 			}),
 		});
+		expect(
+			mockGenerateContentStream.mock.calls[0]?.[0].config,
+		).not.toHaveProperty("temperature");
+		expect(
+			mockGenerateContentStream.mock.calls[0]?.[0].config,
+		).not.toHaveProperty("topP");
+		expect(
+			mockGenerateContentStream.mock.calls[0]?.[0].config,
+		).not.toHaveProperty("topK");
 	});
 
 	it("emits typed thinking, accumulated response, and usage events", async () => {

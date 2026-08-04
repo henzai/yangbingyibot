@@ -16,6 +16,22 @@ export type GeminiUsage = {
 	totalTokens: number;
 };
 
+export function addGeminiUsage(
+	total: GeminiUsage | null,
+	usage: GeminiUsage | null,
+): GeminiUsage | null {
+	if (!usage) {
+		return total;
+	}
+	return {
+		promptTokens: (total?.promptTokens ?? 0) + usage.promptTokens,
+		cachedTokens: (total?.cachedTokens ?? 0) + usage.cachedTokens,
+		thoughtsTokens: (total?.thoughtsTokens ?? 0) + usage.thoughtsTokens,
+		candidatesTokens: (total?.candidatesTokens ?? 0) + usage.candidatesTokens,
+		totalTokens: (total?.totalTokens ?? 0) + usage.totalTokens,
+	};
+}
+
 export type GeminiStreamEvent =
 	| {
 			type: "thinking";

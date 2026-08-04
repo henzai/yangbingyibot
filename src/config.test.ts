@@ -19,6 +19,7 @@ describe("loadConfig", () => {
 	it("uses backward-compatible defaults for optional settings", () => {
 		const config = loadConfig(createBindings());
 
+		expect(DEFAULT_RUNTIME_CONFIG.geminiModel).toBe("gemini-3.5-flash-lite");
 		expect(config).toMatchObject({
 			geminiModel: DEFAULT_RUNTIME_CONFIG.geminiModel,
 			geminiSummaryModel: DEFAULT_RUNTIME_CONFIG.geminiSummaryModel,
