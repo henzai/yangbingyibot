@@ -1,14 +1,30 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended", ":automergeMinor"],
+	"extends": ["config:recommended", ":automergeMinor", ":automergeDigest"],
+	"automergeType": "pr",
+	"platformAutomerge": true,
+	"automergeStrategy": "squash",
 	"packageRules": [
 		{
-			"groupName": "vitest",
+			"description": "Keep the Cloudflare and Vitest toolchain compatible",
+			"groupName": "Cloudflare and Vitest toolchain",
+			"groupSlug": "cloudflare-vitest",
+			"matchManagers": ["npm"],
 			"matchPackageNames": [
-				"/vitest/",
-				"/@vitest//",
-				"/@cloudflare/vitest-pool-workers/"
-			]
+				"vitest",
+				"@vitest/**",
+				"@cloudflare/vitest-pool-workers",
+				"wrangler"
+			],
+			"separateMajorMinor": false
+		},
+		{
+			"description": "Update official GitHub Actions together",
+			"groupName": "official GitHub Actions",
+			"groupSlug": "official-github-actions",
+			"matchManagers": ["github-actions"],
+			"matchPackageNames": ["actions/**"],
+			"separateMajorMinor": false
 		}
 	]
 }
