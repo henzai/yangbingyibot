@@ -131,11 +131,21 @@ export class GeminiGateway implements IGeminiGateway {
 
 		let accumulated = "";
 		let latestUsage: GeminiUsage | null = null;
+		let finishReason: string | undefined;
+		let blockReason: string | undefined;
 		try {
 			for await (const chunk of stream) {
 				const usage = toUsage(chunk.usageMetadata);
 				if (usage) {
 					latestUsage = usage;
+				}
+				const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
+				if (chunkFinishReason !== undefined) {
+					finishReason = chunkFinishReason;
+				}
+				const chunkBlockReason = chunk.promptFeedback?.blockReason;
+				if (chunkBlockReason !== undefined) {
+					blockReason = chunkBlockReason;
 				}
 
 				for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
@@ -163,9 +173,12 @@ export class GeminiGateway implements IGeminiGateway {
 		} else {
 			this.log.warn("Gemini usage metadata missing", { mode: "stream" });
 		}
+		yield { type: "finish", finishReason, blockReason };
 		this.log.info("Gemini streaming API completed", {
 			model: request.model,
 			durationMs: Date.now() - startTime,
+			finishReason,
+			blockReason,
 		});
 	}
 

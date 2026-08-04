@@ -53,6 +53,31 @@ function getMetricsClient(env: Bindings, log: Logger): IMetricsClient {
 	return new NoOpMetricsClient();
 }
 
+const BLOCKED_FINISH_REASONS = new Set([
+	"SAFETY",
+	"RECITATION",
+	"PROHIBITED_CONTENT",
+]);
+
+/**
+ * Explain an empty Gemini answer to the user based on why the stream finished.
+ */
+function emptyResponseUserMessage(
+	finishReason: string | undefined,
+	blockReason: string | undefined,
+): string {
+	if (finishReason === "MAX_TOKENS") {
+		return "思考が長くなりすぎて回答を生成できませんでした。質問を短く区切って再度お試しください。";
+	}
+	if (
+		blockReason ||
+		(finishReason && BLOCKED_FINISH_REASONS.has(finishReason))
+	) {
+		return "安全性フィルタにより回答できませんでした。";
+	}
+	return "AIから有効な応答が得られませんでした。";
+}
+
 // Step 1: Get sheet data from KV cache or Google Sheets
 export async function getSheetDataStep(
 	env: Bindings,
@@ -246,11 +271,18 @@ export async function streamGeminiWithDiscordEditsStep(
 	const streamResult = coordinator.getResult();
 	const response = streamResult.response;
 	if (!response.trim()) {
+		const { finishReason, blockReason } = streamResult;
+		log.error("Gemini returned an empty answer", {
+			finishReason,
+			blockReason,
+			thinkingLength: streamResult.thinking.length,
+			thoughtsTokens: streamResult.usage?.thoughtsTokens,
+		});
 		throw new ExternalServiceError({
 			service: "gemini",
 			operation: "validate streamed response",
 			retryable: false,
-			userMessage: "AIから有効な応答が得られませんでした。",
+			userMessage: emptyResponseUserMessage(finishReason, blockReason),
 		});
 	}
 
