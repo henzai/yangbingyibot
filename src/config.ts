@@ -4,7 +4,7 @@ const HISTORY_TTL_MIN_SECONDS = 60;
 const HISTORY_TTL_MAX_SECONDS = 86_400;
 
 export const DEFAULT_RUNTIME_CONFIG = {
-	geminiModel: "gemini-3.6-flash",
+	geminiModel: "gemini-3.5-flash-lite",
 	geminiSummaryModel: "gemini-2.5-flash-lite",
 	spreadsheet: {
 		id: "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg",

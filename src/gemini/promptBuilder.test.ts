@@ -38,13 +38,28 @@ describe("buildAnswerPrompt", () => {
 });
 
 describe("buildThinkingSummaryPrompt", () => {
-	it("places thought text in user content instead of the instruction", () => {
-		const prompt = buildThinkingSummaryPrompt("private thought");
+	it("places the previous summary and new thought in user content", () => {
+		const prompt = buildThinkingSummaryPrompt("前の要約", "private thought");
 
 		expect(prompt.systemInstruction).toContain("50文字以内");
 		expect(prompt.systemInstruction).not.toContain("private thought");
 		expect(prompt.contents).toEqual([
-			{ role: "user", parts: [{ text: "private thought" }] },
+			{
+				role: "user",
+				parts: [
+					{
+						text: "前回の要約:\n前の要約\n\n新しい思考内容:\nprivate thought",
+					},
+				],
+			},
 		]);
+	});
+
+	it("初回は前回の要約がないことを明示する", () => {
+		const prompt = buildThinkingSummaryPrompt("", "first thought");
+
+		expect(prompt.contents[0]?.parts[0]?.text).toContain(
+			"前回の要約:\n（なし）",
+		);
 	});
 });

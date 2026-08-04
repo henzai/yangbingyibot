@@ -1,6 +1,7 @@
 import {
 	type GenerateContentResponseUsageMetadata,
 	GoogleGenAI,
+	ThinkingLevel,
 } from "@google/genai";
 import {
 	ExternalServiceError,
@@ -18,13 +19,11 @@ import type {
 } from "./types";
 
 const ANSWER_GENERATION_CONFIG = {
-	temperature: 1,
-	topP: 0.95,
-	topK: 40,
 	maxOutputTokens: 8192,
 	responseMimeType: "text/plain",
 	thinkingConfig: {
 		includeThoughts: true,
+		thinkingLevel: ThinkingLevel.MINIMAL,
 	},
 };
 

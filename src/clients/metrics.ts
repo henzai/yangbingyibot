@@ -29,6 +29,9 @@ export interface MetricData {
 export interface GeminiMetricData extends MetricData {
 	retryCount?: number;
 	usage?: GeminiUsage | null;
+	model?: string;
+	purpose?: "answer" | "thinking_summary";
+	callCount?: number;
 }
 
 /**
@@ -85,7 +88,7 @@ export interface IMetricsClient {
  *
  * Data point structure:
  * - indexes: [requestId] (max 96 bytes, for efficient queries)
- * - blobs: [eventType, requestId, ...additional context]
+ * - blobs: [eventType, requestId, model, purpose, ...additional context]
  * - doubles: [durationMs, success (1/0), ...additional metrics]
  */
 export class MetricsClient implements IMetricsClient {
@@ -100,13 +103,17 @@ export class MetricsClient implements IMetricsClient {
 	/**
 	 * Record Gemini API call metrics
 	 * doubles: [durationMs, success, retryCount, promptTokens, cachedTokens,
-	 *   thoughtsTokens, candidatesTokens, totalTokens]
+	 *   thoughtsTokens, candidatesTokens, totalTokens, callCount]
 	 */
 	recordGeminiCall(data: GeminiMetricData): void {
 		const usage = data.usage;
 		this.writeDataPoint("gemini_api_call", {
 			indexes: [data.requestId.substring(0, 96)],
-			blobs: [data.requestId],
+			blobs: [
+				data.requestId,
+				data.model ?? "unknown",
+				data.purpose ?? "answer",
+			],
 			doubles: [
 				data.durationMs,
 				data.success ? 1 : 0,
@@ -116,6 +123,7 @@ export class MetricsClient implements IMetricsClient {
 				usage?.thoughtsTokens ?? 0,
 				usage?.candidatesTokens ?? 0,
 				usage?.totalTokens ?? 0,
+				data.callCount ?? 1,
 			],
 		});
 	}

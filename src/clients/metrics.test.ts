@@ -52,8 +52,8 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_abc123"],
-				blobs: ["gemini_api_call", "req_abc123"],
-				doubles: [1500, 1, 0, 0, 0, 0, 0, 0],
+				blobs: ["gemini_api_call", "req_abc123", "unknown", "answer"],
+				doubles: [1500, 1, 0, 0, 0, 0, 0, 0, 1],
 			});
 		});
 
@@ -69,8 +69,8 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_xyz789"],
-				blobs: ["gemini_api_call", "req_xyz789"],
-				doubles: [500, 0, 2, 0, 0, 0, 0, 0],
+				blobs: ["gemini_api_call", "req_xyz789", "unknown", "answer"],
+				doubles: [500, 0, 2, 0, 0, 0, 0, 0, 1],
 			});
 		});
 
@@ -85,8 +85,8 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_123"],
-				blobs: ["gemini_api_call", "req_123"],
-				doubles: [100, 1, 0, 0, 0, 0, 0, 0],
+				blobs: ["gemini_api_call", "req_123", "unknown", "answer"],
+				doubles: [100, 1, 0, 0, 0, 0, 0, 0, 1],
 			});
 		});
 
@@ -102,8 +102,8 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: [longRequestId.substring(0, 96)],
-				blobs: ["gemini_api_call", longRequestId],
-				doubles: [100, 1, 0, 0, 0, 0, 0, 0],
+				blobs: ["gemini_api_call", longRequestId, "unknown", "answer"],
+				doubles: [100, 1, 0, 0, 0, 0, 0, 0, 1],
 			});
 		});
 
@@ -113,6 +113,9 @@ describe("MetricsClient", () => {
 				success: true,
 				durationMs: 250,
 				retryCount: 1,
+				model: "gemini-3.5-flash-lite",
+				purpose: "thinking_summary",
+				callCount: 3,
 				usage: {
 					promptTokens: 100,
 					cachedTokens: 50,
@@ -124,8 +127,13 @@ describe("MetricsClient", () => {
 
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req_usage"],
-				blobs: ["gemini_api_call", "req_usage"],
-				doubles: [250, 1, 1, 100, 50, 10, 20, 130],
+				blobs: [
+					"gemini_api_call",
+					"req_usage",
+					"gemini-3.5-flash-lite",
+					"thinking_summary",
+				],
+				doubles: [250, 1, 1, 100, 50, 10, 20, 130, 3],
 			});
 		});
 	});
