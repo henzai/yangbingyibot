@@ -6,7 +6,7 @@ const mockGenerateContent = vi.fn();
 const mockGenerateContentStream = vi.fn();
 
 vi.mock("@google/genai", () => ({
-	ThinkingLevel: { MINIMAL: "MINIMAL" },
+	ThinkingLevel: { LOW: "LOW" },
 	GoogleGenAI: vi.fn(
 		class {
 			models = {
@@ -78,7 +78,7 @@ describe("GeminiGateway", () => {
 				maxOutputTokens: 8192,
 				thinkingConfig: {
 					includeThoughts: true,
-					thinkingLevel: "MINIMAL",
+					thinkingLevel: "LOW",
 				},
 			}),
 		});

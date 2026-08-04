@@ -23,7 +23,7 @@ const ANSWER_GENERATION_CONFIG = {
 	responseMimeType: "text/plain",
 	thinkingConfig: {
 		includeThoughts: true,
-		thinkingLevel: ThinkingLevel.MINIMAL,
+		thinkingLevel: ThinkingLevel.LOW,
 	},
 };
 
