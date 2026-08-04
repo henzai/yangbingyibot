@@ -57,9 +57,12 @@ function parseCsv(csv: string): string[][] {
 	return rows;
 }
 
-// TSVの区切りを壊さないよう、セル内の制御文字を空白に潰す
+// HTML改行を意味のある区切りへ変換し、TSVを壊す制御文字は空白に潰す
 function sanitizeCell(value: string | undefined): string {
-	return (value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+	return (value ?? "")
+		.replace(/\s*<br\s*\/?>\s*/gi, " / ")
+		.replace(/[\t\r\n]+/g, " ")
+		.trim();
 }
 
 export function compactSheetCsv(csv: string): string {

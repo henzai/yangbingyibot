@@ -1,8 +1,12 @@
 export const DISCORD_CONTENT_LIMIT = 2000;
 const PREFERRED_BOUNDARY_MIN_FILL_RATIO = 0.8;
 
+export function normalizeDiscordText(content: string): string {
+	return content.replace(/<br\s*\/?>/gi, "\n");
+}
+
 export function formatAnswer(question: string, answer: string): string {
-	return `> ${question}\n${answer}`;
+	return `> ${question}\n${normalizeDiscordText(answer)}`;
 }
 
 export function formatThinking(question: string, summary: string): string {

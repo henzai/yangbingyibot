@@ -4,6 +4,7 @@ import {
 	formatAnswer,
 	formatError,
 	formatThinking,
+	normalizeDiscordText,
 	splitContent,
 } from "./formatter";
 
@@ -16,6 +17,21 @@ describe("Discord formatter", () => {
 		expect(formatError("question", "failure")).toBe(
 			"> question\n:rotating_light: エラーが発生しました: failure",
 		);
+	});
+
+	it("normalizes HTML line breaks without changing Discord Markdown", () => {
+		const content = "**概要**<br>1行目<br/>2行目<BR />3行目";
+
+		expect(normalizeDiscordText(content)).toBe("**概要**\n1行目\n2行目\n3行目");
+		expect(formatAnswer("question", content)).toBe(
+			"> question\n**概要**\n1行目\n2行目\n3行目",
+		);
+	});
+
+	it("leaves content without HTML line breaks unchanged", () => {
+		const content = "**概要**\n- 1行目\n- 2行目";
+
+		expect(normalizeDiscordText(content)).toBe(content);
 	});
 
 	it.each([0, 1, 1999, 2000])(

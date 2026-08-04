@@ -15,6 +15,11 @@ describe("buildAnswerPrompt", () => {
 
 		expect(prompt.systemInstruction).toContain("回答方針");
 		expect(prompt.systemInstruction).toContain("シートの知識");
+		expect(prompt.systemInstruction).toContain("質問と同じ言語");
+		expect(prompt.systemInstruction).toContain("そのまま転載せず");
+		expect(prompt.systemInstruction).toContain("HTMLタグは使わず");
+		expect(prompt.systemInstruction).toContain("2〜3文で概要");
+		expect(prompt.systemInstruction).toContain("時系列の箇条書き");
 		expect(prompt.contents).toEqual([
 			{ role: "user", parts: [{ text: "質問: 前の質問" }] },
 			{ role: "model", parts: [{ text: "前の回答" }] },

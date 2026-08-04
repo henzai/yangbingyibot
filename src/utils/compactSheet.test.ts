@@ -89,6 +89,15 @@ describe("compactSheetCsv", () => {
 		expect(columns[1]).toBe("Yan MingJun");
 	});
 
+	it.each(["<br>", "<br/>", "<BR />"])(
+		"replaces an HTML line break (%s) with a semantic separator",
+		(lineBreak) => {
+			const csv = `${HEADER}\n"1","加入${lineBreak}移籍","SII"`;
+
+			expect(compactSheetCsv(csv).split("\n")[3]).toBe("1\t加入 / 移籍\tSII");
+		},
+	);
+
 	it("trims surrounding whitespace in cells", () => {
 		const csv = `${HEADER}\n"1","  闫明筠  ","SII"`;
 

@@ -379,6 +379,38 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(lastCall?.[0]).toBe("> user question\nfull response");
 		});
 
+		it("normalizes HTML line breaks in previews, final output, and history", async () => {
+			const rawResponse = "概要<br>2015年加入<BR />2016年移籍";
+			const normalizedResponse = "概要\n2015年加入\n2016年移籍";
+			mockStream([
+				{
+					type: "response",
+					delta: rawResponse,
+					accumulated: rawResponse,
+				},
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"test-token",
+				"経歴",
+				"経歴を教えて",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(result.response).toBe(normalizedResponse);
+			expect(result.updatedHistory.at(-1)).toEqual({
+				role: "model",
+				text: normalizedResponse,
+			});
+			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledWith(
+				`> 経歴\n${normalizedResponse}`,
+			);
+		});
+
 		it("delivers a long final answer in ordered chunks without loss", async () => {
 			const response = "a".repeat(4500);
 			mockStream([
