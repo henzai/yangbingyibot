@@ -45,6 +45,11 @@ export type GeminiStreamEvent =
 	| {
 			type: "usage";
 			usage: GeminiUsage;
+	  }
+	| {
+			type: "finish";
+			finishReason?: string;
+			blockReason?: string;
 	  };
 
 export type GeminiStreamRequest = {

@@ -29,6 +29,8 @@ export class StreamCoordinator {
 	private hasSeenThinking = false;
 	private response = "";
 	private usage: GeminiUsage | null = null;
+	private finishReason: string | undefined;
+	private blockReason: string | undefined;
 	private lastEditAt = 0;
 	private lastThinkingEditLength = 0;
 	private lastResponseEditLength = 0;
@@ -41,6 +43,12 @@ export class StreamCoordinator {
 	handle(event: GeminiStreamEvent, now: number): StreamPreviewDecision | null {
 		if (event.type === "usage") {
 			this.usage = event.usage;
+			return null;
+		}
+
+		if (event.type === "finish") {
+			this.finishReason = event.finishReason;
+			this.blockReason = event.blockReason;
 			return null;
 		}
 
@@ -115,12 +123,16 @@ export class StreamCoordinator {
 		response: string;
 		thinking: string;
 		usage: GeminiUsage | null;
+		finishReason: string | undefined;
+		blockReason: string | undefined;
 	} {
 		return {
 			phase: this.phase,
 			response: this.response,
 			thinking: this.thinking,
 			usage: this.usage,
+			finishReason: this.finishReason,
+			blockReason: this.blockReason,
 		};
 	}
 }

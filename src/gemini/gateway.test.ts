@@ -139,7 +139,68 @@ describe("GeminiGateway", () => {
 					totalTokens: 130,
 				},
 			},
+			{ type: "finish", finishReason: undefined, blockReason: undefined },
 		]);
+	});
+
+	it("emits the finish reason and block reason reported by the stream", async () => {
+		mockGenerateContentStream.mockResolvedValue(
+			(async function* () {
+				yield {
+					candidates: [
+						{ content: { parts: [{ text: "thought", thought: true }] } },
+					],
+				};
+				yield {
+					candidates: [{ finishReason: "MAX_TOKENS" }],
+					promptFeedback: { blockReason: "SAFETY" },
+				};
+			})(),
+		);
+		const log = makeLogger();
+
+		const events = await collect(
+			new GeminiGateway("key", log).generateStream({ model: "model", prompt }),
+		);
+
+		expect(events.at(-1)).toEqual({
+			type: "finish",
+			finishReason: "MAX_TOKENS",
+			blockReason: "SAFETY",
+		});
+		expect(log.info).toHaveBeenCalledWith(
+			"Gemini streaming API completed",
+			expect.objectContaining({
+				finishReason: "MAX_TOKENS",
+				blockReason: "SAFETY",
+			}),
+		);
+	});
+
+	it("keeps the last reported finish reason instead of a later undefined one", async () => {
+		mockGenerateContentStream.mockResolvedValue(
+			(async function* () {
+				yield {
+					candidates: [
+						{
+							content: { parts: [{ text: "answer" }] },
+							finishReason: "STOP",
+						},
+					],
+				};
+				yield { candidates: [{ content: { parts: [] } }] };
+			})(),
+		);
+
+		const events = await collect(
+			new GeminiGateway("key").generateStream({ model: "model", prompt }),
+		);
+
+		expect(events.at(-1)).toEqual({
+			type: "finish",
+			finishReason: "STOP",
+			blockReason: undefined,
+		});
 	});
 
 	it("normalizes an error raised while consuming the stream", async () => {
@@ -277,7 +338,10 @@ describe("GeminiGateway", () => {
 			new GeminiGateway("key", log).generateStream({ model: "model", prompt }),
 		);
 
-		expect(events).toHaveLength(1);
+		expect(events).toEqual([
+			{ type: "response", delta: "answer", accumulated: "answer" },
+			{ type: "finish", finishReason: undefined, blockReason: undefined },
+		]);
 		expect(log.warn).toHaveBeenCalledWith("Gemini usage metadata missing", {
 			mode: "stream",
 		});

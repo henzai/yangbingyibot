@@ -125,4 +125,46 @@ describe("StreamCoordinator", () => {
 			usage: { totalTokens: 17 },
 		});
 	});
+
+	it("records the finish reason without emitting a preview update", () => {
+		const coordinator = new StreamCoordinator(config);
+		coordinator.handle({ type: "thinking", delta: "thought only" }, 0);
+
+		expect(
+			coordinator.handle({ type: "finish", finishReason: "MAX_TOKENS" }, 1000),
+		).toBeNull();
+		expect(coordinator.getResult()).toMatchObject({
+			phase: "thinking",
+			response: "",
+			finishReason: "MAX_TOKENS",
+			blockReason: undefined,
+		});
+	});
+
+	it("records a prompt block reason from the finish event", () => {
+		const coordinator = new StreamCoordinator(config);
+
+		expect(
+			coordinator.handle(
+				{ type: "finish", finishReason: "SAFETY", blockReason: "SAFETY" },
+				0,
+			),
+		).toBeNull();
+		expect(coordinator.getResult()).toMatchObject({
+			finishReason: "SAFETY",
+			blockReason: "SAFETY",
+		});
+	});
+
+	it("leaves both reasons undefined when the stream finishes without them", () => {
+		const coordinator = new StreamCoordinator(config);
+		coordinator.handle({ type: "response", delta: "hi", accumulated: "hi" }, 0);
+		coordinator.handle({ type: "finish" }, 1);
+
+		expect(coordinator.getResult()).toMatchObject({
+			response: "hi",
+			finishReason: undefined,
+			blockReason: undefined,
+		});
+	});
 });

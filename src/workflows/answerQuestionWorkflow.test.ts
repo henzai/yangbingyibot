@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bindings, HistoryEntry } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
+import type { GeminiStreamEvent } from "../gemini/types";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -321,26 +322,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		};
 		const history: HistoryOutput = { history: [] };
 
-		const mockStream = (
-			events: Array<
-				| { type: "thinking"; delta: string }
-				| {
-						type: "response";
-						delta: string;
-						accumulated: string;
-				  }
-				| {
-						type: "usage";
-						usage: {
-							promptTokens: number;
-							cachedTokens: number;
-							thoughtsTokens: number;
-							candidatesTokens: number;
-							totalTokens: number;
-						};
-				  }
-			>,
-		) => {
+		const mockStream = (events: GeminiStreamEvent[]) => {
 			mockGeminiGateway.generateStream.mockImplementation(async function* () {
 				for (const event of events) {
 					yield event;
@@ -452,6 +434,133 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			});
 
 			expect(mockDiscordInstance.postMessage).not.toHaveBeenCalled();
+		});
+
+		it("logs the finish reason and token budget when the answer is empty", async () => {
+			mockStream([
+				{ type: "thinking", delta: "thought only" },
+				{
+					type: "usage",
+					usage: {
+						promptTokens: 100,
+						cachedTokens: 0,
+						thoughtsTokens: 8192,
+						candidatesTokens: 0,
+						totalTokens: 8292,
+					},
+				},
+				{ type: "finish", finishReason: "MAX_TOKENS" },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+
+			await expect(
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				),
+			).rejects.toThrow();
+
+			expect(mockLogger.error).toHaveBeenCalledWith(
+				"Gemini returned an empty answer",
+				{
+					finishReason: "MAX_TOKENS",
+					blockReason: undefined,
+					thinkingLength: "thought only".length,
+					thoughtsTokens: 8192,
+				},
+			);
+		});
+
+		it("explains a token-budget exhaustion to the user", async () => {
+			mockStream([
+				{ type: "thinking", delta: "thought only" },
+				{ type: "finish", finishReason: "MAX_TOKENS" },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+
+			await expect(
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				),
+			).rejects.toMatchObject({
+				service: "gemini",
+				operation: "validate streamed response",
+				retryable: false,
+				userMessage:
+					"思考が長くなりすぎて回答を生成できませんでした。質問を短く区切って再度お試しください。",
+			});
+		});
+
+		it.each(["SAFETY", "RECITATION", "PROHIBITED_CONTENT"])(
+			"explains a %s finish reason as a safety block",
+			async (finishReason) => {
+				mockStream([{ type: "finish", finishReason }]);
+
+				await expect(
+					streamGeminiWithDiscordEditsStep(
+						mockEnv,
+						"token",
+						"question",
+						"message",
+						sheetData,
+						history,
+						mockLogger,
+					),
+				).rejects.toMatchObject({
+					userMessage: "安全性フィルタにより回答できませんでした。",
+				});
+			},
+		);
+
+		it("explains a prompt-level block reason as a safety block", async () => {
+			mockStream([{ type: "finish", blockReason: "SAFETY" }]);
+
+			await expect(
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				),
+			).rejects.toMatchObject({
+				userMessage: "安全性フィルタにより回答できませんでした。",
+			});
+		});
+
+		it("keeps the generic message when no finish reason explains the empty answer", async () => {
+			mockStream([
+				{ type: "thinking", delta: "thought only" },
+				{ type: "finish", finishReason: "STOP" },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+
+			await expect(
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				),
+			).rejects.toMatchObject({
+				userMessage: "AIから有効な応答が得られませんでした。",
+			});
 		});
 
 		it("displays summarized thinking content with thought balloon", async () => {
