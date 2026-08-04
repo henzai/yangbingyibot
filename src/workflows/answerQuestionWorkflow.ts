@@ -18,6 +18,7 @@ import {
 	formatAnswer,
 	formatError,
 	formatThinking,
+	normalizeDiscordText,
 } from "../discord/formatter";
 import { createGeminiGateway } from "../gemini/gateway";
 import { buildAnswerPrompt } from "../gemini/promptBuilder";
@@ -269,8 +270,8 @@ export async function streamGeminiWithDiscordEditsStep(
 	}
 
 	const streamResult = coordinator.getResult();
-	const response = streamResult.response;
-	if (!response.trim()) {
+	const rawResponse = streamResult.response;
+	if (!rawResponse.trim()) {
 		const { finishReason, blockReason } = streamResult;
 		log.error("Gemini returned an empty answer", {
 			finishReason,
@@ -285,6 +286,7 @@ export async function streamGeminiWithDiscordEditsStep(
 			userMessage: emptyResponseUserMessage(finishReason, blockReason),
 		});
 	}
+	const response = normalizeDiscordText(rawResponse);
 
 	const finalDeliveryStartTime = Date.now();
 	const finalDelivery = await delivery.deliverFinal(
