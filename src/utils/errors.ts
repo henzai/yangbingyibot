@@ -1,4 +1,16 @@
-export type ExternalService = "discord" | "gemini" | "sheets" | "github";
+export type ExternalService =
+	| "discord"
+	| "gemini"
+	| "llm"
+	| "sheets"
+	| "github";
+
+export type LlmErrorKind =
+	| "http"
+	| "transport"
+	| "timeout"
+	| "cancelled"
+	| "interrupted";
 
 type ExternalServiceErrorOptions = {
 	service: ExternalService;
@@ -8,6 +20,8 @@ type ExternalServiceErrorOptions = {
 	userMessage: string;
 	retryAfterMs?: number;
 	cause?: unknown;
+	provider?: string;
+	kind?: LlmErrorKind;
 };
 
 type NormalizeExternalServiceErrorOptions = Omit<
@@ -27,6 +41,8 @@ export class ExternalServiceError extends Error {
 	readonly retryable: boolean;
 	readonly userMessage: string;
 	readonly retryAfterMs?: number;
+	readonly provider?: string;
+	readonly kind?: LlmErrorKind;
 
 	constructor(options: ExternalServiceErrorOptions) {
 		const statusSuffix =
@@ -41,6 +57,8 @@ export class ExternalServiceError extends Error {
 		this.retryable = options.retryable;
 		this.userMessage = options.userMessage;
 		this.retryAfterMs = options.retryAfterMs;
+		this.provider = options.provider;
+		this.kind = options.kind;
 	}
 }
 
@@ -159,5 +177,7 @@ export function getExternalErrorLogContext(
 		status: error.status,
 		retryable: error.retryable,
 		retryAfterMs: error.retryAfterMs,
+		...(error.provider === undefined ? {} : { provider: error.provider }),
+		...(error.kind === undefined ? {} : { kind: error.kind }),
 	};
 }
