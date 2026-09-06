@@ -1,15 +1,9 @@
-import {
-	type GenerateContentResponseUsageMetadata,
-	GoogleGenAI,
-	ThinkingLevel,
-} from "@google/genai";
-import {
-	ExternalServiceError,
-	normalizeExternalServiceError,
-} from "../utils/errors";
-import { logger as defaultLogger, type Logger } from "../utils/logger";
-import { withRetry } from "../utils/retry";
+import { GeminiLlmGateway } from "../llm/providers/gemini";
+import type { LlmPrompt, LlmUsage } from "../llm/types";
+import { ExternalServiceError } from "../utils/errors";
+import type { Logger } from "../utils/logger";
 import type {
+	GeminiPrompt,
 	GeminiStreamEvent,
 	GeminiStreamRequest,
 	GeminiTextRequest,
@@ -18,202 +12,98 @@ import type {
 	IGeminiGateway,
 } from "./types";
 
-const ANSWER_GENERATION_CONFIG = {
-	maxOutputTokens: 8192,
-	responseMimeType: "text/plain",
-	thinkingConfig: {
-		includeThoughts: true,
-		thinkingLevel: ThinkingLevel.LOW,
-	},
-};
-
-const RETRY_CONFIG = {
-	maxAttempts: 2,
-	initialDelayMs: 500,
-	maxDelayMs: 2000,
-};
-
-function toUsage(
-	usage: GenerateContentResponseUsageMetadata | undefined,
-): GeminiUsage | null {
-	if (!usage) {
-		return null;
-	}
+function fromLegacyPrompt(prompt: GeminiPrompt): LlmPrompt {
 	return {
-		promptTokens: usage.promptTokenCount ?? 0,
-		cachedTokens: usage.cachedContentTokenCount ?? 0,
-		thoughtsTokens: usage.thoughtsTokenCount ?? 0,
-		candidatesTokens: usage.candidatesTokenCount ?? 0,
-		totalTokens: usage.totalTokenCount ?? 0,
+		systemInstruction: prompt.systemInstruction,
+		messages: prompt.contents.map(({ role, parts }) => ({
+			role: role === "model" ? "assistant" : "user",
+			text: parts.map((part) => part.text).join(""),
+		})),
 	};
 }
 
+/** Keep the existing metrics schema until the provider-aware metrics migration. */
+function toLegacyUsage(usage: LlmUsage | null): GeminiUsage | null {
+	return (
+		usage && {
+			promptTokens: usage.inputTokens ?? 0,
+			cachedTokens: usage.cachedInputTokens ?? 0,
+			thoughtsTokens: usage.reasoningTokens ?? 0,
+			candidatesTokens: usage.outputTokens ?? 0,
+			totalTokens: usage.totalTokens ?? 0,
+		}
+	);
+}
+
+function toLegacyError(error: unknown): unknown {
+	if (!(error instanceof ExternalServiceError) || error.service !== "llm")
+		return error;
+	return new ExternalServiceError({
+		service: "gemini",
+		provider: error.provider,
+		kind: error.kind,
+		operation: error.operation,
+		status: error.status,
+		retryable: error.retryable,
+		retryAfterMs: error.retryAfterMs,
+		userMessage: error.userMessage,
+		cause: error,
+	});
+}
+
+/** Temporary facade for the existing Workflow/coordinator and metrics contract. */
 export class GeminiGateway implements IGeminiGateway {
-	private readonly client: GoogleGenAI;
-	private readonly log: Logger;
-
+	private readonly gateway: GeminiLlmGateway;
 	constructor(apiKey: string, log?: Logger) {
-		this.client = new GoogleGenAI({ apiKey });
-		this.log = log ?? defaultLogger;
-	}
-
-	private userMessageForStatus(status: number | undefined): string {
-		if (status === 429) {
-			return "API使用制限に達しました。しばらく待ってから再度お試しください。";
-		}
-		if (status === 401 || status === 403) {
-			return "API認証エラーが発生しました。";
-		}
-		return "AI APIへのリクエストに失敗しました。";
-	}
-
-	private normalizeError(
-		error: unknown,
-		operation: string,
-	): ExternalServiceError {
-		const normalized = normalizeExternalServiceError(error, {
-			service: "gemini",
-			operation,
-			userMessage: "AI APIへのリクエストに失敗しました。",
-		});
-		if (normalized.service !== "gemini") {
-			return normalized;
-		}
-		return new ExternalServiceError({
-			service: normalized.service,
-			operation: normalized.operation,
-			status: normalized.status,
-			retryable: normalized.retryable,
-			userMessage: this.userMessageForStatus(normalized.status),
-			retryAfterMs: normalized.retryAfterMs,
-			cause: normalized.cause,
-		});
-	}
-
-	private async executeRequest<T>(
-		operation: string,
-		request: () => Promise<T>,
-	): Promise<T> {
-		return withRetry(
-			async () => {
-				try {
-					return await request();
-				} catch (error) {
-					throw this.normalizeError(error, operation);
-				}
-			},
-			RETRY_CONFIG,
-			undefined,
-			this.log,
-		);
+		this.gateway = new GeminiLlmGateway(apiKey, log);
 	}
 
 	async *generateStream(
 		request: GeminiStreamRequest,
 	): AsyncIterable<GeminiStreamEvent> {
-		this.log.info("Gemini streaming API request starting", {
-			model: request.model,
-		});
-		const startTime = Date.now();
-
-		const stream = await this.executeRequest(
-			"start content stream",
-			async () =>
-				await this.client.models.generateContentStream({
-					model: request.model,
-					contents: request.prompt.contents,
-					config: {
-						...ANSWER_GENERATION_CONFIG,
-						systemInstruction: request.prompt.systemInstruction,
-					},
-				}),
-		);
-
 		let accumulated = "";
-		let latestUsage: GeminiUsage | null = null;
-		let finishReason: string | undefined;
-		let blockReason: string | undefined;
 		try {
-			for await (const chunk of stream) {
-				const usage = toUsage(chunk.usageMetadata);
-				if (usage) {
-					latestUsage = usage;
-				}
-				const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
-				if (chunkFinishReason !== undefined) {
-					finishReason = chunkFinishReason;
-				}
-				const chunkBlockReason = chunk.promptFeedback?.blockReason;
-				if (chunkBlockReason !== undefined) {
-					blockReason = chunkBlockReason;
-				}
-
-				for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-					if (typeof part.text !== "string" || part.text.length === 0) {
-						continue;
+			for await (const event of this.gateway.generateStream({
+				...request,
+				prompt: fromLegacyPrompt(request.prompt),
+				includeReasoningSummary: true,
+			})) {
+				switch (event.type) {
+					case "text":
+						accumulated += event.delta;
+						yield { type: "response", delta: event.delta, accumulated };
+						break;
+					case "reasoning_summary":
+						yield { type: "thinking", delta: event.delta };
+						break;
+					case "usage": {
+						const usage = toLegacyUsage(event.usage);
+						if (usage) yield { type: "usage", usage };
+						break;
 					}
-					if (part.thought) {
-						yield { type: "thinking", delta: part.text };
-						continue;
-					}
-					accumulated += part.text;
-					yield {
-						type: "response",
-						delta: part.text,
-						accumulated,
-					};
+					case "finish":
+						yield {
+							type: "finish",
+							finishReason: event.finish.providerFinishReason,
+							blockReason: event.finish.providerBlockReason,
+						};
 				}
 			}
 		} catch (error) {
-			throw this.normalizeError(error, "consume content stream");
+			throw toLegacyError(error);
 		}
-
-		if (latestUsage) {
-			yield { type: "usage", usage: latestUsage };
-		} else {
-			this.log.warn("Gemini usage metadata missing", { mode: "stream" });
-		}
-		yield { type: "finish", finishReason, blockReason };
-		this.log.info("Gemini streaming API completed", {
-			model: request.model,
-			durationMs: Date.now() - startTime,
-			finishReason,
-			blockReason,
-		});
 	}
 
 	async generateText(request: GeminiTextRequest): Promise<GeminiTextResult> {
-		this.log.info("Gemini text API request starting", {
-			model: request.model,
-		});
-		const startTime = Date.now();
-		const result = await this.executeRequest(
-			"generate text",
-			async () =>
-				await this.client.models.generateContent({
-					model: request.model,
-					contents: request.prompt.contents,
-					config: {
-						systemInstruction: request.prompt.systemInstruction,
-						temperature: request.temperature,
-						maxOutputTokens: request.maxOutputTokens,
-					},
-				}),
-		);
-		this.log.info("Gemini text API completed", {
-			model: request.model,
-			durationMs: Date.now() - startTime,
-		});
-
-		const text =
-			result.candidates?.[0]?.content?.parts
-				?.map((part) => (typeof part.text === "string" ? part.text : ""))
-				.join("") ?? "";
-		const usage = toUsage(result.usageMetadata);
-		if (!usage) {
-			this.log.warn("Gemini usage metadata missing", { mode: "generate" });
+		try {
+			const result = await this.gateway.generateText({
+				...request,
+				prompt: fromLegacyPrompt(request.prompt),
+			});
+			return { text: result.text, usage: toLegacyUsage(result.usage) };
+		} catch (error) {
+			throw toLegacyError(error);
 		}
-		return { text, usage };
 	}
 }
 

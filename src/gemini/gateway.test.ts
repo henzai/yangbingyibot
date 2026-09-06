@@ -222,7 +222,8 @@ describe("GeminiGateway", () => {
 			service: "gemini",
 			operation: "consume content stream",
 			status: 503,
-			retryable: true,
+			retryable: false,
+			kind: "interrupted",
 		});
 		expect((error as Error).message).not.toContain("SDK body");
 	});
@@ -310,6 +311,7 @@ describe("GeminiGateway", () => {
 				systemInstruction: "system",
 				temperature: 0,
 				maxOutputTokens: 128,
+				abortSignal: expect.any(AbortSignal),
 			},
 		});
 		expect(result).toEqual({
