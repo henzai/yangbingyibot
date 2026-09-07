@@ -1,7 +1,6 @@
-export type HistoryEntry = {
-	role: "user" | "model";
-	text: string;
-};
+import type { LlmMessage } from "./llm/types";
+
+export type HistoryEntry = LlmMessage;
 
 export type ParsedDiscordAskCommand = {
 	token: string;
@@ -27,7 +26,8 @@ export type Bindings = {
 	DISCORD_TOKEN: string;
 	DISCORD_PUBLIC_KEY: string;
 	DISCORD_APPLICATION_ID: string;
-	GEMINI_API_KEY: string;
+	GEMINI_API_KEY?: string;
+	OPENAI_API_KEY?: string;
 	GOOGLE_SERVICE_ACCOUNT: string;
 	sushanshan_bot: KVNamespace;
 	ANSWER_QUESTION_WORKFLOW: Workflow<WorkflowParams>;
@@ -35,6 +35,11 @@ export type Bindings = {
 	GITHUB_TOKEN?: string;
 	GEMINI_MODEL?: string;
 	GEMINI_SUMMARY_MODEL?: string;
+	LLM_PROVIDER?: string;
+	LLM_MODEL?: string;
+	LLM_SUMMARY_ENABLED?: string;
+	LLM_SUMMARY_PROVIDER?: string;
+	LLM_SUMMARY_MODEL?: string;
 	GOOGLE_SPREADSHEET_ID?: string;
 	GOOGLE_DATA_SHEET_NAME?: string;
 	GOOGLE_DESCRIPTION_SHEET_NAME?: string;

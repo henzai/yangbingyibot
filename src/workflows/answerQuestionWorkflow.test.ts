@@ -1,7 +1,10 @@
+import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bindings, HistoryEntry } from "../contracts";
+import { loadConfig } from "../config";
+import type { Bindings, HistoryEntry, WorkflowParams } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
-import type { GeminiStreamEvent } from "../gemini/types";
+import { PROVIDERS } from "../llm/providerCatalog";
+import type { LlmStreamEvent } from "../llm/types";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -32,7 +35,9 @@ const mockDeduplicationStore = {
 	mark: vi.fn(),
 };
 
-const mockGeminiGateway = {
+const mockLlmGateway = {
+	provider: "gemini",
+	capabilities: { reasoningSummary: true },
 	generateStream: vi.fn(),
 	generateText: vi.fn(),
 };
@@ -45,7 +50,10 @@ vi.mock("../repositories/sheetCache", () => ({
 	createSheetCacheRepository: vi.fn(() => mockSheetCacheRepository),
 }));
 
-vi.mock("../repositories/conversationHistory", () => ({
+vi.mock("../repositories/conversationHistory", async (importOriginal) => ({
+	...(await importOriginal<
+		typeof import("../repositories/conversationHistory")
+	>()),
 	createConversationHistoryRepository: vi.fn(() => mockHistoryRepository),
 }));
 
@@ -53,11 +61,12 @@ vi.mock("../repositories/deduplicationStore", () => ({
 	createDeduplicationStore: vi.fn(() => mockDeduplicationStore),
 }));
 
-vi.mock("../gemini/gateway", () => ({
-	createGeminiGateway: vi.fn(() => mockGeminiGateway),
+vi.mock("../llm/factory", () => ({
+	createLlmGateway: vi.fn(() => mockLlmGateway),
 }));
 
-vi.mock("../gemini/thinkingSummarizer", () => ({
+vi.mock("../llm/thinkingSummarizer", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../llm/thinkingSummarizer")>()),
 	createThinkingSummarizer: vi.fn(() => mockThinkingSummarizer),
 }));
 
@@ -85,12 +94,14 @@ vi.mock("../clients/spreadSheet", () => ({
 }));
 
 import { getSheetData } from "../clients/spreadSheet";
-import { createGeminiGateway } from "../gemini/gateway";
-import { createThinkingSummarizer } from "../gemini/thinkingSummarizer";
+import { createLlmGateway } from "../llm/factory";
+import { createThinkingSummarizer } from "../llm/thinkingSummarizer";
 import { createConversationHistoryRepository } from "../repositories/conversationHistory";
 import {
+	AnswerQuestionWorkflow,
 	getHistoryStep,
 	getSheetDataStep,
+	normalizeStreamingOutput,
 	reportErrorToGitHub,
 	saveHistoryStep,
 	sendDiscordResponseStep,
@@ -123,6 +134,9 @@ const mockEnv: Bindings = {
 describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockLlmGateway.provider = "gemini";
+		mockLlmGateway.capabilities.reasoningSummary = true;
+		vi.mocked(createLlmGateway).mockImplementation(() => mockLlmGateway);
 		mockDeduplicationStore.isMarked.mockResolvedValue(false);
 		mockThinkingSummarizer.summarize.mockResolvedValue({
 			text: "思考要約",
@@ -220,7 +234,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		it("returns history from KV", async () => {
 			const existingHistory = [
 				{ role: "user", text: "old question" },
-				{ role: "model", text: "old answer" },
+				{ role: "assistant", text: "old answer" },
 			];
 			mockHistoryRepository.get.mockResolvedValue(existingHistory);
 
@@ -276,7 +290,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		it("saves history to KV", async () => {
 			const updatedHistory: HistoryEntry[] = [
 				{ role: "user", text: "question" },
-				{ role: "model", text: "answer" },
+				{ role: "assistant", text: "answer" },
 			];
 
 			const result = await saveHistoryStep(
@@ -322,33 +336,221 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		};
 		const history: HistoryOutput = { history: [] };
 
-		const mockStream = (events: GeminiStreamEvent[]) => {
-			mockGeminiGateway.generateStream.mockImplementation(async function* () {
+		const mockStream = (events: LlmStreamEvent[]) => {
+			mockLlmGateway.generateStream.mockImplementation(async function* () {
 				for (const event of events) {
 					yield event;
 				}
 			});
 		};
 
+		it.each(["disabled", "unsupported"])(
+			"uses generic progress without summary calls when %s",
+			async (mode) => {
+				const env = {
+					...mockEnv,
+					LLM_SUMMARY_ENABLED: mode === "disabled" ? "false" : "true",
+				};
+				mockLlmGateway.capabilities.reasoningSummary = mode !== "unsupported";
+				mockStream([
+					{ type: "reasoning_summary", delta: "private summary" },
+					{ type: "text", delta: "answer" },
+					{ type: "finish", finish: { reason: "stop" } },
+				]);
+				mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+				const result = await streamGeminiWithDiscordEditsStep(
+					env,
+					"token",
+					"question",
+					"question",
+					sheetData,
+					history,
+					mockLogger,
+				);
+				expect(createThinkingSummarizer).not.toHaveBeenCalled();
+				expect(mockThinkingSummarizer.summarize).not.toHaveBeenCalled();
+				expect(mockLlmGateway.generateStream).toHaveBeenCalledWith(
+					expect.objectContaining({ includeReasoningSummary: false }),
+				);
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.calls[0][0],
+				).toContain("考え中");
+				expect(result.thinkingSummaryCallCount).toBe(0);
+				expect(result.thinkingSummaryUsage).toBeNull();
+				expect(JSON.stringify(result.updatedHistory)).not.toContain(
+					"private summary",
+				);
+			},
+		);
+		it("routes a fake answer provider with no Gemini credentials and translates old history", async () => {
+			const env = {
+				...mockEnv,
+				GEMINI_API_KEY: undefined,
+				OPENAI_API_KEY: "fake-key",
+				LLM_PROVIDER: "fake",
+				LLM_MODEL: "fake-answer",
+				LLM_SUMMARY_ENABLED: "false",
+			};
+			const config = loadConfig(env, {
+				...PROVIDERS,
+				fake: { apiKeySetting: "OPENAI_API_KEY" },
+			});
+			mockLlmGateway.provider = "fake";
+			mockStream([
+				{ type: "text", delta: "answer" },
+				{ type: "finish", finish: { reason: "stop" } },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			const oldHistory = {
+				history: [{ role: "model", text: "old answer" }],
+			} as unknown as HistoryOutput;
+			const result = await streamGeminiWithDiscordEditsStep(
+				env,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				oldHistory,
+				mockLogger,
+				config,
+			);
+			expect(createLlmGateway).toHaveBeenCalledExactlyOnceWith(
+				config.llm.answer,
+				mockLogger,
+			);
+			expect(mockLlmGateway.generateStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "fake-answer",
+					prompt: expect.objectContaining({
+						messages: expect.arrayContaining([
+							{ role: "assistant", text: "old answer" },
+						]),
+					}),
+				}),
+			);
+			expect(result.updatedHistory[0]).toEqual({
+				role: "assistant",
+				text: "old answer",
+			});
+			expect(JSON.stringify(result)).not.toContain("fake-key");
+		});
+		it("uses a separate provider only for enabled summaries", async () => {
+			const env = {
+				...mockEnv,
+				OPENAI_API_KEY: "summary-key",
+				LLM_SUMMARY_PROVIDER: "fake",
+				LLM_SUMMARY_MODEL: "fake-summary",
+			};
+			const config = loadConfig(env, {
+				...PROVIDERS,
+				fake: { apiKeySetting: "OPENAI_API_KEY" },
+			});
+			const summaryGateway = { ...mockLlmGateway, provider: "fake" };
+			vi.mocked(createLlmGateway).mockImplementation((selection) =>
+				selection.provider === "fake" ? summaryGateway : mockLlmGateway,
+			);
+			mockStream([
+				{ type: "reasoning_summary", delta: "summary source" },
+				{ type: "text", delta: "answer" },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			await streamGeminiWithDiscordEditsStep(
+				env,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				history,
+				mockLogger,
+				config,
+			);
+			expect(createLlmGateway).toHaveBeenCalledTimes(2);
+			expect(createThinkingSummarizer).toHaveBeenCalledWith(
+				summaryGateway,
+				"fake-summary",
+				mockLogger,
+			);
+			expect(mockThinkingSummarizer.summarize).toHaveBeenCalled();
+		});
+		it("reuses the answer gateway for the same summary provider", async () => {
+			mockStream([{ type: "text", delta: "answer" }]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				history,
+				mockLogger,
+			);
+			expect(createLlmGateway).toHaveBeenCalledTimes(1);
+			expect(createThinkingSummarizer).toHaveBeenCalledWith(
+				mockLlmGateway,
+				"gemini-2.5-flash-lite",
+				mockLogger,
+			);
+		});
+		it("marks truncated final answers without putting the notice in conversation history", async () => {
+			mockStream([
+				{ type: "text", delta: "partial answer" },
+				{ type: "finish", finish: { reason: "length" } },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				history,
+				mockLogger,
+			);
+			expect(
+				mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
+			).toContain("出力上限");
+			expect(result.updatedHistory.at(-1)?.text).toBe("partial answer");
+		});
+		it.each(["blocked", "error"] as const)(
+			"rejects a nonempty %s completion",
+			async (reason) => {
+				mockStream([
+					{ type: "text", delta: "partial" },
+					{ type: "finish", finish: { reason } },
+				]);
+				mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+				await expect(
+					streamGeminiWithDiscordEditsStep(
+						mockEnv,
+						"token",
+						"question",
+						"question",
+						sheetData,
+						history,
+						mockLogger,
+					),
+				).rejects.toBeInstanceOf(ExternalServiceError);
+				expect(mockHistoryRepository.save).not.toHaveBeenCalled();
+			},
+		);
 		it("streams typed events, edits Discord, and returns history and usage", async () => {
 			const updatedHistory: HistoryEntry[] = [
 				{ role: "user", text: "質問: test message" },
-				{ role: "model", text: "full response" },
+				{ role: "assistant", text: "full response" },
 			];
 			mockStream([
-				{ type: "response", delta: "partial", accumulated: "partial" },
+				{ type: "text", delta: "full" },
 				{
-					type: "response",
+					type: "text",
 					delta: " response",
-					accumulated: "full response",
 				},
 				{
 					type: "usage",
 					usage: {
-						promptTokens: 100,
-						cachedTokens: 25,
-						thoughtsTokens: 10,
-						candidatesTokens: 20,
+						inputTokens: 100,
+						cachedInputTokens: 25,
+						reasoningTokens: 10,
+						outputTokens: 20,
 						totalTokens: 130,
 					},
 				},
@@ -368,10 +570,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(result.response).toBe("full response");
 			expect(result.updatedHistory).toEqual(updatedHistory);
 			expect(result.usage).toEqual({
-				promptTokens: 100,
-				cachedTokens: 25,
-				thoughtsTokens: 10,
-				candidatesTokens: 20,
+				inputTokens: 100,
+				cachedInputTokens: 25,
+				reasoningTokens: 10,
+				outputTokens: 20,
 				totalTokens: 130,
 			});
 			const lastCall =
@@ -384,9 +586,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			const normalizedResponse = "概要\n2015年加入\n2016年移籍";
 			mockStream([
 				{
-					type: "response",
+					type: "text",
 					delta: rawResponse,
-					accumulated: rawResponse,
 				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
@@ -403,7 +604,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			expect(result.response).toBe(normalizedResponse);
 			expect(result.updatedHistory.at(-1)).toEqual({
-				role: "model",
+				role: "assistant",
 				text: normalizedResponse,
 			});
 			expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalledWith(
@@ -413,9 +614,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("delivers a long final answer in ordered chunks without loss", async () => {
 			const response = "a".repeat(4500);
-			mockStream([
-				{ type: "response", delta: response, accumulated: response },
-			]);
+			mockStream([{ type: "text", delta: response }]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 			mockDiscordInstance.postMessage.mockResolvedValue(undefined);
 
@@ -446,7 +645,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		});
 
 		it("rejects an empty Gemini answer before persisting history", async () => {
-			mockStream([{ type: "thinking", delta: "thought only" }]);
+			mockStream([{ type: "reasoning_summary", delta: "thought only" }]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 
 			await expect(
@@ -460,7 +659,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					mockLogger,
 				),
 			).rejects.toMatchObject({
-				service: "gemini",
+				service: "llm",
+				provider: "gemini",
 				operation: "validate streamed response",
 				retryable: false,
 			});
@@ -470,18 +670,21 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("logs the finish reason and token budget when the answer is empty", async () => {
 			mockStream([
-				{ type: "thinking", delta: "thought only" },
+				{ type: "reasoning_summary", delta: "thought only" },
 				{
 					type: "usage",
 					usage: {
-						promptTokens: 100,
-						cachedTokens: 0,
-						thoughtsTokens: 8192,
-						candidatesTokens: 0,
+						inputTokens: 100,
+						cachedInputTokens: 0,
+						reasoningTokens: 8192,
+						outputTokens: 0,
 						totalTokens: 8292,
 					},
 				},
-				{ type: "finish", finishReason: "MAX_TOKENS" },
+				{
+					type: "finish",
+					finish: { reason: "length", providerFinishReason: "MAX_TOKENS" },
+				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 
@@ -498,20 +701,23 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			).rejects.toThrow();
 
 			expect(mockLogger.error).toHaveBeenCalledWith(
-				"Gemini returned an empty answer",
+				"LLM returned an empty answer",
 				{
-					finishReason: "MAX_TOKENS",
-					blockReason: undefined,
+					provider: "gemini",
+					finish: { reason: "length", providerFinishReason: "MAX_TOKENS" },
 					thinkingLength: "thought only".length,
-					thoughtsTokens: 8192,
+					reasoningTokens: 8192,
 				},
 			);
 		});
 
 		it("explains a token-budget exhaustion to the user", async () => {
 			mockStream([
-				{ type: "thinking", delta: "thought only" },
-				{ type: "finish", finishReason: "MAX_TOKENS" },
+				{ type: "reasoning_summary", delta: "thought only" },
+				{
+					type: "finish",
+					finish: { reason: "length", providerFinishReason: "MAX_TOKENS" },
+				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 
@@ -526,7 +732,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					mockLogger,
 				),
 			).rejects.toMatchObject({
-				service: "gemini",
+				service: "llm",
+				provider: "gemini",
 				operation: "validate streamed response",
 				retryable: false,
 				userMessage:
@@ -537,7 +744,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		it.each(["SAFETY", "RECITATION", "PROHIBITED_CONTENT"])(
 			"explains a %s finish reason as a safety block",
 			async (finishReason) => {
-				mockStream([{ type: "finish", finishReason }]);
+				mockStream([
+					{
+						type: "finish",
+						finish: { reason: "blocked", providerFinishReason: finishReason },
+					},
+				]);
 
 				await expect(
 					streamGeminiWithDiscordEditsStep(
@@ -556,7 +768,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		);
 
 		it("explains a prompt-level block reason as a safety block", async () => {
-			mockStream([{ type: "finish", blockReason: "SAFETY" }]);
+			mockStream([
+				{
+					type: "finish",
+					finish: { reason: "blocked", providerBlockReason: "SAFETY" },
+				},
+			]);
 
 			await expect(
 				streamGeminiWithDiscordEditsStep(
@@ -575,8 +792,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("keeps the generic message when no finish reason explains the empty answer", async () => {
 			mockStream([
-				{ type: "thinking", delta: "thought only" },
-				{ type: "finish", finishReason: "STOP" },
+				{ type: "reasoning_summary", delta: "thought only" },
+				{
+					type: "finish",
+					finish: { reason: "stop", providerFinishReason: "STOP" },
+				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
 
@@ -602,11 +822,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				success: true,
 			});
 			mockStream([
-				{ type: "thinking", delta: "private thought" },
+				{ type: "reasoning_summary", delta: "private thought" },
 				{
-					type: "response",
+					type: "text",
 					delta: "final answer",
-					accumulated: "final answer",
 				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
@@ -637,6 +856,38 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 		});
 
+		it("delivers and saves only the final answer when summary generation falls back", async () => {
+			mockThinkingSummarizer.summarize.mockResolvedValueOnce({
+				text: "考え中...",
+				usage: null,
+				success: false,
+			});
+			mockStream([
+				{ type: "reasoning_summary", delta: "summary source" },
+				{ type: "text", delta: "final answer" },
+				{ type: "finish", finish: { reason: "stop" } },
+			]);
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				history,
+				mockLogger,
+			);
+			expect(result.thinkingSummaryCallCount).toBe(1);
+			expect(result.thinkingSummarySuccessCount).toBe(0);
+			expect(result.thinkingSummaryUsage?.inputTokens).toBeNull();
+			expect(result.updatedHistory).toEqual([
+				{ role: "user", text: "質問: question" },
+				{ role: "assistant", text: "final answer" },
+			]);
+			expect(
+				mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
+			).toContain("final answer");
+		});
 		it("summarizes only new thinking and aggregates summary usage", async () => {
 			vi.useFakeTimers();
 			vi.setSystemTime(0);
@@ -645,10 +896,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				.mockResolvedValueOnce({
 					text: "最初の要約",
 					usage: {
-						promptTokens: 10,
-						cachedTokens: 1,
-						thoughtsTokens: 0,
-						candidatesTokens: 2,
+						inputTokens: 10,
+						cachedInputTokens: 1,
+						reasoningTokens: 0,
+						outputTokens: 2,
 						totalTokens: 12,
 					},
 					success: true,
@@ -656,22 +907,21 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				.mockResolvedValueOnce({
 					text: "更新後の要約",
 					usage: {
-						promptTokens: 20,
-						cachedTokens: 2,
-						thoughtsTokens: 0,
-						candidatesTokens: 3,
+						inputTokens: 20,
+						cachedInputTokens: 2,
+						reasoningTokens: 0,
+						outputTokens: 3,
 						totalTokens: 23,
 					},
 					success: true,
 				});
-			mockGeminiGateway.generateStream.mockImplementation(async function* () {
-				yield { type: "thinking", delta: "first thought" };
+			mockLlmGateway.generateStream.mockImplementation(async function* () {
+				yield { type: "reasoning_summary", delta: "first thought" };
 				vi.setSystemTime(2000);
-				yield { type: "thinking", delta: secondThought };
+				yield { type: "reasoning_summary", delta: secondThought };
 				yield {
-					type: "response",
+					type: "text",
 					delta: "answer",
-					accumulated: "answer",
 				};
 			});
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
@@ -700,10 +950,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				thinkingSummaryCallCount: 2,
 				thinkingSummarySuccessCount: 2,
 				thinkingSummaryUsage: {
-					promptTokens: 30,
-					cachedTokens: 3,
-					thoughtsTokens: 0,
-					candidatesTokens: 5,
+					inputTokens: 30,
+					cachedInputTokens: 3,
+					reasoningTokens: 0,
+					outputTokens: 5,
 					totalTokens: 35,
 				},
 			});
@@ -711,11 +961,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 		it("forces Discord edit on phase transition from thinking to response", async () => {
 			mockStream([
-				{ type: "thinking", delta: "thought" },
+				{ type: "reasoning_summary", delta: "thought" },
 				{
-					type: "response",
+					type: "text",
 					delta: "response start",
-					accumulated: "response start",
 				},
 			]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
@@ -740,9 +989,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		it("continues streaming when intermediate Discord edit fails", async () => {
 			mockStream([
 				{
-					type: "response",
+					type: "text",
 					delta: "response text",
-					accumulated: "response text",
 				},
 			]);
 			// Intermediate edits may fail, but final edit succeeds
@@ -779,9 +1027,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			const historyWithExisting: HistoryOutput = {
 				history: existingHistory,
 			};
-			mockStream([
-				{ type: "response", delta: "response", accumulated: "response" },
-			]);
+			mockStream([{ type: "text", delta: "response" }]);
 			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
 
 			await streamGeminiWithDiscordEditsStep(
@@ -794,22 +1040,26 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockLogger,
 			);
 
-			expect(createGeminiGateway).toHaveBeenCalledWith(
-				mockEnv.GEMINI_API_KEY,
+			expect(createLlmGateway).toHaveBeenCalledWith(
+				{
+					provider: "gemini",
+					model: "gemini-3.5-flash-lite",
+					apiKey: mockEnv.GEMINI_API_KEY,
+				},
 				mockLogger,
 			);
 			expect(createThinkingSummarizer).toHaveBeenCalledWith(
-				mockGeminiGateway,
+				mockLlmGateway,
 				"gemini-2.5-flash-lite",
 				mockLogger,
 			);
-			expect(mockGeminiGateway.generateStream).toHaveBeenCalledWith(
+			expect(mockLlmGateway.generateStream).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "gemini-3.5-flash-lite",
 					prompt: expect.objectContaining({
-						contents: [
-							{ role: "user", parts: [{ text: "previous" }] },
-							{ role: "user", parts: [{ text: "質問: message" }] },
+						messages: [
+							{ role: "user", text: "previous" },
+							{ role: "user", text: "質問: message" },
 						],
 					}),
 				}),
@@ -1067,5 +1317,129 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				expect.objectContaining({ delayMs: 2500, status: 429 }),
 			);
 		});
+	});
+});
+
+describe("completed Workflow checkpoint compatibility", () => {
+	it("replays completed generation without invoking or delivering twice and preserves step options", async () => {
+		vi.clearAllMocks();
+		mockHistoryRepository.save.mockResolvedValue(undefined);
+		const checkpoint = {
+			response: "answer",
+			updatedHistory: [
+				{ role: "user", text: "question" },
+				{ role: "model", text: "answer" },
+			],
+			usage: {
+				promptTokens: 10,
+				cachedTokens: 0,
+				candidatesTokens: 3,
+				thoughtsTokens: 2,
+				totalTokens: 15,
+			},
+			thinkingSummaryUsage: null,
+			thinkingSummaryCallCount: 0,
+			thinkingSummarySuccessCount: 0,
+			thinkingSummaryDurationMs: 0,
+			editCount: 1,
+			chunkCount: 1,
+			deliveryStatus: "success",
+			failedChunks: [],
+			retryCount: 0,
+			deliveryDurationMs: 1,
+		};
+		const execute = vi.fn(async (name: string, ...args: unknown[]) => {
+			if (name === "getSheetData")
+				return {
+					sheetInfo: "knowledge",
+					description: "description",
+					fromCache: true,
+				};
+			if (name === "getHistory")
+				return { history: [{ role: "model", text: "old answer" }] };
+			if (name === "streamGeminiAndEditDiscord")
+				return JSON.parse(JSON.stringify(checkpoint));
+			const callback = args.at(-1) as () => Promise<unknown>;
+			return callback();
+		});
+		const event = {
+			instanceId: "workflow-id",
+			payload: {
+				token: "token",
+				message: "question",
+				requestId: "request-id",
+				conversationKey: "conversation",
+			},
+		} as WorkflowEvent<WorkflowParams>;
+		await AnswerQuestionWorkflow.prototype.run.call(
+			{ env: mockEnv } as unknown as AnswerQuestionWorkflow,
+			event,
+			{ do: execute } as unknown as WorkflowStep,
+		);
+		expect(execute.mock.calls.map((call) => call[0])).toEqual([
+			"getSheetData",
+			"getHistory",
+			"streamGeminiAndEditDiscord",
+			"saveHistory",
+		]);
+		expect(execute).toHaveBeenCalledWith(
+			"streamGeminiAndEditDiscord",
+			{
+				retries: { limit: 0, delay: "1 second", backoff: "exponential" },
+				timeout: "120 seconds",
+			},
+			expect.any(Function),
+		);
+		expect(createLlmGateway).not.toHaveBeenCalled();
+		expect(mockDiscordInstance.editOriginalMessage).not.toHaveBeenCalled();
+		expect(mockHistoryRepository.save).toHaveBeenCalledWith("conversation", [
+			{ role: "user", text: "question" },
+			{ role: "assistant", text: "answer" },
+		]);
+		expect(mockAnalyticsDataset.writeDataPoint).toHaveBeenCalledWith(
+			expect.objectContaining({
+				blobs: [
+					"gemini_api_call",
+					"request-id",
+					"gemini-3.5-flash-lite",
+					"answer",
+				],
+				doubles: [expect.any(Number), 1, 0, 10, 0, 2, 3, 15, 1],
+			}),
+		);
+	});
+
+	it("converts old persisted history and usage while keeping delivery results", () => {
+		const old = {
+			response: "answer",
+			updatedHistory: [{ role: "model", text: "answer" }],
+			usage: {
+				promptTokens: 10,
+				candidatesTokens: 5,
+				cachedTokens: 0,
+				thoughtsTokens: 2,
+				totalTokens: 17,
+			},
+			thinkingSummaryUsage: null,
+			thinkingSummaryCallCount: 0,
+			thinkingSummarySuccessCount: 0,
+			thinkingSummaryDurationMs: 0,
+			editCount: 1,
+			chunkCount: 1,
+			deliveryStatus: "success",
+			failedChunks: [],
+			retryCount: 0,
+			deliveryDurationMs: 3,
+		};
+		const result = normalizeStreamingOutput(
+			old as unknown as import("./types").StreamingLlmOutput,
+		);
+		expect(result.updatedHistory).toEqual([
+			{ role: "assistant", text: "answer" },
+		]);
+		expect(result.usage?.inputTokens).toBe(10);
+		expect(result.usage?.outputTokens).toBe(5);
+		expect(result.deliveryStatus).toBe("success");
+		expect(result.editCount).toBe(1);
 	});
 });

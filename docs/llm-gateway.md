@@ -1,6 +1,6 @@
 # LLM gateway boundary
 
-This is the first stage of [#428](https://github.com/henzai/yangbingyibot/issues/428), implementing [#429](https://github.com/henzai/yangbingyibot/issues/429).
+This documents stages [#429](https://github.com/henzai/yangbingyibot/issues/429) and [#430](https://github.com/henzai/yangbingyibot/issues/430) of [#428](https://github.com/henzai/yangbingyibot/issues/428). Gemini is the only production adapter currently registered.
 
 `src/llm/types.ts` defines the text-only `ILlmGateway`. It has no SDK, Cloudflare binding, Discord, or KV dependencies. `src/llm/promptBuilder.ts` keeps application instructions, knowledge context, and `user`/`assistant` messages separate. The Gemini adapter owns wire conversion, SDK configuration, and provider-specific instruction placement.
 
@@ -28,14 +28,53 @@ The application owns retries: at most two attempts for text generation or stream
 
 The default total budget is 90 seconds for streams and 15 seconds for text/summary calls. A caller can request a smaller budget; all requests are capped at 90 seconds. Retries, backoff, and the time a stream consumer spends displaying progress share the same stream budget. The adapter aborts the underlying request and bounds pending SDK promises; it cannot interrupt arbitrary work in the consumer, which observes cancellation when it resumes iteration. Returning early closes the request and releases timers/listeners. API-side generation and billing may continue after client cancellation; cancellation is not a refund guarantee.
 
-## Compatibility and next stages
+## Provider configuration
 
-The existing `src/gemini/gateway.ts` and prompt builder are temporary facades over this boundary. They preserve the current Workflow/coordinator event shape, raw finish reasons, and metrics layout. The old usage mapping still converts missing fields to zero **only at that compatibility boundary**, pending the metrics migration. Workflow names, KV format, model defaults, and environment variables are unchanged. Existing empty-answer and Discord formatting tests remain in place.
+| Setting | Default / precedence |
+| --- | --- |
+| `LLM_PROVIDER` | `gemini` |
+| `LLM_MODEL` | Explicit value → selected provider's legacy model setting → its default |
+| `LLM_SUMMARY_ENABLED` | `true`; accepts only `true` or `false` |
+| `LLM_SUMMARY_PROVIDER` | Answer provider when enabled |
+| `LLM_SUMMARY_MODEL` | Explicit value → selected provider's legacy summary setting → its summary default |
+| `GEMINI_MODEL` | Legacy answer override; default `gemini-3.5-flash-lite` |
+| `GEMINI_SUMMARY_MODEL` | Legacy summary override; default `gemini-2.5-flash-lite` |
 
-The intentional behavior changes in this stage are bounded request time, one owner for retries, non-retryable interrupted streams, and excluding summary/thought parts from ordinary answer text. The Workflow already disables retries for its generation/delivery step.
+Values are trimmed. An explicitly blank value, unknown provider, missing selected key, or missing model without a provider default fails with a setting name, without printing credentials. Common model settings take precedence over legacy settings. Non-Gemini providers never inherit Gemini model settings.
 
-[#430](https://github.com/henzai/yangbingyibot/issues/430) will move configuration, Workflow/coordinator, and history consumers to the common contracts. [#431](https://github.com/henzai/yangbingyibot/issues/431) will add the second adapter. Provider selection and provider-aware monitoring are not enabled by this stage.
+Only enabled answer/summary providers require their credentials. Unused keys and unused legacy Gemini model settings are ignored. `GEMINI_API_KEY` is optional in the binding type but required whenever Gemini is selected. `OPENAI_API_KEY` is reserved for the next adapter; setting it does not enable OpenAI in this build. Google Sheets still requires `GOOGLE_SERVICE_ACCOUNT` regardless of LLM choice.
+
+An existing deployment needs no configuration changes. To use common Gemini settings:
+
+```toml
+[vars]
+LLM_PROVIDER = "gemini"
+LLM_MODEL = "gemini-3.5-flash-lite"
+LLM_SUMMARY_ENABLED = "true"
+LLM_SUMMARY_PROVIDER = "gemini"
+LLM_SUMMARY_MODEL = "gemini-2.5-flash-lite"
+```
+
+Supply API keys through Worker secrets, never `[vars]`. To disable summary generation, set `LLM_SUMMARY_ENABLED = "false"` and **unset** `LLM_SUMMARY_PROVIDER` and `LLM_SUMMARY_MODEL`; supplying either is a contradictory configuration. Existing `GEMINI_SUMMARY_MODEL` can remain and is ignored when disabled.
+
+`src/llm/providerCatalog.ts` holds SDK-free configuration metadata. `src/llm/factory.ts` constructs only the selected adapter. New providers register in both places; tests inject a fake catalog/factory without enabling another real API. Answer and summary models may differ, and a shared provider reuses its gateway. Configuration is resolved at the start of `run` for generation and metrics; SDK clients and API keys stay outside serialized step results and Workflow payloads.
+
+## Progress, history, and running Workflows
+
+Workflow, StreamCoordinator, and ThinkingSummarizer consume common contracts. When summaries are disabled or the answer adapter lacks `reasoningSummary`, the bot displays generic progress and makes no summary API calls. Explicitly enabled summary settings are still validated even if that answer adapter lacks summary support. A provider supporting summaries may return no summary for a particular model or request; ordinary answer delivery still works. Summary failure uses a generic fallback and does not fail the answer.
+
+Empty answers retain the existing Japanese finish-state messages. Nonempty `length` results are delivered with an output-limit notice; conversation history contains only the answer text. `blocked`/`error` completions and interrupted streams do not become saved answers. Normal history contains only `user`/`assistant` messages, never progress or summary text.
+
+KV reads accept both legacy `model` and common `assistant` roles. Writes deliberately keep `user`/`model` at `chat_history:v2:<conversationKey>` so an older deployment can read them after rollback. Conversation isolation, TTL, the latest 20 entries, and the 64 KiB UTF-8 limit are unchanged. Old Workflow history checkpoints and completed generation usage are normalized on replay.
+
+The `AnswerQuestionWorkflow` export and persisted step IDs, including `streamGeminiAndEditDiscord`, remain unchanged. That generation/delivery step retains zero retries and its 120-second timeout so an already completed step is not regenerated or redelivered. `streamGeminiWithDiscordEditsStep` remains an alias for the common implementation. The legacy gateway and prompt builder under `src/gemini/` remain compatibility facades; Workflow no longer uses them.
+
+## Monitoring compatibility and next stages
+
+The common metrics entry point translates Gemini usage to its existing positional `gemini_api_call` schema; missing counters become zero only at this legacy metrics/facade boundary. Separate summary-call usage aggregation otherwise preserves unknown counters as `null`. A non-Gemini event uses `llm_api_call`, appends provider to blobs, and uses `-1` for missing counters. The health check probes each configured provider once; Gemini behavior is unchanged. An unimplemented provider probe reports failure rather than silently claiming health.
+
+Full monitoring migration and other provider health probes remain [#432](https://github.com/henzai/yangbingyibot/issues/432). [#431](https://github.com/henzai/yangbingyibot/issues/431) will register the second production adapter and its model/key configuration. [#433](https://github.com/henzai/yangbingyibot/issues/433) covers evaluations and operating guidance. None of these later stages is implemented by #430, and the production model is unchanged.
 
 ## Verification
 
-Use Node.js 24 and `npm run verify`. Adapter tests mock the SDK: there are no real LLM calls or charges. They cover prompt translation, summary absence, nullable/cumulative usage, completion reasons, permanent/transient failures, Retry-After, interrupted streams, cancellation, deadlines, and cleanup. Existing Workflow tests exercise the facade, Discord delivery, PING/defer, history, and formatting regressions.
+Use Node.js 24 and `npm run verify`. Tests mock provider calls: no real LLM calls or charges. They cover legacy/common configuration precedence, selected credentials, fake-provider routing, same/separate/disabled/unsupported summary configurations, fallback, nullable usage, finish handling, mixed KV roles, and replay of completed generation checkpoints without redelivery. Existing SDK adapter, Discord PING/defer, delivery throttling, and conversation-isolation regressions remain in the suite.

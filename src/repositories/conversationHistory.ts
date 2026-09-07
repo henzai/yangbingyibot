@@ -6,26 +6,43 @@ const HISTORY_KEY_PREFIX = "chat_history:v2:";
 const MAX_HISTORY_ENTRIES = 20;
 const MAX_HISTORY_BYTES = 64 * 1024;
 
-function isHistoryEntry(value: unknown): value is HistoryEntry {
+type StoredHistoryEntry = { role: "user" | "model"; text: string };
+
+function isHistoryEntry(
+	value: unknown,
+): value is HistoryEntry | StoredHistoryEntry {
 	if (!value || typeof value !== "object") {
 		return false;
 	}
 
 	const entry = value as Record<string, unknown>;
 	return (
-		(entry.role === "user" || entry.role === "model") &&
+		(entry.role === "user" ||
+			entry.role === "model" ||
+			entry.role === "assistant") &&
 		typeof entry.text === "string"
 	);
+}
+
+/** Accept old KV and in-flight Workflow checkpoints without changing storage keys. */
+export function normalizeHistory(history: readonly unknown[]): HistoryEntry[] {
+	return history.filter(isHistoryEntry).map(({ role, text }) => ({
+		role: role === "model" ? "assistant" : role,
+		text,
+	}));
 }
 
 function historyKey(conversationKey: string): string {
 	return `${HISTORY_KEY_PREFIX}${conversationKey}`;
 }
 
-function constrainHistory(history: HistoryEntry[]): HistoryEntry[] {
-	const entries = history
+function constrainHistory(history: HistoryEntry[]): StoredHistoryEntry[] {
+	const entries: StoredHistoryEntry[] = normalizeHistory(history)
 		.slice(-MAX_HISTORY_ENTRIES)
-		.map(({ role, text }) => ({ role, text }));
+		.map(({ role, text }) => ({
+			role: role === "assistant" ? "model" : "user",
+			text,
+		}));
 
 	while (
 		entries.length > 0 &&
@@ -60,9 +77,7 @@ export class ConversationHistoryRepository {
 				return [];
 			}
 
-			return parsedHistory
-				.filter(isHistoryEntry)
-				.map(({ role, text }) => ({ role, text }));
+			return normalizeHistory(parsedHistory);
 		} catch (error) {
 			this.log.error("Failed to get history from KV", {
 				error: getErrorMessage(error),

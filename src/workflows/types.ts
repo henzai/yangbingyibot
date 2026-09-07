@@ -1,6 +1,6 @@
 import type { HistoryEntry } from "../contracts";
 import type { DeliveryStatus } from "../discord/delivery";
-import type { GeminiUsage } from "../gemini/types";
+import type { LlmUsage } from "../llm/types";
 
 export type { WorkflowParams } from "../contracts";
 
@@ -15,11 +15,11 @@ export interface HistoryOutput {
 	history: HistoryEntry[];
 }
 
-export interface StreamingGeminiOutput {
+export interface StreamingLlmOutput {
 	response: string;
 	updatedHistory: HistoryEntry[];
-	usage: GeminiUsage | null;
-	thinkingSummaryUsage: GeminiUsage | null;
+	usage: LlmUsage | null;
+	thinkingSummaryUsage: LlmUsage | null;
 	thinkingSummaryCallCount: number;
 	thinkingSummarySuccessCount: number;
 	thinkingSummaryDurationMs: number;

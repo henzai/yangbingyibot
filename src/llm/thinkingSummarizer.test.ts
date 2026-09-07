@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../utils/logger";
 import { THINKING_FALLBACK, ThinkingSummarizer } from "./thinkingSummarizer";
-import type { IGeminiGateway } from "./types";
+import type { ILlmGateway } from "./types";
 
 const gateway = {
+	provider: "gemini",
+	capabilities: { reasoningSummary: true },
 	generateStream: vi.fn(),
 	generateText: vi.fn(),
 };
@@ -22,10 +24,14 @@ describe("ThinkingSummarizer", () => {
 	});
 
 	it("uses the configured summary model through the shared gateway", async () => {
-		gateway.generateText.mockResolvedValue({ text: " 要約結果 ", usage: null });
+		gateway.generateText.mockResolvedValue({
+			text: " 要約結果 ",
+			usage: null,
+			finish: { reason: "stop" },
+		});
 
 		const result = await new ThinkingSummarizer(
-			gateway as unknown as IGeminiGateway,
+			gateway as unknown as ILlmGateway,
 			"summary-model",
 			log,
 		).summarize("前の要約", "new thought");
@@ -37,14 +43,10 @@ describe("ThinkingSummarizer", () => {
 				temperature: 0,
 				maxOutputTokens: 128,
 				prompt: expect.objectContaining({
-					contents: [
+					messages: [
 						{
 							role: "user",
-							parts: [
-								{
-									text: "前回の要約:\n前の要約\n\n新しい思考内容:\nnew thought",
-								},
-							],
+							text: "前回の要約:\n前の要約\n\n新しい思考内容:\nnew thought",
 						},
 					],
 				}),
@@ -53,11 +55,15 @@ describe("ThinkingSummarizer", () => {
 	});
 
 	it("returns fallback for an empty summary", async () => {
-		gateway.generateText.mockResolvedValue({ text: " ", usage: null });
+		gateway.generateText.mockResolvedValue({
+			text: " ",
+			usage: null,
+			finish: { reason: "stop" },
+		});
 
 		await expect(
 			new ThinkingSummarizer(
-				gateway as unknown as IGeminiGateway,
+				gateway as unknown as ILlmGateway,
 				"model",
 				log,
 			).summarize("", "thought"),
@@ -68,12 +74,32 @@ describe("ThinkingSummarizer", () => {
 		});
 	});
 
+	it.each(["length", "blocked", "error"])(
+		"falls back on %s while retaining consumed usage",
+		async (reason) => {
+			const usage = {
+				inputTokens: 1,
+				cachedInputTokens: 0,
+				reasoningTokens: null,
+				outputTokens: 2,
+				totalTokens: 3,
+			};
+			gateway.generateText.mockResolvedValue({
+				text: "incomplete summary",
+				usage,
+				finish: { reason },
+			});
+			await expect(
+				new ThinkingSummarizer(gateway, "summary", log).summarize("", "source"),
+			).resolves.toEqual({ text: THINKING_FALLBACK, usage, success: false });
+		},
+	);
 	it("returns fallback when summary generation fails", async () => {
 		gateway.generateText.mockRejectedValue(new Error("unavailable"));
 
 		await expect(
 			new ThinkingSummarizer(
-				gateway as unknown as IGeminiGateway,
+				gateway as unknown as ILlmGateway,
 				"model",
 				log,
 			).summarize("", "thought"),
@@ -84,7 +110,7 @@ describe("ThinkingSummarizer", () => {
 		});
 		expect(log.warn).toHaveBeenCalledWith(
 			"Thinking summarization failed (non-fatal)",
-			expect.objectContaining({ service: "gemini" }),
+			expect.objectContaining({ service: "llm", provider: "gemini" }),
 		);
 	});
 });

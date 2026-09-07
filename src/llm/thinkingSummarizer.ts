@@ -1,22 +1,20 @@
-import {
-	getExternalErrorLogContext,
-	normalizeExternalServiceError,
-} from "../utils/errors";
+import { getExternalErrorLogContext } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
+import { normalizeLlmError } from "./errors";
 import { buildThinkingSummaryPrompt } from "./promptBuilder";
-import type { GeminiUsage, IGeminiGateway } from "./types";
+import type { ILlmGateway, LlmUsage } from "./types";
 
 export const THINKING_FALLBACK = "考え中...";
 
 export type ThinkingSummaryResult = {
 	text: string;
-	usage: GeminiUsage | null;
+	usage: LlmUsage | null;
 	success: boolean;
 };
 
 export class ThinkingSummarizer {
 	constructor(
-		private readonly gateway: IGeminiGateway,
+		private readonly gateway: ILlmGateway,
 		private readonly model: string,
 		private readonly log: Logger = defaultLogger,
 	) {}
@@ -33,16 +31,22 @@ export class ThinkingSummarizer {
 				maxOutputTokens: 128,
 			});
 			const summary = result.text.trim();
-			if (summary) {
+			if (
+				summary &&
+				result.finish.reason !== "blocked" &&
+				result.finish.reason !== "error" &&
+				result.finish.reason !== "length"
+			) {
 				return { text: summary, usage: result.usage, success: true };
 			}
-			this.log.warn("Empty summarization result, using fallback");
+			this.log.warn("Empty or incomplete summarization result, using fallback");
+			return { text: THINKING_FALLBACK, usage: result.usage, success: false };
 		} catch (error) {
-			const normalized = normalizeExternalServiceError(error, {
-				service: "gemini",
-				operation: "summarize thinking",
-				userMessage: "思考要約の生成に失敗しました。",
-			});
+			const normalized = normalizeLlmError(
+				error,
+				this.gateway.provider,
+				"summarize thinking",
+			);
 			this.log.warn("Thinking summarization failed (non-fatal)", {
 				...getExternalErrorLogContext(normalized),
 			});
@@ -52,7 +56,7 @@ export class ThinkingSummarizer {
 }
 
 export function createThinkingSummarizer(
-	gateway: IGeminiGateway,
+	gateway: ILlmGateway,
 	model: string,
 	log?: Logger,
 ): ThinkingSummarizer {
