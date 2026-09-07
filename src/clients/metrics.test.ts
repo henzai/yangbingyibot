@@ -39,6 +39,44 @@ describe("MetricsClient", () => {
 		);
 	});
 
+	describe("common usage compatibility", () => {
+		it("retains the deployed Gemini metric schema", () => {
+			metrics.recordLlmCall({
+				provider: "gemini",
+				model: "answer-model",
+				requestId: "req",
+				success: true,
+				durationMs: 10,
+				usage: {
+					inputTokens: 10,
+					cachedInputTokens: 2,
+					reasoningTokens: 3,
+					outputTokens: 4,
+					totalTokens: 17,
+				},
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req"],
+				blobs: ["gemini_api_call", "req", "answer-model", "answer"],
+				doubles: [10, 1, 0, 10, 2, 3, 4, 17, 1],
+			});
+		});
+		it("does not label another provider as Gemini or report missing usage as zero", () => {
+			metrics.recordLlmCall({
+				provider: "fake",
+				model: "fake-model",
+				requestId: "req",
+				success: true,
+				durationMs: 10,
+				usage: null,
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req"],
+				blobs: ["llm_api_call", "req", "fake-model", "answer", "fake"],
+				doubles: [10, 1, 0, -1, -1, -1, -1, -1, 1],
+			});
+		});
+	});
 	describe("recordGeminiCall", () => {
 		it("writes data point with correct structure for success", () => {
 			const data: GeminiMetricData = {

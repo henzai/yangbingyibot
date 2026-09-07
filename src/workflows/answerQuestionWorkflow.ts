@@ -11,7 +11,7 @@ import {
 	NoOpMetricsClient,
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
-import { loadConfig } from "../config";
+import { type AppConfig, loadConfig } from "../config";
 import type { Bindings, HistoryEntry } from "../contracts";
 import { createDiscordDeliveryService } from "../discord/delivery";
 import {
@@ -20,12 +20,19 @@ import {
 	formatThinking,
 	normalizeDiscordText,
 } from "../discord/formatter";
-import { createGeminiGateway } from "../gemini/gateway";
-import { buildAnswerPrompt } from "../gemini/promptBuilder";
-import { StreamCoordinator } from "../gemini/streamCoordinator";
-import { createThinkingSummarizer } from "../gemini/thinkingSummarizer";
-import { addGeminiUsage } from "../gemini/types";
-import { createConversationHistoryRepository } from "../repositories/conversationHistory";
+import { createLlmGateway } from "../llm/factory";
+import { buildAnswerPrompt } from "../llm/promptBuilder";
+import { StreamCoordinator } from "../llm/streamCoordinator";
+import {
+	createThinkingSummarizer,
+	THINKING_FALLBACK,
+} from "../llm/thinkingSummarizer";
+import type { LlmFinish } from "../llm/types";
+import { addLlmUsage, normalizeSavedUsage, zeroUsage } from "../llm/usage";
+import {
+	createConversationHistoryRepository,
+	normalizeHistory,
+} from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
 import {
@@ -40,7 +47,7 @@ import type {
 	HistoryOutput,
 	SaveHistoryOutput,
 	SheetDataOutput,
-	StreamingGeminiOutput,
+	StreamingLlmOutput,
 	WorkflowParams,
 } from "./types";
 
@@ -54,29 +61,25 @@ function getMetricsClient(env: Bindings, log: Logger): IMetricsClient {
 	return new NoOpMetricsClient();
 }
 
-const BLOCKED_FINISH_REASONS = new Set([
-	"SAFETY",
-	"RECITATION",
-	"PROHIBITED_CONTENT",
-]);
-
-/**
- * Explain an empty Gemini answer to the user based on why the stream finished.
- */
-function emptyResponseUserMessage(
-	finishReason: string | undefined,
-	blockReason: string | undefined,
-): string {
-	if (finishReason === "MAX_TOKENS") {
+/** Provider-independent empty-answer explanation; keep existing Japanese messages. */
+function emptyResponseUserMessage(finish: LlmFinish): string {
+	if (finish.reason === "length")
 		return "思考が長くなりすぎて回答を生成できませんでした。質問を短く区切って再度お試しください。";
-	}
-	if (
-		blockReason ||
-		(finishReason && BLOCKED_FINISH_REASONS.has(finishReason))
-	) {
+	if (finish.reason === "blocked")
 		return "安全性フィルタにより回答できませんでした。";
-	}
 	return "AIから有効な応答が得られませんでした。";
+}
+
+/** Decode completed steps written by the previous deployment on Workflow replay. */
+export function normalizeStreamingOutput(
+	result: StreamingLlmOutput,
+): StreamingLlmOutput {
+	return {
+		...result,
+		updatedHistory: normalizeHistory(result.updatedHistory),
+		usage: normalizeSavedUsage(result.usage),
+		thinkingSummaryUsage: normalizeSavedUsage(result.thinkingSummaryUsage),
+	};
 }
 
 // Step 1: Get sheet data from KV cache or Google Sheets
@@ -173,8 +176,8 @@ export async function saveHistoryStep(
 	}
 }
 
-// Step 3+5 combined: Stream Gemini response + progressively edit Discord message
-export async function streamGeminiWithDiscordEditsStep(
+// Step 3+5 combined: Stream LLM response + progressively edit Discord message
+export async function streamLlmWithDiscordEditsStep(
 	env: Bindings,
 	token: string,
 	question: string,
@@ -182,25 +185,32 @@ export async function streamGeminiWithDiscordEditsStep(
 	sheetData: SheetDataOutput,
 	historyOutput: HistoryOutput,
 	log: Logger,
-): Promise<StreamingGeminiOutput> {
-	const config = loadConfig(env);
+	config: AppConfig = loadConfig(env),
+): Promise<StreamingLlmOutput> {
 	const discord = createDiscordWebhookClient(
 		config.discordApplicationId,
 		token,
 		log,
 	);
 	const delivery = createDiscordDeliveryService(discord, log);
-	const gateway = createGeminiGateway(config.geminiApiKey, log);
-	const summarizer = createThinkingSummarizer(
-		gateway,
-		config.geminiSummaryModel,
-		log,
-	);
+	const gateway = createLlmGateway(config.llm.answer, log);
+	const summarySelection = gateway.capabilities.reasoningSummary
+		? config.llm.summary
+		: null;
+	const summaryGateway = summarySelection
+		? summarySelection.provider === config.llm.answer.provider
+			? gateway
+			: createLlmGateway(summarySelection, log)
+		: null;
+	const summarizer =
+		summarySelection && summaryGateway
+			? createThinkingSummarizer(summaryGateway, summarySelection.model, log)
+			: null;
 	const coordinator = new StreamCoordinator();
 	const prompt = buildAnswerPrompt({
 		description: sheetData.description,
 		knowledge: sheetData.sheetInfo,
-		history: historyOutput.history,
+		history: normalizeHistory(historyOutput.history),
 		question: message,
 	});
 
@@ -209,17 +219,30 @@ export async function streamGeminiWithDiscordEditsStep(
 	let deliveryDurationMs = 0;
 	let thinkingSummary = "";
 	let summarizedThinkingLength = 0;
-	let thinkingSummaryUsage: StreamingGeminiOutput["thinkingSummaryUsage"] =
-		null;
+	let thinkingSummaryUsage = zeroUsage();
 	let thinkingSummaryCallCount = 0;
 	let thinkingSummarySuccessCount = 0;
 	let thinkingSummaryDurationMs = 0;
 
-	log.info("Starting Gemini streaming with Discord edits");
+	if (!summarizer) {
+		const started = Date.now();
+		const preview = await delivery.deliverPreview(
+			formatThinking(question, THINKING_FALLBACK),
+		);
+		deliveryDurationMs += Date.now() - started;
+		editCount += preview.editCount;
+		retryCount += preview.retryCount;
+	}
+	log.info("Starting LLM streaming with Discord edits", {
+		provider: config.llm.answer.provider,
+		model: config.llm.answer.model,
+	});
 	for await (const event of gateway.generateStream({
-		model: config.geminiModel,
+		model: config.llm.answer.model,
 		prompt,
+		includeReasoningSummary: summarizer !== null,
 	})) {
+		if (event.type === "reasoning_summary" && !summarizer) continue;
 		const decision = coordinator.handle(event, Date.now());
 		if (!decision) {
 			continue;
@@ -227,6 +250,7 @@ export async function streamGeminiWithDiscordEditsStep(
 
 		let content: string;
 		if (decision.phase === "thinking") {
+			if (!summarizer) continue;
 			const summaryStartTime = Date.now();
 			const summaryResult = await summarizer.summarize(
 				thinkingSummary,
@@ -234,7 +258,7 @@ export async function streamGeminiWithDiscordEditsStep(
 			);
 			thinkingSummaryDurationMs += Date.now() - summaryStartTime;
 			thinkingSummaryCallCount++;
-			thinkingSummaryUsage = addGeminiUsage(
+			thinkingSummaryUsage = addLlmUsage(
 				thinkingSummaryUsage,
 				summaryResult.usage,
 			);
@@ -272,25 +296,42 @@ export async function streamGeminiWithDiscordEditsStep(
 	const streamResult = coordinator.getResult();
 	const rawResponse = streamResult.response;
 	if (!rawResponse.trim()) {
-		const { finishReason, blockReason } = streamResult;
-		log.error("Gemini returned an empty answer", {
-			finishReason,
-			blockReason,
+		const { finish } = streamResult;
+		log.error("LLM returned an empty answer", {
+			provider: config.llm.answer.provider,
+			finish,
 			thinkingLength: streamResult.thinking.length,
-			thoughtsTokens: streamResult.usage?.thoughtsTokens,
+			reasoningTokens: streamResult.usage?.reasoningTokens,
 		});
 		throw new ExternalServiceError({
-			service: "gemini",
+			service: "llm",
+			provider: config.llm.answer.provider,
 			operation: "validate streamed response",
 			retryable: false,
-			userMessage: emptyResponseUserMessage(finishReason, blockReason),
+			userMessage: emptyResponseUserMessage(finish),
+		});
+	}
+	if (
+		streamResult.finish.reason === "blocked" ||
+		streamResult.finish.reason === "error"
+	) {
+		throw new ExternalServiceError({
+			service: "llm",
+			provider: config.llm.answer.provider,
+			operation: "validate streamed response",
+			retryable: false,
+			userMessage: emptyResponseUserMessage(streamResult.finish),
 		});
 	}
 	const response = normalizeDiscordText(rawResponse);
+	const finalResponse =
+		streamResult.finish.reason === "length"
+			? `${response}\n\n（回答が出力上限に達しました。続きが必要な場合は質問を分けてください。）`
+			: response;
 
 	const finalDeliveryStartTime = Date.now();
 	const finalDelivery = await delivery.deliverFinal(
-		response.length === 0 ? "" : formatAnswer(question, response),
+		response.length === 0 ? "" : formatAnswer(question, finalResponse),
 	);
 	deliveryDurationMs += Date.now() - finalDeliveryStartTime;
 	editCount += finalDelivery.editCount;
@@ -307,12 +348,13 @@ export async function streamGeminiWithDiscordEditsStep(
 	return {
 		response,
 		updatedHistory: [
-			...historyOutput.history,
+			...normalizeHistory(historyOutput.history),
 			{ role: "user", text: `質問: ${message}` },
-			{ role: "model", text: response },
+			{ role: "assistant", text: response },
 		],
 		usage: streamResult.usage,
-		thinkingSummaryUsage,
+		thinkingSummaryUsage:
+			thinkingSummaryCallCount > 0 ? thinkingSummaryUsage : null,
 		thinkingSummaryCallCount,
 		thinkingSummarySuccessCount,
 		thinkingSummaryDurationMs,
@@ -325,6 +367,9 @@ export async function streamGeminiWithDiscordEditsStep(
 		deliveryDurationMs,
 	};
 }
+
+/** Compatibility export; persisted step names also remain unchanged. */
+export const streamGeminiWithDiscordEditsStep = streamLlmWithDiscordEditsStep;
 
 // Step 5: Send response to Discord webhook (used for error messages)
 export async function sendDiscordResponseStep(
@@ -473,11 +518,12 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			});
 			stepCount++;
 
-			// Step 3: Stream Gemini response + progressively edit Discord message
-			const geminiStartTime = Date.now();
-			let geminiSuccess = false;
-			let geminiUsage: StreamingGeminiOutput["usage"] = null;
-			let streamResult: StreamingGeminiOutput;
+			// Step 3: Stream the selected LLM and progressively edit Discord.
+			// Keep the persisted Gemini-era step ID to avoid replaying completed calls.
+			const llmStartTime = Date.now();
+			let llmSuccess = false;
+			let llmUsage: StreamingLlmOutput["usage"] = null;
+			let streamResult: StreamingLlmOutput;
 			try {
 				streamResult = await step.do(
 					"streamGeminiAndEditDiscord",
@@ -490,7 +536,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 						timeout: "120 seconds",
 					},
 					async () => {
-						return streamGeminiWithDiscordEditsStep(
+						return streamLlmWithDiscordEditsStep(
 							this.env,
 							token,
 							message,
@@ -498,33 +544,37 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 							sheetData,
 							historyOutput,
 							log.withContext({ step: "streamGeminiAndEditDiscord" }),
+							config,
 						);
 					},
 				);
-				geminiUsage = streamResult.usage;
-				geminiSuccess = true;
+				streamResult = normalizeStreamingOutput(streamResult);
+				llmUsage = streamResult.usage;
+				llmSuccess = true;
 				stepCount++;
 			} finally {
-				metrics.recordGeminiCall({
+				metrics.recordLlmCall({
 					requestId,
-					success: geminiSuccess,
-					durationMs: Date.now() - geminiStartTime,
-					usage: geminiUsage,
-					model: config.geminiModel,
+					success: llmSuccess,
+					durationMs: Date.now() - llmStartTime,
+					usage: llmUsage,
+					provider: config.llm.answer.provider,
+					model: config.llm.answer.model,
 					purpose: "answer",
 					callCount: 1,
 				});
 			}
 
-			if (streamResult.thinkingSummaryCallCount > 0) {
-				metrics.recordGeminiCall({
+			if (streamResult.thinkingSummaryCallCount > 0 && config.llm.summary) {
+				metrics.recordLlmCall({
 					requestId,
 					success:
 						streamResult.thinkingSummarySuccessCount ===
 						streamResult.thinkingSummaryCallCount,
 					durationMs: streamResult.thinkingSummaryDurationMs,
 					usage: streamResult.thinkingSummaryUsage,
-					model: config.geminiSummaryModel,
+					provider: config.llm.summary.provider,
+					model: config.llm.summary.model,
 					purpose: "thinking_summary",
 					callCount: streamResult.thinkingSummaryCallCount,
 				});

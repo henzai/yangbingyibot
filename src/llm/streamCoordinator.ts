@@ -1,4 +1,4 @@
-import type { GeminiStreamEvent, GeminiUsage } from "./types";
+import type { LlmFinish, LlmStreamEvent, LlmUsage } from "./types";
 
 export type StreamPhase = "idle" | "thinking" | "response";
 
@@ -28,9 +28,8 @@ export class StreamCoordinator {
 	private thinking = "";
 	private hasSeenThinking = false;
 	private response = "";
-	private usage: GeminiUsage | null = null;
-	private finishReason: string | undefined;
-	private blockReason: string | undefined;
+	private usage: LlmUsage | null = null;
+	private finish: LlmFinish = { reason: "unknown" };
 	private lastEditAt = 0;
 	private lastThinkingEditLength = 0;
 	private lastResponseEditLength = 0;
@@ -40,30 +39,29 @@ export class StreamCoordinator {
 		this.config = { ...DEFAULT_CONFIG, ...config };
 	}
 
-	handle(event: GeminiStreamEvent, now: number): StreamPreviewDecision | null {
+	handle(event: LlmStreamEvent, now: number): StreamPreviewDecision | null {
 		if (event.type === "usage") {
 			this.usage = event.usage;
 			return null;
 		}
 
 		if (event.type === "finish") {
-			this.finishReason = event.finishReason;
-			this.blockReason = event.blockReason;
+			this.finish = event.finish;
 			return null;
 		}
 
 		const previousPhase = this.phase;
-		if (event.type === "thinking") {
+		if (event.type === "reasoning_summary") {
 			const firstThinking = !this.hasSeenThinking;
 			this.hasSeenThinking = true;
 			this.phase = "thinking";
 			this.thinking += event.delta;
-			return this.createDecision(event.type, now, firstThinking, false);
+			return this.createDecision("thinking", now, firstThinking, false);
 		} else {
 			this.phase = "response";
-			this.response = event.accumulated;
+			this.response += event.delta;
 			return this.createDecision(
-				event.type,
+				"response",
 				now,
 				false,
 				previousPhase !== "response",
@@ -122,17 +120,15 @@ export class StreamCoordinator {
 		phase: StreamPhase;
 		response: string;
 		thinking: string;
-		usage: GeminiUsage | null;
-		finishReason: string | undefined;
-		blockReason: string | undefined;
+		usage: LlmUsage | null;
+		finish: LlmFinish;
 	} {
 		return {
 			phase: this.phase,
 			response: this.response,
 			thinking: this.thinking,
 			usage: this.usage,
-			finishReason: this.finishReason,
-			blockReason: this.blockReason,
+			finish: this.finish,
 		};
 	}
 }

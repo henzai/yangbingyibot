@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import * as configuration from "./config";
 import type { Bindings } from "./contracts";
 import type { CheckResult } from "./health";
 import { runHealthCheck } from "./health";
@@ -55,6 +56,42 @@ describe("health check", () => {
 		mockFetch.mockReset();
 	});
 
+	it("probes Gemini only once with summaries disabled", async () => {
+		const env = createMockEnv({
+			LLM_SUMMARY_ENABLED: "false",
+			OPENAI_API_KEY: " ",
+		});
+		mockFetch.mockResolvedValue(
+			new Response(JSON.stringify({ models: [] }), { status: 200 }),
+		);
+		const result = await runHealthCheck(env, log);
+		expect(result.allHealthy).toBe(true);
+		expect(result.checks.map((check) => check.name)).toEqual([
+			"kv",
+			"gemini",
+			"google_sa",
+		]);
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+	});
+	it("does not probe Gemini for an alternate-only configuration or falsely mark it healthy", async () => {
+		const env = createMockEnv();
+		const config = configuration.loadConfig(env);
+		config.llm = {
+			answer: { provider: "fake", model: "fake-model", apiKey: "fake-key" },
+			summary: null,
+		};
+		const spy = vi.spyOn(configuration, "loadConfig").mockReturnValue(config);
+		try {
+			const result = await runHealthCheck(env, log);
+			expect(result.allHealthy).toBe(false);
+			expect(result.checks).toContainEqual(
+				expect.objectContaining({ name: "llm:fake", ok: false }),
+			);
+			expect(mockFetch).not.toHaveBeenCalled();
+		} finally {
+			spy.mockRestore();
+		}
+	});
 	describe("all checks pass", () => {
 		it("returns allHealthy: true with no GitHub issue", async () => {
 			const env = createMockEnv();

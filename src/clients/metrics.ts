@@ -1,5 +1,6 @@
 import type { DeliveryStatus } from "../discord/delivery";
 import type { GeminiUsage } from "../gemini/types";
+import type { LlmUsage } from "../llm/types";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -8,6 +9,7 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
  */
 export type MetricEventType =
 	| "gemini_api_call"
+	| "llm_api_call"
 	| "workflow_complete"
 	| "kv_cache_access"
 	| "discord_webhook"
@@ -32,6 +34,11 @@ export interface GeminiMetricData extends MetricData {
 	model?: string;
 	purpose?: "answer" | "thinking_summary";
 	callCount?: number;
+}
+
+export interface LlmMetricData extends Omit<GeminiMetricData, "usage"> {
+	provider: string;
+	usage?: LlmUsage | null;
 }
 
 /**
@@ -75,6 +82,7 @@ export interface HealthCheckMetricData {
  * Interface for MetricsClient to enable testing with mocks
  */
 export interface IMetricsClient {
+	recordLlmCall(data: LlmMetricData): void;
 	recordGeminiCall(data: GeminiMetricData): void;
 	recordWorkflowComplete(data: WorkflowMetricData): void;
 	recordKVCacheAccess(data: KVCacheMetricData): void;
@@ -98,6 +106,44 @@ export class MetricsClient implements IMetricsClient {
 	constructor(dataset: AnalyticsEngineDataset, log?: Logger) {
 		this.dataset = dataset;
 		this.log = log ?? defaultLogger;
+	}
+
+	/** Keep the existing positional schema until #432, with provider appended. */
+	recordLlmCall(data: LlmMetricData): void {
+		const usage = data.usage;
+		if (data.provider === "gemini") {
+			this.recordGeminiCall({
+				...data,
+				usage: usage && {
+					promptTokens: usage.inputTokens ?? 0,
+					cachedTokens: usage.cachedInputTokens ?? 0,
+					thoughtsTokens: usage.reasoningTokens ?? 0,
+					candidatesTokens: usage.outputTokens ?? 0,
+					totalTokens: usage.totalTokens ?? 0,
+				},
+			});
+			return;
+		}
+		this.writeDataPoint("llm_api_call", {
+			indexes: [data.requestId.substring(0, 96)],
+			blobs: [
+				data.requestId,
+				data.model ?? "unknown",
+				data.purpose ?? "answer",
+				data.provider,
+			],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.retryCount ?? 0,
+				usage?.inputTokens ?? -1,
+				usage?.cachedInputTokens ?? -1,
+				usage?.reasoningTokens ?? -1,
+				usage?.outputTokens ?? -1,
+				usage?.totalTokens ?? -1,
+				data.callCount ?? 1,
+			],
+		});
 	}
 
 	/**
@@ -231,6 +277,7 @@ export class MetricsClient implements IMetricsClient {
  * No-op implementation for testing or when metrics are disabled
  */
 export class NoOpMetricsClient implements IMetricsClient {
+	recordLlmCall(_data: LlmMetricData): void {}
 	recordGeminiCall(_data: GeminiMetricData): void {}
 	recordWorkflowComplete(_data: WorkflowMetricData): void {}
 	recordKVCacheAccess(_data: KVCacheMetricData): void {}

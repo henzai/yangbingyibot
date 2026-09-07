@@ -9,6 +9,7 @@ import {
 } from "./clients/metrics";
 import { loadConfig } from "./config";
 import type { Bindings } from "./contracts";
+import type { LlmRoutingConfig } from "./llm/providerCatalog";
 import { createDeduplicationStore } from "./repositories/deduplicationStore";
 import {
 	externalServiceErrorFromResponse,
@@ -18,7 +19,7 @@ import {
 } from "./utils/errors";
 import type { Logger } from "./utils/logger";
 
-type CheckName = "kv" | "gemini" | "google_sa";
+type CheckName = "kv" | "gemini" | "google_sa" | `llm:${string}`;
 
 export type CheckResult = {
 	name: CheckName;
@@ -104,6 +105,34 @@ function checkGoogleSA(saJson: string): CheckResult {
 	}
 }
 
+/** Only probe configured providers. Additional provider probes belong to #432. */
+function checkConfiguredLlms(
+	config: LlmRoutingConfig,
+): Array<Promise<CheckResult>> {
+	const selections = [
+		config.answer,
+		...(config.summary ? [config.summary] : []),
+	];
+	const seen = new Set<string>();
+	return selections
+		.filter((selection) => {
+			if (seen.has(selection.provider)) return false;
+			seen.add(selection.provider);
+			return true;
+		})
+		.map((selection) =>
+			selection.provider === "gemini"
+				? checkGemini(selection.apiKey)
+				: Promise.resolve({
+						name: `llm:${selection.provider}` as const,
+						ok: false,
+						durationMs: 0,
+						error:
+							"Health probe is not implemented for the configured provider",
+					}),
+		);
+}
+
 async function reportHealthCheckToGitHub(
 	env: Bindings,
 	failedChecks: CheckResult[],
@@ -183,7 +212,7 @@ export async function runHealthCheck(
 	// Run all checks in parallel
 	const results = await Promise.allSettled([
 		checkKV(env.sushanshan_bot),
-		checkGemini(config.geminiApiKey),
+		...checkConfiguredLlms(config.llm),
 		Promise.resolve(checkGoogleSA(config.googleServiceAccount)),
 	]);
 

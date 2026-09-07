@@ -1,4 +1,3 @@
-import type { HistoryEntry } from "../contracts";
 import {
 	buildAnswerPrompt as buildLlmAnswerPrompt,
 	buildThinkingSummaryPrompt as buildLlmThinkingSummaryPrompt,
@@ -9,7 +8,7 @@ import type { GeminiPrompt } from "./types";
 export type AnswerPromptInput = {
 	description: string;
 	knowledge: string;
-	history: HistoryEntry[];
+	history: Array<{ role: "user" | "model"; text: string }>;
 	question: string;
 };
 

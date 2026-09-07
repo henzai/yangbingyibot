@@ -1,11 +1,17 @@
 import type { Bindings } from "./contracts";
+import {
+	type LlmRoutingConfig,
+	type LlmSelection,
+	PROVIDERS,
+	type ProviderCatalog,
+} from "./llm/providerCatalog";
 
 const HISTORY_TTL_MIN_SECONDS = 60;
 const HISTORY_TTL_MAX_SECONDS = 86_400;
 
 export const DEFAULT_RUNTIME_CONFIG = {
-	geminiModel: "gemini-3.5-flash-lite",
-	geminiSummaryModel: "gemini-2.5-flash-lite",
+	geminiModel: PROVIDERS.gemini.defaultModel,
+	geminiSummaryModel: PROVIDERS.gemini.defaultSummaryModel,
 	spreadsheet: {
 		id: "1sPOk2XqSB3ZB-O0eKl2ZkKYVr_OgvVCZX0xS79FTNfg",
 		dataSheetName: "test",
@@ -35,11 +41,9 @@ export type AppConfig = {
 	discordToken: string;
 	discordPublicKey: string;
 	discordApplicationId: string;
-	geminiApiKey: string;
+	llm: LlmRoutingConfig;
 	googleServiceAccount: string;
 	githubToken?: string;
-	geminiModel: string;
-	geminiSummaryModel: string;
 	spreadsheet: SpreadsheetConfig;
 	githubRepository: GitHubRepositoryConfig;
 	historyTtlSeconds: number;
@@ -62,6 +66,7 @@ function requiredString(
 		| "DISCORD_PUBLIC_KEY"
 		| "DISCORD_APPLICATION_ID"
 		| "GEMINI_API_KEY"
+		| "OPENAI_API_KEY"
 		| "GOOGLE_SERVICE_ACCOUNT",
 ): string {
 	const value = env[setting];
@@ -77,6 +82,11 @@ function optionalString(
 		| "GITHUB_TOKEN"
 		| "GEMINI_MODEL"
 		| "GEMINI_SUMMARY_MODEL"
+		| "LLM_PROVIDER"
+		| "LLM_MODEL"
+		| "LLM_SUMMARY_ENABLED"
+		| "LLM_SUMMARY_PROVIDER"
+		| "LLM_SUMMARY_MODEL"
 		| "GOOGLE_SPREADSHEET_ID"
 		| "GOOGLE_DATA_SHEET_NAME"
 		| "GOOGLE_DESCRIPTION_SHEET_NAME",
@@ -142,23 +152,78 @@ function parseGitHubRepository(
 	};
 }
 
-export function loadConfig(env: Bindings): AppConfig {
+function loadLlmConfig(
+	env: Bindings,
+	catalog: ProviderCatalog,
+): LlmRoutingConfig {
+	const provider = optionalString(env, "LLM_PROVIDER", "gemini") ?? "gemini";
+	const select = (
+		provider: string,
+		purpose: "answer" | "summary",
+	): LlmSelection => {
+		const providerSetting =
+			purpose === "answer" ? "LLM_PROVIDER" : "LLM_SUMMARY_PROVIDER";
+		const modelSetting =
+			purpose === "answer" ? "LLM_MODEL" : "LLM_SUMMARY_MODEL";
+		if (!Object.hasOwn(catalog, provider))
+			throw new ConfigError(
+				providerSetting,
+				"provider is not supported by this build",
+			);
+		const definition = catalog[provider];
+		const legacySetting =
+			purpose === "answer"
+				? definition.legacyModelSetting
+				: definition.legacySummaryModelSetting;
+		const model =
+			optionalString(env, modelSetting) ??
+			(legacySetting ? optionalString(env, legacySetting) : undefined) ??
+			(purpose === "answer"
+				? definition.defaultModel
+				: definition.defaultSummaryModel);
+		if (!model)
+			throw new ConfigError(
+				modelSetting,
+				"an explicit model is required for the selected provider",
+			);
+		return {
+			provider,
+			model,
+			apiKey: requiredString(env, definition.apiKeySetting),
+		};
+	};
+	const answer = select(provider, "answer");
+	const enabled = optionalString(env, "LLM_SUMMARY_ENABLED", "true");
+	if (enabled !== "true" && enabled !== "false")
+		throw new ConfigError("LLM_SUMMARY_ENABLED", "must be true or false");
+	if (enabled === "false") {
+		if (
+			env.LLM_SUMMARY_PROVIDER !== undefined ||
+			env.LLM_SUMMARY_MODEL !== undefined
+		) {
+			throw new ConfigError(
+				"LLM_SUMMARY_ENABLED",
+				"summary provider/model must be unset when summaries are disabled",
+			);
+		}
+		return { answer, summary: null };
+	}
+	const summaryProvider =
+		optionalString(env, "LLM_SUMMARY_PROVIDER", provider) ?? provider;
+	return { answer, summary: select(summaryProvider, "summary") };
+}
+
+export function loadConfig(
+	env: Bindings,
+	catalog: ProviderCatalog = PROVIDERS,
+): AppConfig {
 	return {
 		discordToken: requiredString(env, "DISCORD_TOKEN"),
 		discordPublicKey: requiredString(env, "DISCORD_PUBLIC_KEY"),
 		discordApplicationId: requiredString(env, "DISCORD_APPLICATION_ID"),
-		geminiApiKey: requiredString(env, "GEMINI_API_KEY"),
+		llm: loadLlmConfig(env, catalog),
 		googleServiceAccount: requiredString(env, "GOOGLE_SERVICE_ACCOUNT"),
 		githubToken: optionalString(env, "GITHUB_TOKEN"),
-		geminiModel:
-			optionalString(env, "GEMINI_MODEL", DEFAULT_RUNTIME_CONFIG.geminiModel) ??
-			DEFAULT_RUNTIME_CONFIG.geminiModel,
-		geminiSummaryModel:
-			optionalString(
-				env,
-				"GEMINI_SUMMARY_MODEL",
-				DEFAULT_RUNTIME_CONFIG.geminiSummaryModel,
-			) ?? DEFAULT_RUNTIME_CONFIG.geminiSummaryModel,
 		spreadsheet: {
 			id:
 				optionalString(

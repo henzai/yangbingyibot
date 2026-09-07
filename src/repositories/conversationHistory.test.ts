@@ -21,6 +21,29 @@ describe("ConversationHistoryRepository", () => {
 		repository = new ConversationHistoryRepository(mockKV, 600);
 	});
 
+	it("reads mixed roles and writes the rollback-compatible model format", async () => {
+		(mockKV.get as Mock).mockResolvedValue([
+			{ role: "user", text: "question" },
+			{ role: "model", text: "old answer" },
+			{ role: "assistant", text: "new answer" },
+		]);
+		const history = await repository.get("conversation");
+		expect(history.map((entry) => entry.role)).toEqual([
+			"user",
+			"assistant",
+			"assistant",
+		]);
+		await repository.save("conversation", history);
+		expect(mockKV.put).toHaveBeenCalledWith(
+			"chat_history:v2:conversation",
+			JSON.stringify([
+				{ role: "user", text: "question" },
+				{ role: "model", text: "old answer" },
+				{ role: "model", text: "new answer" },
+			]),
+			{ expirationTtl: 600 },
+		);
+	});
 	it("isolates histories by conversation key and never reads the legacy key", async () => {
 		(mockKV.get as Mock).mockResolvedValue([]);
 
@@ -42,14 +65,17 @@ describe("ConversationHistoryRepository", () => {
 
 	it("saves only the latest 20 entries with the configured TTL", async () => {
 		const history: HistoryEntry[] = Array.from({ length: 25 }, (_, index) => ({
-			role: index % 2 === 0 ? "user" : "model",
+			role: index % 2 === 0 ? "user" : "assistant",
 			text: `entry-${index}`,
 		}));
 
 		await repository.save("conversation", history);
 
 		const [, serialized, options] = (mockKV.put as Mock).mock.calls[0];
-		const saved = JSON.parse(serialized) as HistoryEntry[];
+		const saved = JSON.parse(serialized) as Array<{
+			role: string;
+			text: string;
+		}>;
 		expect(saved).toHaveLength(20);
 		expect(saved[0].text).toBe("entry-5");
 		expect(saved.at(-1)?.text).toBe("entry-24");
@@ -59,13 +85,16 @@ describe("ConversationHistoryRepository", () => {
 	it("removes oldest entries until serialized UTF-8 data is at most 64 KiB", async () => {
 		const history: HistoryEntry[] = [
 			{ role: "user", text: "古".repeat(15_000) },
-			{ role: "model", text: "新".repeat(15_000) },
+			{ role: "assistant", text: "新".repeat(15_000) },
 		];
 
 		await repository.save("conversation", history);
 
 		const serialized = (mockKV.put as Mock).mock.calls[0][1] as string;
-		const saved = JSON.parse(serialized) as HistoryEntry[];
+		const saved = JSON.parse(serialized) as Array<{
+			role: string;
+			text: string;
+		}>;
 		expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(
 			64 * 1024,
 		);
@@ -88,14 +117,14 @@ describe("ConversationHistoryRepository", () => {
 		(mockKV.get as Mock).mockResolvedValue([
 			{ role: "user", text: "valid" },
 			null,
-			{ role: "assistant", text: "invalid role" },
+			{ role: "system", text: "invalid role" },
 			{ role: "model", text: 123 },
 			{ role: "model", text: "also valid", extra: "removed" },
 		]);
 
 		await expect(repository.get("conversation")).resolves.toEqual([
 			{ role: "user", text: "valid" },
-			{ role: "model", text: "also valid" },
+			{ role: "assistant", text: "also valid" },
 		]);
 	});
 
