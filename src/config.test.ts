@@ -138,6 +138,36 @@ describe("LLM routing configuration", () => {
 			summary: null,
 		});
 	});
+	it("selects the production OpenAI provider without requiring Gemini", () => {
+		const config = loadConfig(
+			createBindings({
+				LLM_PROVIDER: "openai",
+				LLM_MODEL: "gpt-4.1-mini",
+				OPENAI_API_KEY: "openai-key",
+				GEMINI_API_KEY: undefined,
+				LLM_SUMMARY_ENABLED: "false",
+			}),
+		);
+		expect(config.llm).toEqual({
+			answer: {
+				provider: "openai",
+				model: "gpt-4.1-mini",
+				apiKey: "openai-key",
+			},
+			summary: null,
+		});
+	});
+	it("requires explicit OpenAI models because model selection is deferred", () => {
+		expect(() =>
+			loadConfig(
+				createBindings({
+					LLM_PROVIDER: "openai",
+					OPENAI_API_KEY: "openai-key",
+					LLM_SUMMARY_ENABLED: "false",
+				}),
+			),
+		).toThrow("Invalid configuration for LLM_MODEL:");
+	});
 	it("uses an alternate provider for both models without Gemini credentials", () => {
 		const config = loadConfig(
 			createBindings({

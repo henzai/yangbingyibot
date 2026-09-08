@@ -17,6 +17,9 @@ export const PROVIDERS = {
 		legacyModelSetting: "GEMINI_MODEL",
 		legacySummaryModelSetting: "GEMINI_SUMMARY_MODEL",
 	},
+	openai: {
+		apiKeySetting: "OPENAI_API_KEY",
+	},
 } as const satisfies ProviderCatalog;
 
 export type LlmSelection = {

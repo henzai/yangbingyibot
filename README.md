@@ -1,13 +1,13 @@
 # yangbingyibot
 
-Google SheetsのナレッジベースとGoogle Gemini AIを使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
+Google Sheetsのナレッジベースと設定可能なLLM（既定はGoogle Gemini、OpenAI Responses APIにも対応）を使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
 
 ## 機能
 
 - `/ask` スラッシュコマンドで質問を受け付け
 - Google Sheetsからナレッジベースを取得
-- Google Gemini AIでストリーミング回答（リアルタイムでDiscordメッセージを段階的更新）
-- Gemini思考過程の表示（💭 AI要約で表示）
+- Gemini / OpenAIでストリーミング回答（リアルタイムでDiscordメッセージを段階的更新）
+- providerが公開する推論要約の表示（対応時のみ、💭 AI要約で表示）
 - 利用者＋チャンネル単位の会話履歴と、接続先別のシートデータをKVに保持
 - Analytics Engineでメトリクス収集
 - Cronヘルスチェック（5分間隔でKV・Gemini API・サービスアカウントを監視）
@@ -16,7 +16,7 @@ Google SheetsのナレッジベースとGoogle Gemini AIを使用してDiscord�
 ## アーキテクチャ
 
 ```
-Discord → Cloudflare Workers → Cloudflare Workflow → Google Gemini AI (streaming)
+Discord → Cloudflare Workers → Cloudflare Workflow → Gemini / OpenAI (streaming)
                                       ↓                    ↓
                                Google Sheets        Discord PATCH (段階的更新)
                                       ↓
@@ -34,7 +34,7 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 4. Cloudflare Workflow (`AnswerQuestionWorkflow`) を非同期実行:
    - Step 1: Google SheetsからシートデータをKVキャッシュ経由で取得
    - Step 2: KVから会話履歴を取得
-   - Step 3: Gemini APIでストリーミング応答 + Discordメッセージを1〜1.5秒間隔でPATCH更新
+   - Step 3: 設定したLLM APIでストリーミング応答 + Discordメッセージを1〜1.5秒間隔でPATCH更新
    - Step 4: 会話履歴をKVに保存
 
 Discordはインタラクションに3秒以内の応答を要求するため、実処理はWorkflowに逃がして即座に遅延レスポンスを返す構成になっています。
@@ -47,7 +47,7 @@ Discordはインタラクションに3秒以内の応答を要求するため、
 - Cloudflareアカウント
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
-- Google Gemini APIキー
+- Google Gemini APIキー（既定構成）またはOpenAI APIキー
 
 ### 環境変数
 
@@ -64,12 +64,14 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 
 以下は任意設定です。未設定時は現在の本番値へフォールバックします。
 
+- `LLM_PROVIDER`, `LLM_MODEL`, `LLM_SUMMARY_ENABLED`, `LLM_SUMMARY_PROVIDER`, `LLM_SUMMARY_MODEL`
 - `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`
 - `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DATA_SHEET_NAME`, `GOOGLE_DESCRIPTION_SHEET_NAME`
 - `GITHUB_REPOSITORY`（`owner/repository`形式）
 - `HISTORY_TTL_SECONDS`（60〜86400秒、既定値300秒）
 
 本番環境では `wrangler secret` でシークレットを設定してください。
+OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、未実装のOpenAIヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
 
 ### 起動
 

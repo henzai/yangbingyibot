@@ -4,6 +4,15 @@ import { createLlmGateway } from "./factory";
 import type { ILlmGateway } from "./types";
 
 describe("LLM factory", () => {
+	it("constructs the registered OpenAI adapter", () => {
+		const gateway = createLlmGateway({
+			provider: "openai",
+			model: "configured-model",
+			apiKey: "test-key",
+		});
+		expect(gateway.provider).toBe("openai");
+		expect(gateway.capabilities.reasoningSummary).toBe(true);
+	});
 	it("constructs only the selected provider", () => {
 		const gateway: ILlmGateway = {
 			provider: "fake",

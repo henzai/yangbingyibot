@@ -2,6 +2,7 @@ import { ConfigError } from "../config";
 import type { Logger } from "../utils/logger";
 import type { LlmSelection } from "./providerCatalog";
 import { GeminiLlmGateway } from "./providers/gemini";
+import { OpenAILlmGateway } from "./providers/openai";
 import type { ILlmGateway } from "./types";
 
 export type GatewayFactories = Readonly<
@@ -9,6 +10,7 @@ export type GatewayFactories = Readonly<
 >;
 const FACTORIES: GatewayFactories = {
 	gemini: (apiKey, log) => new GeminiLlmGateway(apiKey, log),
+	openai: (apiKey, log) => new OpenAILlmGateway(apiKey, log),
 };
 
 export function createLlmGateway(

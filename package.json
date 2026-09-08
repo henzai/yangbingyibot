@@ -31,6 +31,7 @@
 		"discord-api-types": "^0.38.0",
 		"discord-interactions": "^4.0.0",
 		"google-spreadsheet": "^5.0.0",
-		"hono": "^4.3.11"
+		"hono": "^4.3.11",
+		"openai": "^7.10.0"
 	}
 }

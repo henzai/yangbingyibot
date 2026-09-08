@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../config";
 import type { Bindings, HistoryEntry, WorkflowParams } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
-import { PROVIDERS } from "../llm/providerCatalog";
 import type { LlmStreamEvent } from "../llm/types";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
@@ -382,20 +381,17 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				);
 			},
 		);
-		it("routes a fake answer provider with no Gemini credentials and translates old history", async () => {
+		it("completes with OpenAI and summaries disabled without Gemini credentials", async () => {
 			const env = {
 				...mockEnv,
 				GEMINI_API_KEY: undefined,
-				OPENAI_API_KEY: "fake-key",
-				LLM_PROVIDER: "fake",
-				LLM_MODEL: "fake-answer",
+				OPENAI_API_KEY: "openai-key",
+				LLM_PROVIDER: "openai",
+				LLM_MODEL: "openai-answer",
 				LLM_SUMMARY_ENABLED: "false",
 			};
-			const config = loadConfig(env, {
-				...PROVIDERS,
-				fake: { apiKeySetting: "OPENAI_API_KEY" },
-			});
-			mockLlmGateway.provider = "fake";
+			const config = loadConfig(env);
+			mockLlmGateway.provider = "openai";
 			mockStream([
 				{ type: "text", delta: "answer" },
 				{ type: "finish", finish: { reason: "stop" } },
@@ -420,7 +416,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			);
 			expect(mockLlmGateway.generateStream).toHaveBeenCalledWith(
 				expect.objectContaining({
-					model: "fake-answer",
+					model: "openai-answer",
+					includeReasoningSummary: false,
 					prompt: expect.objectContaining({
 						messages: expect.arrayContaining([
 							{ role: "assistant", text: "old answer" },
@@ -432,22 +429,20 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				role: "assistant",
 				text: "old answer",
 			});
-			expect(JSON.stringify(result)).not.toContain("fake-key");
+			expect(createThinkingSummarizer).not.toHaveBeenCalled();
+			expect(JSON.stringify(result)).not.toContain("openai-key");
 		});
 		it("uses a separate provider only for enabled summaries", async () => {
 			const env = {
 				...mockEnv,
 				OPENAI_API_KEY: "summary-key",
-				LLM_SUMMARY_PROVIDER: "fake",
-				LLM_SUMMARY_MODEL: "fake-summary",
+				LLM_SUMMARY_PROVIDER: "openai",
+				LLM_SUMMARY_MODEL: "openai-summary",
 			};
-			const config = loadConfig(env, {
-				...PROVIDERS,
-				fake: { apiKeySetting: "OPENAI_API_KEY" },
-			});
-			const summaryGateway = { ...mockLlmGateway, provider: "fake" };
+			const config = loadConfig(env);
+			const summaryGateway = { ...mockLlmGateway, provider: "openai" };
 			vi.mocked(createLlmGateway).mockImplementation((selection) =>
-				selection.provider === "fake" ? summaryGateway : mockLlmGateway,
+				selection.provider === "openai" ? summaryGateway : mockLlmGateway,
 			);
 			mockStream([
 				{ type: "reasoning_summary", delta: "summary source" },
@@ -467,7 +462,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(createLlmGateway).toHaveBeenCalledTimes(2);
 			expect(createThinkingSummarizer).toHaveBeenCalledWith(
 				summaryGateway,
-				"fake-summary",
+				"openai-summary",
 				mockLogger,
 			);
 			expect(mockThinkingSummarizer.summarize).toHaveBeenCalled();
