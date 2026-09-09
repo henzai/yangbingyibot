@@ -71,7 +71,7 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 - `HISTORY_TTL_SECONDS`（60〜86400秒、既定値300秒）
 
 本番環境では `wrangler secret` でシークレットを設定してください。
-OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、未実装のOpenAIヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
+OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例と保持方針については [`docs/llm-gateway.md`](docs/llm-gateway.md)、ヘルスプローブとメトリクスについては [`docs/llm-observability.md`](docs/llm-observability.md) を参照してください。
 
 ### 起動
 
