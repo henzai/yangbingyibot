@@ -170,3 +170,6 @@ dist
 
 .dev.vars
 .wrangler/
+
+# Agent-local operational configuration
+.agents/local/
