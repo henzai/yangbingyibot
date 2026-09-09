@@ -9,11 +9,13 @@ import type { LlmRequest, LlmStreamEvent } from "../types";
 
 const mocks = vi.hoisted(() => ({
 	create: vi.fn(),
+	retrieve: vi.fn(),
 	constructor: vi.fn(),
 }));
 vi.mock("openai", () => ({
 	default: class {
 		responses = { create: mocks.create };
+		models = { retrieve: mocks.retrieve };
 		constructor(options: unknown) {
 			mocks.constructor(options);
 		}
@@ -91,6 +93,29 @@ afterEach(() => {
 });
 
 describe("OpenAI LLM adapter", () => {
+	it("probes one selected model without creating a Response", async () => {
+		mocks.retrieve.mockResolvedValue({
+			id: "configured-model",
+			object: "model",
+			created: 0,
+			owned_by: "openai",
+		});
+
+		await expect(
+			new OpenAILlmGateway("test-key").probe({ model: "configured-model" }),
+		).resolves.toEqual({
+			status: "available",
+			scope: "model_metadata",
+			generationSupport: "unverified",
+			detail:
+				"Model availability was verified; Responses generation was not executed",
+		});
+		expect(mocks.retrieve).toHaveBeenCalledWith("configured-model", {
+			signal: expect.any(AbortSignal),
+		});
+		expect(mocks.create).not.toHaveBeenCalled();
+	});
+
 	it("accepts a replaceable Responses client", async () => {
 		const create = vi.fn().mockResolvedValue(response());
 		const responses = { create } as unknown as OpenAI["responses"];
@@ -306,6 +331,8 @@ describe("OpenAI LLM adapter", () => {
 
 	it("retries stream establishment but never replays interrupted consumption", async () => {
 		vi.useFakeTimers();
+		const onAttempt = vi.fn();
+		const onFirstText = vi.fn();
 		mocks.create
 			.mockRejectedValueOnce({ status: 429, headers: { "retry-after": "1" } })
 			.mockResolvedValueOnce(
@@ -316,9 +343,10 @@ describe("OpenAI LLM adapter", () => {
 			);
 		const seen: LlmStreamEvent[] = [];
 		const pending = (async () => {
-			for await (const value of new OpenAILlmGateway("key").generateStream(
-				request,
-			))
+			for await (const value of new OpenAILlmGateway("key").generateStream({
+				...request,
+				telemetry: { onAttempt, onFirstText },
+			}))
 				seen.push(value);
 		})().catch((error) => error);
 		await vi.advanceTimersByTimeAsync(1000);
@@ -331,6 +359,8 @@ describe("OpenAI LLM adapter", () => {
 		});
 		expect(seen).toEqual([{ type: "text", delta: "partial" }]);
 		expect(mocks.create).toHaveBeenCalledTimes(2);
+		expect(onAttempt).toHaveBeenCalledTimes(2);
+		expect(onFirstText).toHaveBeenCalledOnce();
 		expect(error.message).not.toContain("private");
 	});
 

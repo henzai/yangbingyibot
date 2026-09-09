@@ -27,7 +27,7 @@ import {
 	createThinkingSummarizer,
 	THINKING_FALLBACK,
 } from "../llm/thinkingSummarizer";
-import type { LlmFinish } from "../llm/types";
+import type { LlmFinish, LlmUsage } from "../llm/types";
 import { addLlmUsage, normalizeSavedUsage, zeroUsage } from "../llm/usage";
 import {
 	createConversationHistoryRepository,
@@ -79,6 +79,46 @@ export function normalizeStreamingOutput(
 		updatedHistory: normalizeHistory(result.updatedHistory),
 		usage: normalizeSavedUsage(result.usage),
 		thinkingSummaryUsage: normalizeSavedUsage(result.thinkingSummaryUsage),
+		thinkingSummaryRetryCount:
+			typeof result.thinkingSummaryRetryCount === "number"
+				? result.thinkingSummaryRetryCount
+				: null,
+		answerDurationMs:
+			typeof result.answerDurationMs === "number"
+				? result.answerDurationMs
+				: null,
+		answerFirstTextDurationMs:
+			typeof result.answerFirstTextDurationMs === "number"
+				? result.answerFirstTextDurationMs
+				: null,
+		answerRetryCount:
+			typeof result.answerRetryCount === "number"
+				? result.answerRetryCount
+				: null,
+	};
+}
+
+type LlmStepMetricState = {
+	answerDurationMs: number | null;
+	answerFirstTextDurationMs: number | null;
+	answerRetryCount: number | null;
+	summaryUsage: LlmUsage | null;
+	summaryCallCount: number;
+	summarySuccessCount: number;
+	summaryDurationMs: number;
+	summaryRetryCount: number | null;
+};
+
+function createLlmStepMetricState(): LlmStepMetricState {
+	return {
+		answerDurationMs: null,
+		answerFirstTextDurationMs: null,
+		answerRetryCount: null,
+		summaryUsage: null,
+		summaryCallCount: 0,
+		summarySuccessCount: 0,
+		summaryDurationMs: 0,
+		summaryRetryCount: null,
 	};
 }
 
@@ -186,6 +226,7 @@ export async function streamLlmWithDiscordEditsStep(
 	historyOutput: HistoryOutput,
 	log: Logger,
 	config: AppConfig = loadConfig(env),
+	metricState?: LlmStepMetricState,
 ): Promise<StreamingLlmOutput> {
 	const discord = createDiscordWebhookClient(
 		config.discordApplicationId,
@@ -223,6 +264,9 @@ export async function streamLlmWithDiscordEditsStep(
 	let thinkingSummaryCallCount = 0;
 	let thinkingSummarySuccessCount = 0;
 	let thinkingSummaryDurationMs = 0;
+	let thinkingSummaryRetryCount = 0;
+	let answerAttemptCount = 0;
+	let answerFirstTextDurationMs: number | null = null;
 
 	if (!summarizer) {
 		const started = Date.now();
@@ -237,10 +281,23 @@ export async function streamLlmWithDiscordEditsStep(
 		provider: config.llm.answer.provider,
 		model: config.llm.answer.model,
 	});
+	const answerStartTime = Date.now();
 	for await (const event of gateway.generateStream({
 		model: config.llm.answer.model,
 		prompt,
 		includeReasoningSummary: summarizer !== null,
+		telemetry: {
+			onAttempt: () => {
+				answerAttemptCount++;
+				if (metricState)
+					metricState.answerRetryCount = Math.max(0, answerAttemptCount - 1);
+			},
+			onFirstText: () => {
+				answerFirstTextDurationMs ??= Date.now() - answerStartTime;
+				if (metricState)
+					metricState.answerFirstTextDurationMs = answerFirstTextDurationMs;
+			},
+		},
 	})) {
 		if (event.type === "reasoning_summary" && !summarizer) continue;
 		const decision = coordinator.handle(event, Date.now());
@@ -258,14 +315,24 @@ export async function streamLlmWithDiscordEditsStep(
 			);
 			thinkingSummaryDurationMs += Date.now() - summaryStartTime;
 			thinkingSummaryCallCount++;
+			thinkingSummaryRetryCount += summaryResult.retryCount ?? 0;
 			thinkingSummaryUsage = addLlmUsage(
 				thinkingSummaryUsage,
 				summaryResult.usage,
 			);
+			if (metricState) {
+				metricState.summaryUsage = thinkingSummaryUsage;
+				metricState.summaryCallCount = thinkingSummaryCallCount;
+				metricState.summarySuccessCount = thinkingSummarySuccessCount;
+				metricState.summaryDurationMs = thinkingSummaryDurationMs;
+				metricState.summaryRetryCount = thinkingSummaryRetryCount;
+			}
 			if (summaryResult.success) {
 				thinkingSummary = summaryResult.text;
 				summarizedThinkingLength = decision.textLength;
 				thinkingSummarySuccessCount++;
+				if (metricState)
+					metricState.summarySuccessCount = thinkingSummarySuccessCount;
 			}
 			content = formatThinking(question, summaryResult.text);
 		} else {
@@ -294,6 +361,8 @@ export async function streamLlmWithDiscordEditsStep(
 	}
 
 	const streamResult = coordinator.getResult();
+	const answerDurationMs = Date.now() - answerStartTime;
+	if (metricState) metricState.answerDurationMs = answerDurationMs;
 	const rawResponse = streamResult.response;
 	if (!rawResponse.trim()) {
 		const { finish } = streamResult;
@@ -358,6 +427,10 @@ export async function streamLlmWithDiscordEditsStep(
 		thinkingSummaryCallCount,
 		thinkingSummarySuccessCount,
 		thinkingSummaryDurationMs,
+		thinkingSummaryRetryCount,
+		answerDurationMs,
+		answerFirstTextDurationMs,
+		answerRetryCount: Math.max(0, answerAttemptCount - 1),
 		editCount,
 		chunkCount: finalDelivery.chunkCount,
 		deliveryStatus: finalDelivery.status,
@@ -523,6 +596,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			const llmStartTime = Date.now();
 			let llmSuccess = false;
 			let llmUsage: StreamingLlmOutput["usage"] = null;
+			const llmMetrics = createLlmStepMetricState();
 			let streamResult: StreamingLlmOutput;
 			try {
 				streamResult = await step.do(
@@ -545,39 +619,52 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 							historyOutput,
 							log.withContext({ step: "streamGeminiAndEditDiscord" }),
 							config,
+							llmMetrics,
 						);
 					},
 				);
 				streamResult = normalizeStreamingOutput(streamResult);
 				llmUsage = streamResult.usage;
+				llmMetrics.answerDurationMs = streamResult.answerDurationMs ?? null;
+				llmMetrics.answerFirstTextDurationMs =
+					streamResult.answerFirstTextDurationMs ?? null;
+				llmMetrics.answerRetryCount = streamResult.answerRetryCount ?? null;
+				llmMetrics.summaryUsage = streamResult.thinkingSummaryUsage;
+				llmMetrics.summaryCallCount = streamResult.thinkingSummaryCallCount;
+				llmMetrics.summarySuccessCount =
+					streamResult.thinkingSummarySuccessCount;
+				llmMetrics.summaryDurationMs = streamResult.thinkingSummaryDurationMs;
+				llmMetrics.summaryRetryCount =
+					streamResult.thinkingSummaryRetryCount ?? null;
 				llmSuccess = true;
 				stepCount++;
 			} finally {
 				metrics.recordLlmCall({
 					requestId,
 					success: llmSuccess,
-					durationMs: Date.now() - llmStartTime,
+					durationMs: llmMetrics.answerDurationMs ?? Date.now() - llmStartTime,
 					usage: llmUsage,
 					provider: config.llm.answer.provider,
 					model: config.llm.answer.model,
 					purpose: "answer",
 					callCount: 1,
+					retryCount: llmMetrics.answerRetryCount,
+					firstTextDurationMs: llmMetrics.answerFirstTextDurationMs,
 				});
-			}
-
-			if (streamResult.thinkingSummaryCallCount > 0 && config.llm.summary) {
-				metrics.recordLlmCall({
-					requestId,
-					success:
-						streamResult.thinkingSummarySuccessCount ===
-						streamResult.thinkingSummaryCallCount,
-					durationMs: streamResult.thinkingSummaryDurationMs,
-					usage: streamResult.thinkingSummaryUsage,
-					provider: config.llm.summary.provider,
-					model: config.llm.summary.model,
-					purpose: "thinking_summary",
-					callCount: streamResult.thinkingSummaryCallCount,
-				});
+				if (llmMetrics.summaryCallCount > 0 && config.llm.summary) {
+					metrics.recordLlmCall({
+						requestId,
+						success:
+							llmMetrics.summarySuccessCount === llmMetrics.summaryCallCount,
+						durationMs: llmMetrics.summaryDurationMs,
+						usage: llmMetrics.summaryUsage,
+						provider: config.llm.summary.provider,
+						model: config.llm.summary.model,
+						purpose: "summary",
+						callCount: llmMetrics.summaryCallCount,
+						retryCount: llmMetrics.summaryRetryCount,
+					});
+				}
 			}
 
 			metrics.recordDiscordWebhook({

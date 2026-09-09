@@ -10,6 +10,7 @@ export type ThinkingSummaryResult = {
 	text: string;
 	usage: LlmUsage | null;
 	success: boolean;
+	retryCount: number;
 };
 
 export class ThinkingSummarizer {
@@ -23,13 +24,16 @@ export class ThinkingSummarizer {
 		previousSummary: string,
 		newThinking: string,
 	): Promise<ThinkingSummaryResult> {
+		let attemptCount = 0;
 		try {
 			const result = await this.gateway.generateText({
 				model: this.model,
 				prompt: buildThinkingSummaryPrompt(previousSummary, newThinking),
 				temperature: 0,
 				maxOutputTokens: 128,
+				telemetry: { onAttempt: () => attemptCount++ },
 			});
+			const retryCount = Math.max(0, attemptCount - 1);
 			const summary = result.text.trim();
 			if (
 				summary &&
@@ -37,10 +41,20 @@ export class ThinkingSummarizer {
 				result.finish.reason !== "error" &&
 				result.finish.reason !== "length"
 			) {
-				return { text: summary, usage: result.usage, success: true };
+				return {
+					text: summary,
+					usage: result.usage,
+					success: true,
+					retryCount,
+				};
 			}
 			this.log.warn("Empty or incomplete summarization result, using fallback");
-			return { text: THINKING_FALLBACK, usage: result.usage, success: false };
+			return {
+				text: THINKING_FALLBACK,
+				usage: result.usage,
+				success: false,
+				retryCount,
+			};
 		} catch (error) {
 			const normalized = normalizeLlmError(
 				error,
@@ -51,7 +65,12 @@ export class ThinkingSummarizer {
 				...getExternalErrorLogContext(normalized),
 			});
 		}
-		return { text: THINKING_FALLBACK, usage: null, success: false };
+		return {
+			text: THINKING_FALLBACK,
+			usage: null,
+			success: false,
+			retryCount: Math.max(0, attemptCount - 1),
+		};
 	}
 }
 

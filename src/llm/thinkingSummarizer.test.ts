@@ -36,7 +36,12 @@ describe("ThinkingSummarizer", () => {
 			log,
 		).summarize("前の要約", "new thought");
 
-		expect(result).toEqual({ text: "要約結果", usage: null, success: true });
+		expect(result).toEqual({
+			text: "要約結果",
+			usage: null,
+			success: true,
+			retryCount: 0,
+		});
 		expect(gateway.generateText).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: "summary-model",
@@ -71,6 +76,7 @@ describe("ThinkingSummarizer", () => {
 			text: THINKING_FALLBACK,
 			usage: null,
 			success: false,
+			retryCount: 0,
 		});
 	});
 
@@ -91,7 +97,12 @@ describe("ThinkingSummarizer", () => {
 			});
 			await expect(
 				new ThinkingSummarizer(gateway, "summary", log).summarize("", "source"),
-			).resolves.toEqual({ text: THINKING_FALLBACK, usage, success: false });
+			).resolves.toEqual({
+				text: THINKING_FALLBACK,
+				usage,
+				success: false,
+				retryCount: 0,
+			});
 		},
 	);
 	it("returns fallback when summary generation fails", async () => {
@@ -107,10 +118,27 @@ describe("ThinkingSummarizer", () => {
 			text: THINKING_FALLBACK,
 			usage: null,
 			success: false,
+			retryCount: 0,
 		});
 		expect(log.warn).toHaveBeenCalledWith(
 			"Thinking summarization failed (non-fatal)",
 			expect.objectContaining({ service: "llm", provider: "gemini" }),
 		);
+	});
+
+	it("reports provider retries for one logical summary call", async () => {
+		gateway.generateText.mockImplementation(async (request) => {
+			request.telemetry?.onAttempt();
+			request.telemetry?.onAttempt();
+			return {
+				text: "summary",
+				usage: null,
+				finish: { reason: "stop" },
+			};
+		});
+
+		await expect(
+			new ThinkingSummarizer(gateway, "model", log).summarize("", "thought"),
+		).resolves.toMatchObject({ success: true, retryCount: 1 });
 	});
 });

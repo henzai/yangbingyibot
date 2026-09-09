@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../config";
 import type { Bindings, HistoryEntry, WorkflowParams } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
-import type { LlmStreamEvent } from "../llm/types";
+import type { LlmRequest, LlmStreamEvent } from "../llm/types";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -342,6 +342,39 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				}
 			});
 		};
+
+		it("captures answer retries and first-text/completion latency", async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(1_000);
+			mockLlmGateway.generateStream.mockImplementation(async function* (
+				request: LlmRequest,
+			) {
+				request.telemetry?.onAttempt();
+				request.telemetry?.onAttempt();
+				vi.setSystemTime(1_200);
+				request.telemetry?.onFirstText?.();
+				yield { type: "text", delta: "answer" };
+				vi.setSystemTime(1_500);
+				yield { type: "finish", finish: { reason: "stop" } };
+			});
+			mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+
+			const result = await streamGeminiWithDiscordEditsStep(
+				mockEnv,
+				"token",
+				"question",
+				"question",
+				sheetData,
+				history,
+				mockLogger,
+			);
+
+			expect(result).toMatchObject({
+				answerRetryCount: 1,
+				answerFirstTextDurationMs: 200,
+				answerDurationMs: 500,
+			});
+		});
 
 		it.each(["disabled", "unsupported"])(
 			"uses generic progress without summary calls when %s",
@@ -898,6 +931,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						totalTokens: 12,
 					},
 					success: true,
+					retryCount: 1,
 				})
 				.mockResolvedValueOnce({
 					text: "更新後の要約",
@@ -909,6 +943,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						totalTokens: 23,
 					},
 					success: true,
+					retryCount: 2,
 				});
 			mockLlmGateway.generateStream.mockImplementation(async function* () {
 				yield { type: "reasoning_summary", delta: "first thought" };
@@ -944,6 +979,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(result).toMatchObject({
 				thinkingSummaryCallCount: 2,
 				thinkingSummarySuccessCount: 2,
+				thinkingSummaryRetryCount: 3,
 				thinkingSummaryUsage: {
 					inputTokens: 30,
 					cachedInputTokens: 3,

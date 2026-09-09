@@ -50,6 +50,30 @@ export type LlmRequest = {
 	/** Total budget including retries and streaming; capped by the adapter. */
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	/**
+	 * Optional request-local hooks for provider-independent metrics. Adapters
+	 * call onAttempt exactly once immediately before every provider request.
+	 */
+	telemetry?: {
+		onAttempt(): void;
+		onFirstText?(): void;
+	};
+};
+
+export type LlmProbeRequest = {
+	model: string;
+	/** Health probes are non-generating and use a short bounded deadline. */
+	timeoutMs?: number;
+	signal?: AbortSignal;
+};
+
+export type LlmProbeResult = {
+	status: "available" | "unavailable" | "unverified";
+	/** Both built-in probes read metadata for one selected model. */
+	scope: "model_metadata";
+	/** Metadata support is not the same as a successful generation. */
+	generationSupport: "supported" | "unverified";
+	detail?: string;
 };
 
 export type LlmTextResult = {
@@ -69,4 +93,10 @@ export interface ILlmGateway {
 	 */
 	generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent>;
 	generateText(request: LlmRequest): Promise<LlmTextResult>;
+	/**
+	 * A non-generating reachability/authentication/model-availability probe.
+	 * Optional so a provider without a safe non-generating probe is reported as
+	 * unverified instead of being assumed healthy.
+	 */
+	probe?(request: LlmProbeRequest): Promise<LlmProbeResult>;
 }

@@ -29,10 +29,25 @@ export interface HealthCheckReport {
 		name: string;
 		error: string;
 		durationMs: number;
+		status?: "unhealthy" | "unverified";
+		provider?: string;
+		model?: string;
+		purposes?: string[];
+		errorKind?: string;
+		probeScope?: string;
+		generationSupport?: string;
+		detail?: string;
 	}[];
 	passedChecks: {
 		name: string;
 		durationMs: number;
+		status?: "healthy";
+		provider?: string;
+		model?: string;
+		purposes?: string[];
+		probeScope?: string;
+		generationSupport?: string;
+		detail?: string;
 	}[];
 	timestamp: string;
 }
@@ -153,32 +168,52 @@ export class GitHubIssueClient {
 		const failedNames = report.failedChecks.map((c) => c.name).join(", ");
 		const title = `[Health Check] ${failedNames} 異常検知`;
 
+		const escapeTable = (value: string) =>
+			value.replaceAll("|", "\\|").replaceAll(/\r?\n/g, " ");
 		const allChecks = [
 			...report.failedChecks.map((c) => ({
 				name: c.name,
-				status: "❌ 異常",
+				status: c.status === "unverified" ? "⚠️ 未検証" : "❌ 異常",
 				durationMs: c.durationMs,
-				detail: c.error,
+				target:
+					c.provider && c.model ? `${c.provider}/${c.model}` : "infrastructure",
+				purpose: c.purposes?.join("+") ?? "-",
+				detail: [
+					c.errorKind,
+					c.probeScope,
+					c.generationSupport,
+					c.detail,
+					c.error,
+				]
+					.filter(Boolean)
+					.join(" / "),
 			})),
 			...report.passedChecks.map((c) => ({
 				name: c.name,
 				status: "✅ 正常",
 				durationMs: c.durationMs,
-				detail: "-",
+				target:
+					c.provider && c.model ? `${c.provider}/${c.model}` : "infrastructure",
+				purpose: c.purposes?.join("+") ?? "-",
+				detail:
+					[c.probeScope, c.generationSupport, c.detail]
+						.filter(Boolean)
+						.join(" / ") || "-",
 			})),
 		];
 
 		const tableRows = allChecks
 			.map(
-				(c) => `| ${c.name} | ${c.status} | ${c.durationMs}ms | ${c.detail} |`,
+				(c) =>
+					`| ${escapeTable(c.name)} | ${c.status} | ${escapeTable(c.target)} | ${escapeTable(c.purpose)} | ${c.durationMs}ms | ${escapeTable(c.detail)} |`,
 			)
 			.join("\n");
 
 		const body = [
 			"## ヘルスチェック結果",
 			"",
-			"| チェック | 状態 | レイテンシ | 詳細 |",
-			"| --- | --- | --- | --- |",
+			"| チェック | 状態 | 対象 | 用途 | レイテンシ | 詳細 |",
+			"| --- | --- | --- | --- | --- | --- |",
 			tableRows,
 			"",
 			"## Fingerprint",
