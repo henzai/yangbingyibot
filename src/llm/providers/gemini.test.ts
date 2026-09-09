@@ -4,6 +4,7 @@ import type { LlmRequest, LlmStreamEvent } from "../types";
 const mocks = vi.hoisted(() => ({
 	generate: vi.fn(),
 	stream: vi.fn(),
+	get: vi.fn(),
 	constructor: vi.fn(),
 }));
 vi.mock("@google/genai", () => ({
@@ -12,6 +13,7 @@ vi.mock("@google/genai", () => ({
 		models = {
 			generateContent: mocks.generate,
 			generateContentStream: mocks.stream,
+			get: mocks.get,
 		};
 		constructor(options: unknown) {
 			mocks.constructor(options);
@@ -58,6 +60,39 @@ afterEach(() => {
 });
 
 describe("Gemini LLM adapter", () => {
+	it("probes one selected model without generating content", async () => {
+		mocks.get.mockResolvedValue({
+			name: "models/configured-model",
+			supportedActions: ["generateContent", "countTokens"],
+		});
+
+		await expect(
+			new GeminiLlmGateway("test-key").probe({ model: "configured-model" }),
+		).resolves.toEqual({
+			status: "available",
+			scope: "model_metadata",
+			generationSupport: "supported",
+		});
+		expect(mocks.get).toHaveBeenCalledWith({
+			model: "configured-model",
+			config: { abortSignal: expect.any(AbortSignal) },
+		});
+		expect(mocks.generate).not.toHaveBeenCalled();
+		expect(mocks.stream).not.toHaveBeenCalled();
+	});
+
+	it("does not claim health when model metadata omits generation support", async () => {
+		mocks.get.mockResolvedValue({ supportedActions: [] });
+		await expect(
+			new GeminiLlmGateway("test-key").probe({ model: "configured-model" }),
+		).resolves.toEqual(
+			expect.objectContaining({
+				status: "unavailable",
+				generationSupport: "unverified",
+			}),
+		);
+	});
+
 	it("translates the common prompt and leaves retries to the application", async () => {
 		mocks.stream.mockResolvedValue(chunks(answer));
 		const events = await collect(
@@ -298,15 +333,24 @@ describe("Gemini LLM adapter", () => {
 
 	it("retries stream establishment at most twice and honors Retry-After", async () => {
 		vi.useFakeTimers();
+		const onAttempt = vi.fn();
+		const onFirstText = vi.fn();
 		mocks.stream
 			.mockRejectedValueOnce({ status: 429, headers: { "retry-after": "2" } })
 			.mockResolvedValueOnce(chunks(answer));
-		const result = collect(new GeminiLlmGateway("key").generateStream(request));
+		const result = collect(
+			new GeminiLlmGateway("key").generateStream({
+				...request,
+				telemetry: { onAttempt, onFirstText },
+			}),
+		);
 		await vi.advanceTimersByTimeAsync(1999);
 		expect(mocks.stream).toHaveBeenCalledTimes(1);
 		await vi.advanceTimersByTimeAsync(1);
 		expect(await result).toContainEqual({ type: "text", delta: "answer" });
 		expect(mocks.stream).toHaveBeenCalledTimes(2);
+		expect(onAttempt).toHaveBeenCalledTimes(2);
+		expect(onFirstText).toHaveBeenCalledOnce();
 	});
 
 	it("exhausts two transport attempts without leaking response bodies", async () => {

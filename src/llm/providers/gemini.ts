@@ -10,6 +10,8 @@ import { LlmRequestScope } from "../requestScope";
 import type {
 	ILlmGateway,
 	LlmFinish,
+	LlmProbeRequest,
+	LlmProbeResult,
 	LlmRequest,
 	LlmStreamEvent,
 	LlmTextResult,
@@ -82,9 +84,11 @@ export class GeminiLlmGateway implements ILlmGateway {
 		scope: LlmRequestScope,
 		operation: string,
 		request: () => Promise<T>,
+		onAttempt?: () => void,
 	): Promise<T> {
 		return withRetry(
 			async () => {
+				onAttempt?.();
 				try {
 					return await scope.run(operation, request);
 				} catch (error) {
@@ -95,6 +99,47 @@ export class GeminiLlmGateway implements ILlmGateway {
 			undefined,
 			this.log,
 		);
+	}
+
+	async probe(request: LlmProbeRequest): Promise<LlmProbeResult> {
+		const scope = new LlmRequestScope(
+			this.provider,
+			request.timeoutMs ?? 5_000,
+			request.signal,
+		);
+		try {
+			const model = await scope.run("retrieve model metadata", () =>
+				this.client.models.get({
+					model: request.model,
+					config: { abortSignal: scope.signal },
+				}),
+			);
+			if (!Array.isArray(model.supportedActions)) {
+				return {
+					status: "unverified",
+					scope: "model_metadata",
+					generationSupport: "unverified",
+					detail: "Model metadata did not declare supported actions",
+				};
+			}
+			if (!model.supportedActions.includes("generateContent")) {
+				return {
+					status: "unavailable",
+					scope: "model_metadata",
+					generationSupport: "unverified",
+					detail: "Selected model does not advertise generateContent support",
+				};
+			}
+			return {
+				status: "available",
+				scope: "model_metadata",
+				generationSupport: "supported",
+			};
+		} catch (error) {
+			throw normalizeLlmError(error, this.provider, "retrieve model metadata");
+		} finally {
+			scope.dispose();
+		}
 	}
 
 	async *generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
@@ -133,6 +178,7 @@ export class GeminiLlmGateway implements ILlmGateway {
 							abortSignal: scope.signal,
 						},
 					}),
+				request.telemetry?.onAttempt,
 			);
 			let latestUsage: LlmUsage | null = null;
 			let finishReason: string | undefined;
@@ -155,7 +201,10 @@ export class GeminiLlmGateway implements ILlmGateway {
 						if (part.thought) {
 							if (request.includeReasoningSummary)
 								yield { type: "reasoning_summary", delta: part.text };
-						} else yield { type: "text", delta: part.text };
+						} else {
+							request.telemetry?.onFirstText?.();
+							yield { type: "text", delta: part.text };
+						}
 					}
 				}
 			} catch (error) {
@@ -205,20 +254,24 @@ export class GeminiLlmGateway implements ILlmGateway {
 		const startTime = Date.now();
 		this.log.info("Gemini text API request starting", { model: request.model });
 		try {
-			const result = await this.executeRequest(scope, "generate text", () =>
-				this.client.models.generateContent({
-					model: request.model,
-					contents: prompt.contents,
-					config: {
-						systemInstruction: prompt.systemInstruction,
-						temperature: request.temperature,
-						maxOutputTokens: request.maxOutputTokens,
-						...(request.includeReasoningSummary
-							? { thinkingConfig: { includeThoughts: true } }
-							: {}),
-						abortSignal: scope.signal,
-					},
-				}),
+			const result = await this.executeRequest(
+				scope,
+				"generate text",
+				() =>
+					this.client.models.generateContent({
+						model: request.model,
+						contents: prompt.contents,
+						config: {
+							systemInstruction: prompt.systemInstruction,
+							temperature: request.temperature,
+							maxOutputTokens: request.maxOutputTokens,
+							...(request.includeReasoningSummary
+								? { thinkingConfig: { includeThoughts: true } }
+								: {}),
+							abortSignal: scope.signal,
+						},
+					}),
+				request.telemetry?.onAttempt,
 			);
 			this.log.info("Gemini text API completed", {
 				model: request.model,

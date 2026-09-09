@@ -23,6 +23,11 @@ export interface StreamingLlmOutput {
 	thinkingSummaryCallCount: number;
 	thinkingSummarySuccessCount: number;
 	thinkingSummaryDurationMs: number;
+	/** Missing on checkpoints created before metrics schema v2. */
+	thinkingSummaryRetryCount?: number | null;
+	answerDurationMs?: number | null;
+	answerFirstTextDurationMs?: number | null;
+	answerRetryCount?: number | null;
 	editCount: number;
 	chunkCount: number;
 	deliveryStatus: DeliveryStatus;

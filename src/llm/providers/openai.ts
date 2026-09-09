@@ -11,6 +11,8 @@ import { LlmRequestScope } from "../requestScope";
 import type {
 	ILlmGateway,
 	LlmFinish,
+	LlmProbeRequest,
+	LlmProbeResult,
 	LlmRequest,
 	LlmStreamEvent,
 	LlmTextResult,
@@ -115,29 +117,38 @@ export class OpenAILlmGateway implements ILlmGateway {
 	readonly provider = "openai";
 	readonly capabilities = { reasoningSummary: true } as const;
 	private readonly responses: OpenAI["responses"];
+	private readonly models?: OpenAI["models"];
 
 	constructor(
 		apiKey: string,
 		private readonly log: Logger = defaultLogger,
 		responses?: OpenAI["responses"],
+		models?: OpenAI["models"],
 	) {
-		this.responses =
-			responses ??
-			new OpenAI({
-				apiKey,
-				// The application owns retry and deadline policy.
-				maxRetries: 0,
-				timeout: 90_000,
-			}).responses;
+		if (responses) {
+			this.responses = responses;
+			this.models = models;
+			return;
+		}
+		const client = new OpenAI({
+			apiKey,
+			// The application owns retry and deadline policy.
+			maxRetries: 0,
+			timeout: 90_000,
+		});
+		this.responses = responses ?? client.responses;
+		this.models = models ?? client.models;
 	}
 
 	private executeRequest<T>(
 		scope: LlmRequestScope,
 		operation: string,
 		request: () => Promise<T>,
+		onAttempt?: () => void,
 	): Promise<T> {
 		return withRetry(
 			async () => {
+				onAttempt?.();
 				try {
 					return await scope.run(operation, request);
 				} catch (error) {
@@ -148,6 +159,39 @@ export class OpenAILlmGateway implements ILlmGateway {
 			undefined,
 			this.log,
 		);
+	}
+
+	async probe(request: LlmProbeRequest): Promise<LlmProbeResult> {
+		const models = this.models;
+		if (!models) {
+			return {
+				status: "unverified",
+				scope: "model_metadata",
+				generationSupport: "unverified",
+				detail: "OpenAI Models client is unavailable",
+			};
+		}
+		const scope = new LlmRequestScope(
+			this.provider,
+			request.timeoutMs ?? 5_000,
+			request.signal,
+		);
+		try {
+			await scope.run("retrieve model metadata", () =>
+				models.retrieve(request.model, { signal: scope.signal }),
+			);
+			return {
+				status: "available",
+				scope: "model_metadata",
+				generationSupport: "unverified",
+				detail:
+					"Model availability was verified; Responses generation was not executed",
+			};
+		} catch (error) {
+			throw normalizeLlmError(error, this.provider, "retrieve model metadata");
+		} finally {
+			scope.dispose();
+		}
 	}
 
 	async *generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
@@ -169,6 +213,7 @@ export class OpenAILlmGateway implements ILlmGateway {
 						{ ...toOpenAIRequest(request), stream: true },
 						{ signal: scope.signal },
 					),
+				request.telemetry?.onAttempt,
 			);
 			let finalResponse: Response | null = null;
 			let refusalSeen = false;
@@ -183,7 +228,10 @@ export class OpenAILlmGateway implements ILlmGateway {
 					scope.signal.throwIfAborted();
 					switch (event.type) {
 						case "response.output_text.delta":
-							if (event.delta) yield { type: "text", delta: event.delta };
+							if (event.delta) {
+								request.telemetry?.onFirstText?.();
+								yield { type: "text", delta: event.delta };
+							}
 							break;
 						case "response.reasoning_summary_text.delta":
 							if (request.includeReasoningSummary && event.delta)
@@ -246,10 +294,14 @@ export class OpenAILlmGateway implements ILlmGateway {
 		const startTime = Date.now();
 		this.log.info("OpenAI text API request starting", { model: request.model });
 		try {
-			const response = await this.executeRequest(scope, "create response", () =>
-				this.responses.create(toOpenAIRequest(request), {
-					signal: scope.signal,
-				}),
+			const response = await this.executeRequest(
+				scope,
+				"create response",
+				() =>
+					this.responses.create(toOpenAIRequest(request), {
+						signal: scope.signal,
+					}),
+				request.telemetry?.onAttempt,
 			);
 			const usage = toUsage(response.usage);
 			if (!usage)

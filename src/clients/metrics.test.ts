@@ -40,13 +40,17 @@ describe("MetricsClient", () => {
 	});
 
 	describe("common usage compatibility", () => {
-		it("retains the deployed Gemini metric schema", () => {
+		it("writes common v2 fields and retains the deployed Gemini schema", () => {
 			metrics.recordLlmCall({
 				provider: "gemini",
 				model: "answer-model",
 				requestId: "req",
 				success: true,
 				durationMs: 10,
+				purpose: "answer",
+				callCount: 1,
+				retryCount: 2,
+				firstTextDurationMs: 4,
 				usage: {
 					inputTokens: 10,
 					cachedInputTokens: 2,
@@ -55,25 +59,34 @@ describe("MetricsClient", () => {
 					totalTokens: 17,
 				},
 			});
-			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+			expect(mockDataset.writeDataPoint).toHaveBeenNthCalledWith(1, {
+				indexes: ["req"],
+				blobs: ["llm_api_call_v2", "req", "gemini", "answer-model", "answer"],
+				doubles: [10, 1, 1, 2, 4, 10, 2, 4, 3, 17],
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenNthCalledWith(2, {
 				indexes: ["req"],
 				blobs: ["gemini_api_call", "req", "answer-model", "answer"],
-				doubles: [10, 1, 0, 10, 2, 3, 4, 17, 1],
+				doubles: [10, 1, 2, 10, 2, 3, 4, 17, 1],
 			});
 		});
-		it("does not label another provider as Gemini or report missing usage as zero", () => {
+		it("does not label another provider as Gemini or encode missing values as zero", () => {
 			metrics.recordLlmCall({
 				provider: "fake",
 				model: "fake-model",
 				requestId: "req",
 				success: true,
 				durationMs: 10,
+				purpose: "summary",
+				callCount: 3,
+				retryCount: null,
+				firstTextDurationMs: null,
 				usage: null,
 			});
 			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
 				indexes: ["req"],
-				blobs: ["llm_api_call", "req", "fake-model", "answer", "fake"],
-				doubles: [10, 1, 0, -1, -1, -1, -1, -1, 1],
+				blobs: ["llm_api_call_v2", "req", "fake", "fake-model", "summary"],
+				doubles: [10, 1, 3, -1, -1, -1, -1, -1, -1, -1],
 			});
 		});
 	});
@@ -143,6 +156,18 @@ describe("MetricsClient", () => {
 				blobs: ["gemini_api_call", longRequestId, "unknown", "answer"],
 				doubles: [100, 1, 0, 0, 0, 0, 0, 0, 1],
 			});
+		});
+
+		it("truncates multibyte indexes on a UTF-8 boundary", () => {
+			const requestId = "あ".repeat(40);
+			metrics.recordGeminiCall({
+				requestId,
+				success: true,
+				durationMs: 1,
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith(
+				expect.objectContaining({ indexes: ["あ".repeat(32)] }),
+			);
 		});
 
 		it("records typed token usage in stable appended positions", () => {

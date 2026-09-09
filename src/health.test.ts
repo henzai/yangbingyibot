@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import * as configuration from "./config";
 import type { Bindings } from "./contracts";
-import type { CheckResult } from "./health";
 import { runHealthCheck } from "./health";
-
-// Mock fetch globally
-const mockFetch = vi.fn();
-globalThis.fetch = mockFetch;
+import type { LlmSelection } from "./llm/providerCatalog";
+import type { ILlmGateway, LlmProbeResult } from "./llm/types";
+import { ExternalServiceError } from "./utils/errors";
+import type { Logger } from "./utils/logger";
 
 function createMockEnv(
 	overrides: Partial<Bindings> = {},
@@ -15,21 +13,15 @@ function createMockEnv(
 		get: vi.fn().mockResolvedValue(null),
 		put: vi.fn().mockResolvedValue(undefined),
 	} as unknown as KVNamespace;
-
-	const mockMetrics = {
-		writeDataPoint: vi.fn(),
-	};
-
+	const mockMetrics = { writeDataPoint: vi.fn() };
 	return {
 		DISCORD_TOKEN: "test-token",
 		DISCORD_PUBLIC_KEY: "test-public-key",
 		DISCORD_APPLICATION_ID: "test-app-id",
 		GEMINI_API_KEY: "test-gemini-key",
 		GOOGLE_SERVICE_ACCOUNT: JSON.stringify({
-			type: "service_account",
 			client_email: "test@test.iam.gserviceaccount.com",
-			private_key:
-				"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+			private_key: "test-private-key",
 		}),
 		sushanshan_bot: mockKV,
 		// biome-ignore lint/suspicious/noExplicitAny: mock binding for test
@@ -39,342 +31,292 @@ function createMockEnv(
 	} as Bindings & { METRICS: { writeDataPoint: Mock } };
 }
 
-const mockLog = {
+const log = {
 	info: vi.fn(),
 	warn: vi.fn(),
 	error: vi.fn(),
 	debug: vi.fn(),
 	withContext: vi.fn().mockReturnThis(),
+} as unknown as Logger;
+
+const available: LlmProbeResult = {
+	status: "available",
+	scope: "model_metadata",
+	generationSupport: "supported",
 };
 
-// biome-ignore lint/suspicious/noExplicitAny: mock logger for test
-const log = mockLog as any;
+function gateway(provider: string, probe?: ILlmGateway["probe"]): ILlmGateway {
+	return {
+		provider,
+		capabilities: { reasoningSummary: true },
+		generateStream: vi.fn(),
+		generateText: vi.fn(),
+		...(probe ? { probe } : {}),
+	};
+}
+
+function factory(
+	probes: Record<string, (model: string) => Promise<LlmProbeResult>>,
+) {
+	return vi.fn((selection: LlmSelection) =>
+		gateway(selection.provider, ({ model }) =>
+			probes[selection.provider](model),
+		),
+	);
+}
 
 describe("health check", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockFetch.mockReset();
+		globalThis.fetch = vi.fn();
 	});
 
-	it("probes Gemini only once with summaries disabled", async () => {
-		const env = createMockEnv({
-			LLM_SUMMARY_ENABLED: "false",
-			OPENAI_API_KEY: " ",
-		});
-		mockFetch.mockResolvedValue(
-			new Response(JSON.stringify({ models: [] }), { status: 200 }),
-		);
-		const result = await runHealthCheck(env, log);
+	it("probes one Gemini answer target when summaries are disabled", async () => {
+		const probe = vi.fn().mockResolvedValue(available);
+		const createGateway = factory({ gemini: probe });
+		const env = createMockEnv({ LLM_SUMMARY_ENABLED: "false" });
+
+		const result = await runHealthCheck(env, log, createGateway);
+
 		expect(result.allHealthy).toBe(true);
-		expect(result.checks.map((check) => check.name)).toEqual([
-			"kv",
-			"gemini",
-			"google_sa",
+		expect(probe).toHaveBeenCalledOnce();
+		expect(probe).toHaveBeenCalledWith("gemini-3.5-flash-lite");
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({
+				provider: "gemini",
+				model: "gemini-3.5-flash-lite",
+				purposes: ["answer"],
+				status: "healthy",
+			}),
+		);
+	});
+
+	it("probes OpenAI only and never initializes an unselected provider", async () => {
+		const openaiProbe = vi.fn().mockResolvedValue(available);
+		const createGateway = factory({ openai: openaiProbe });
+		const env = createMockEnv({
+			LLM_PROVIDER: "openai",
+			LLM_MODEL: "openai-answer",
+			LLM_SUMMARY_ENABLED: "false",
+			OPENAI_API_KEY: "test-openai-key",
+		});
+
+		const result = await runHealthCheck(env, log, createGateway);
+
+		expect(result.allHealthy).toBe(true);
+		expect(createGateway).toHaveBeenCalledOnce();
+		expect(createGateway).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: "openai", model: "openai-answer" }),
+			log,
+		);
+		expect(openaiProbe).toHaveBeenCalledWith("openai-answer");
+	});
+
+	it("deduplicates a shared provider/model used for answer and summary", async () => {
+		const probe = vi.fn().mockResolvedValue(available);
+		const env = createMockEnv({
+			LLM_MODEL: "shared-model",
+			LLM_SUMMARY_MODEL: "shared-model",
+		});
+
+		const result = await runHealthCheck(env, log, factory({ gemini: probe }));
+
+		expect(probe).toHaveBeenCalledTimes(1);
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({
+				provider: "gemini",
+				model: "shared-model",
+				purposes: ["answer", "summary"],
+			}),
+		);
+	});
+
+	it("probes two models separately when one provider serves both purposes", async () => {
+		const probe = vi.fn().mockResolvedValue(available);
+		const createGateway = factory({ gemini: probe });
+		const env = createMockEnv({
+			LLM_MODEL: "answer-model",
+			LLM_SUMMARY_MODEL: "summary-model",
+		});
+
+		const result = await runHealthCheck(env, log, createGateway);
+
+		expect(createGateway).toHaveBeenCalledTimes(1);
+		expect(probe).toHaveBeenCalledTimes(2);
+		expect(probe.mock.calls.map(([model]) => model)).toEqual([
+			"answer-model",
+			"summary-model",
 		]);
-		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(result.checks.filter((check) => check.provider)).toHaveLength(2);
 	});
-	it("does not probe Gemini for an alternate-only configuration or falsely mark it healthy", async () => {
-		const env = createMockEnv();
-		const config = configuration.loadConfig(env);
-		config.llm = {
-			answer: { provider: "fake", model: "fake-model", apiKey: "fake-key" },
-			summary: null,
-		};
-		const spy = vi.spyOn(configuration, "loadConfig").mockReturnValue(config);
-		try {
-			const result = await runHealthCheck(env, log);
-			expect(result.allHealthy).toBe(false);
+
+	it("probes answer and summary providers separately", async () => {
+		const geminiProbe = vi.fn().mockResolvedValue(available);
+		const openaiProbe = vi.fn().mockResolvedValue({
+			...available,
+			generationSupport: "unverified",
+		});
+		const env = createMockEnv({
+			LLM_MODEL: "gemini-answer",
+			LLM_SUMMARY_PROVIDER: "openai",
+			LLM_SUMMARY_MODEL: "openai-summary",
+			OPENAI_API_KEY: "test-openai-key",
+		});
+
+		const result = await runHealthCheck(
+			env,
+			log,
+			factory({ gemini: geminiProbe, openai: openaiProbe }),
+		);
+
+		expect(geminiProbe).toHaveBeenCalledWith("gemini-answer");
+		expect(openaiProbe).toHaveBeenCalledWith("openai-summary");
+		expect(result.checks.filter((check) => check.provider)).toHaveLength(2);
+		expect(result.allHealthy).toBe(true);
+	});
+
+	it("distinguishes authentication, timeout, and unavailable-probe states", async () => {
+		const authentication = new ExternalServiceError({
+			service: "llm",
+			provider: "gemini",
+			kind: "http",
+			operation: "retrieve model metadata",
+			status: 401,
+			retryable: false,
+			userMessage: "authentication failed",
+		});
+		const timeout = new ExternalServiceError({
+			service: "llm",
+			provider: "gemini",
+			kind: "timeout",
+			operation: "retrieve model metadata",
+			retryable: false,
+			userMessage: "timeout",
+		});
+		for (const [error, errorKind] of [
+			[authentication, "authentication"],
+			[timeout, "timeout"],
+		] as const) {
+			const result = await runHealthCheck(
+				createMockEnv({ LLM_SUMMARY_ENABLED: "false" }),
+				log,
+				vi.fn(() => gateway("gemini", vi.fn().mockRejectedValue(error))),
+			);
 			expect(result.checks).toContainEqual(
-				expect.objectContaining({ name: "llm:fake", ok: false }),
+				expect.objectContaining({ status: "unhealthy", errorKind }),
 			);
-			expect(mockFetch).not.toHaveBeenCalled();
-		} finally {
-			spy.mockRestore();
 		}
-	});
-	describe("all checks pass", () => {
-		it("returns allHealthy: true with no GitHub issue", async () => {
-			const env = createMockEnv();
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
 
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(true);
-			expect(result.checks).toHaveLength(3);
-			for (const check of result.checks) {
-				expect(check.ok).toBe(true);
-			}
-			// Metrics recorded for all 3 checks
-			expect(env.METRICS.writeDataPoint).toHaveBeenCalledTimes(3);
-			// No GitHub issue creation (fetch called only for Gemini models.list)
-			expect(mockFetch).toHaveBeenCalledTimes(1);
-			expect(mockFetch).toHaveBeenCalledWith(
-				"https://generativelanguage.googleapis.com/v1beta/models",
-				{ headers: { "x-goog-api-key": "test-gemini-key" } },
-			);
-			expect(JSON.stringify(mockFetch.mock.calls)).not.toContain(
-				"?key=test-gemini-key",
-			);
-		});
+		const unverified = await runHealthCheck(
+			createMockEnv({ LLM_SUMMARY_ENABLED: "false" }),
+			log,
+			vi.fn(() => gateway("gemini")),
+		);
+		expect(unverified.allHealthy).toBe(false);
+		expect(unverified.checks).toContainEqual(
+			expect.objectContaining({
+				status: "unverified",
+				errorKind: "probe_unavailable",
+			}),
+		);
 	});
 
-	describe("KV failure", () => {
-		it("reports allHealthy: false and creates GitHub issue", async () => {
-			const mockKV = {
-				get: vi.fn().mockImplementation((key: string) => {
-					if (key === "__health_check__") {
-						throw new Error("KV binding unavailable");
-					}
-					// For deduplication KV check
-					return Promise.resolve(null);
-				}),
-				put: vi.fn().mockResolvedValue(undefined),
-			} as unknown as KVNamespace;
-
-			const env = createMockEnv({
+	it("keeps KV and Google service-account checks", async () => {
+		const mockKV = {
+			get: vi.fn().mockRejectedValue(new Error("KV unavailable")),
+			put: vi.fn(),
+		} as unknown as KVNamespace;
+		const result = await runHealthCheck(
+			createMockEnv({
 				sushanshan_bot: mockKV,
-				GITHUB_TOKEN: "test-github-token",
-			});
-
-			// Gemini models.list - success
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
-			// GitHub isDuplicate search - not duplicate
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ total_count: 0 }), { status: 200 }),
-			);
-			// GitHub create issue - success
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ id: 1 }), { status: 201 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			const kvCheck = result.checks.find((c: CheckResult) => c.name === "kv");
-			expect(kvCheck?.ok).toBe(false);
-			expect(kvCheck?.error).toBe("KV binding unavailable");
-
-			// GitHub issue created
-			expect(mockFetch).toHaveBeenCalledTimes(3);
-		});
-	});
-
-	describe("Gemini API failure", () => {
-		it("reports failure on HTTP 500", async () => {
-			const env = createMockEnv({ GITHUB_TOKEN: "test-github-token" });
-
-			// Gemini models.list - HTTP 500
-			mockFetch.mockResolvedValueOnce(
-				new Response("Internal Server Error", { status: 500 }),
-			);
-			// GitHub isDuplicate search
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ total_count: 0 }), { status: 200 }),
-			);
-			// GitHub create issue
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ id: 1 }), { status: 201 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			const geminiCheck = result.checks.find(
-				(c: CheckResult) => c.name === "gemini",
-			);
-			expect(geminiCheck?.ok).toBe(false);
-			expect(geminiCheck?.error).toBe(
-				"gemini health check failed (status 500)",
-			);
-			expect(geminiCheck?.error).not.toContain("Internal Server Error");
-		});
-
-		it("reports failure on HTTP 401 (invalid key)", async () => {
-			const env = createMockEnv({ GITHUB_TOKEN: "test-github-token" });
-
-			mockFetch.mockResolvedValueOnce(
-				new Response("Unauthorized", { status: 401 }),
-			);
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ total_count: 0 }), { status: 200 }),
-			);
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ id: 1 }), { status: 201 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			const geminiCheck = result.checks.find(
-				(c: CheckResult) => c.name === "gemini",
-			);
-			expect(geminiCheck?.ok).toBe(false);
-			expect(geminiCheck?.error).toBe(
-				"gemini health check failed (status 401)",
-			);
-		});
-	});
-
-	describe("Google SA failure", () => {
-		it("reports failure on invalid JSON", async () => {
-			const env = createMockEnv({
-				GOOGLE_SERVICE_ACCOUNT: "not-json PRIVATE_KEY_SECRET",
-			});
-
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			const saCheck = result.checks.find(
-				(c: CheckResult) => c.name === "google_sa",
-			);
-			expect(saCheck?.ok).toBe(false);
-			expect(saCheck?.error).toBe("Invalid service account JSON format");
-			expect(saCheck?.error).not.toContain("PRIVATE_KEY_SECRET");
-		});
-
-		it("reports failure when required fields are missing", async () => {
-			const env = createMockEnv({
-				GOOGLE_SERVICE_ACCOUNT: JSON.stringify({
-					type: "service_account",
-				}),
-			});
-
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			const saCheck = result.checks.find(
-				(c: CheckResult) => c.name === "google_sa",
-			);
-			expect(saCheck?.ok).toBe(false);
-			expect(saCheck?.error).toBe(
-				"Missing required fields: client_email or private_key",
-			);
-		});
-	});
-
-	describe("GITHUB_TOKEN not set", () => {
-		it("runs checks and records metrics but skips issue creation", async () => {
-			const env = createMockEnv({
 				GOOGLE_SERVICE_ACCOUNT: "invalid-json",
-			});
-			// No GITHUB_TOKEN set
+				LLM_SUMMARY_ENABLED: "false",
+			}),
+			log,
+			factory({ gemini: vi.fn().mockResolvedValue(available) }),
+		);
 
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
+		expect(result.allHealthy).toBe(false);
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({ name: "kv", status: "unhealthy" }),
+		);
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({ name: "google_sa", status: "unhealthy" }),
+		);
+	});
 
-			const result = await runHealthCheck(env, log);
+	it("records provider/model/purpose in health metrics", async () => {
+		const env = createMockEnv({ LLM_SUMMARY_ENABLED: "false" });
+		await runHealthCheck(
+			env,
+			log,
+			factory({ gemini: vi.fn().mockResolvedValue(available) }),
+		);
 
-			expect(result.allHealthy).toBe(false);
-			// Metrics still recorded
-			expect(env.METRICS.writeDataPoint).toHaveBeenCalledTimes(3);
-			// Only Gemini models.list fetch, no GitHub API calls
-			expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(env.METRICS.writeDataPoint).toHaveBeenCalledWith({
+			indexes: ["llm:gemini:gemini-3.5-flash-lite:answer"],
+			blobs: [
+				"health_check",
+				"llm:gemini:gemini-3.5-flash-lite:answer",
+				"healthy",
+				"gemini",
+				"gemini-3.5-flash-lite",
+				"answer",
+				"",
+				"model_metadata",
+				"supported",
+			],
+			doubles: [expect.any(Number), 1],
 		});
 	});
 
-	describe("multiple simultaneous failures", () => {
-		it("reports all failures in a single issue", async () => {
-			const mockKV = {
-				get: vi.fn().mockImplementation((key: string) => {
-					if (key === "__health_check__") {
-						throw new Error("KV unavailable");
-					}
-					return Promise.resolve(null);
-				}),
-				put: vi.fn().mockResolvedValue(undefined),
-			} as unknown as KVNamespace;
-
-			const env = createMockEnv({
-				sushanshan_bot: mockKV,
-				GOOGLE_SERVICE_ACCOUNT: "invalid",
-				GITHUB_TOKEN: "test-github-token",
+	it("uses separate v2 incident fingerprints for different providers", async () => {
+		const env = createMockEnv({
+			LLM_MODEL: "gemini-answer",
+			LLM_SUMMARY_PROVIDER: "openai",
+			LLM_SUMMARY_MODEL: "openai-summary",
+			OPENAI_API_KEY: "test-openai-key",
+			GITHUB_TOKEN: "github-token",
+		});
+		const failure = (provider: string) =>
+			new ExternalServiceError({
+				service: "llm",
+				provider,
+				kind: "transport",
+				operation: "retrieve model metadata",
+				retryable: true,
+				userMessage: "unavailable",
 			});
-
-			// Gemini - failure
-			mockFetch.mockResolvedValueOnce(new Response("Error", { status: 500 }));
-			// GitHub isDuplicate
-			mockFetch.mockResolvedValueOnce(
+		vi.mocked(globalThis.fetch)
+			.mockResolvedValueOnce(
 				new Response(JSON.stringify({ total_count: 0 }), { status: 200 }),
-			);
-			// GitHub create issue
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ id: 1 }), { status: 201 }),
-			);
+			)
+			.mockResolvedValueOnce(new Response("{}", { status: 201 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ total_count: 0 }), { status: 200 }),
+			)
+			.mockResolvedValueOnce(new Response("{}", { status: 201 }));
 
-			const result = await runHealthCheck(env, log);
+		await runHealthCheck(
+			env,
+			log,
+			vi.fn((selection) =>
+				gateway(
+					selection.provider,
+					vi.fn().mockRejectedValue(failure(selection.provider)),
+				),
+			),
+		);
 
-			expect(result.allHealthy).toBe(false);
-			const failedChecks = result.checks.filter((c: CheckResult) => !c.ok);
-			expect(failedChecks).toHaveLength(3);
-		});
-	});
-
-	describe("GitHub issue creation failure", () => {
-		it("returns health check result normally (non-fatal)", async () => {
-			const env = createMockEnv({
-				GOOGLE_SERVICE_ACCOUNT: "invalid",
-				GITHUB_TOKEN: "test-github-token",
-			});
-
-			// Gemini - success
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
-			// GitHub isDuplicate - permanent failure
-			mockFetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
-
-			const result = await runHealthCheck(env, log);
-
-			// Health check result is still returned despite GitHub failure
-			expect(result.allHealthy).toBe(false);
-			expect(result.checks).toHaveLength(3);
-		});
-	});
-
-	describe("deduplication (KV cache hit)", () => {
-		it("does not create duplicate issue when KV cache hit", async () => {
-			const mockKV = {
-				get: vi.fn().mockImplementation((key: string) => {
-					if (key === "__health_check__") {
-						throw new Error("KV unavailable");
-					}
-					// KV deduplication key exists
-					if (key.startsWith("error_reported:")) {
-						return Promise.resolve("1");
-					}
-					return Promise.resolve(null);
-				}),
-				put: vi.fn().mockResolvedValue(undefined),
-			} as unknown as KVNamespace;
-
-			const env = createMockEnv({
-				sushanshan_bot: mockKV,
-				GITHUB_TOKEN: "test-github-token",
-			});
-
-			// Gemini - success
-			mockFetch.mockResolvedValueOnce(
-				new Response(JSON.stringify({ models: [] }), { status: 200 }),
-			);
-
-			const result = await runHealthCheck(env, log);
-
-			expect(result.allHealthy).toBe(false);
-			// Only Gemini fetch, no GitHub API calls due to KV dedup
-			expect(mockFetch).toHaveBeenCalledTimes(1);
-		});
+		const searchUrls = vi
+			.mocked(globalThis.fetch)
+			.mock.calls.map(([url]) => String(url))
+			.filter((url) => url.includes("/search/issues"))
+			.map((url) => decodeURIComponent(url));
+		expect(searchUrls).toHaveLength(2);
+		expect(searchUrls[0]).toContain("gemini:gemini-answer:answer");
+		expect(searchUrls[0]).not.toContain("openai-summary");
+		expect(searchUrls[1]).toContain("openai:openai-summary:summary");
+		expect(searchUrls[1]).not.toContain("gemini-answer");
 	});
 });

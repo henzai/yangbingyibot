@@ -9,23 +9,38 @@ import {
 } from "./clients/metrics";
 import { loadConfig } from "./config";
 import type { Bindings } from "./contracts";
-import type { LlmRoutingConfig } from "./llm/providerCatalog";
+import { createLlmGateway } from "./llm/factory";
+import type { LlmRoutingConfig, LlmSelection } from "./llm/providerCatalog";
+import type { ILlmGateway } from "./llm/types";
 import { createDeduplicationStore } from "./repositories/deduplicationStore";
 import {
-	externalServiceErrorFromResponse,
+	ExternalServiceError,
 	getErrorMessage,
 	getExternalErrorLogContext,
-	normalizeExternalServiceError,
 } from "./utils/errors";
 import type { Logger } from "./utils/logger";
 
-type CheckName = "kv" | "gemini" | "google_sa" | `llm:${string}`;
+type HealthStatus = "healthy" | "unhealthy" | "unverified";
+type HealthPurpose = "answer" | "summary";
 
 export type CheckResult = {
-	name: CheckName;
+	name: string;
 	ok: boolean;
+	status: HealthStatus;
 	durationMs: number;
 	error?: string;
+	errorKind?:
+		| "authentication"
+		| "timeout"
+		| "transport"
+		| "capability"
+		| "probe_unavailable";
+	provider?: string;
+	model?: string;
+	purposes?: HealthPurpose[];
+	probeScope?: "model_metadata";
+	generationSupport?: "supported" | "unverified";
+	detail?: string;
 };
 
 export type HealthCheckResult = {
@@ -33,51 +48,28 @@ export type HealthCheckResult = {
 	allHealthy: boolean;
 };
 
-const GEMINI_MODELS_URL =
-	"https://generativelanguage.googleapis.com/v1beta/models";
 const ERROR_REPORTED_TTL_SECONDS = 60 * 60; // 1 hour
+const LLM_PROBE_TIMEOUT_MS = 5_000;
+
+type GatewayFactory = (selection: LlmSelection, log?: Logger) => ILlmGateway;
 
 async function checkKV(kv: KVNamespace): Promise<CheckResult> {
 	const start = Date.now();
 	try {
 		await kv.get("__health_check__");
-		return { name: "kv", ok: true, durationMs: Date.now() - start };
+		return {
+			name: "kv",
+			ok: true,
+			status: "healthy",
+			durationMs: Date.now() - start,
+		};
 	} catch (error) {
 		return {
 			name: "kv",
 			ok: false,
+			status: "unhealthy",
 			durationMs: Date.now() - start,
 			error: getErrorMessage(error),
-		};
-	}
-}
-
-async function checkGemini(apiKey: string): Promise<CheckResult> {
-	const start = Date.now();
-	try {
-		const res = await fetch(GEMINI_MODELS_URL, {
-			headers: { "x-goog-api-key": apiKey },
-		});
-		if (!res.ok) {
-			throw externalServiceErrorFromResponse(
-				"gemini",
-				"health check",
-				res,
-				"Gemini APIのヘルスチェックに失敗しました。",
-			);
-		}
-		return { name: "gemini", ok: true, durationMs: Date.now() - start };
-	} catch (error) {
-		const normalized = normalizeExternalServiceError(error, {
-			service: "gemini",
-			operation: "health check",
-			userMessage: "Gemini APIのヘルスチェックに失敗しました。",
-		});
-		return {
-			name: "gemini",
-			ok: false,
-			durationMs: Date.now() - start,
-			error: normalized.message,
 		};
 	}
 }
@@ -90,47 +82,143 @@ function checkGoogleSA(saJson: string): CheckResult {
 			return {
 				name: "google_sa",
 				ok: false,
+				status: "unhealthy",
 				durationMs: Date.now() - start,
 				error: "Missing required fields: client_email or private_key",
 			};
 		}
-		return { name: "google_sa", ok: true, durationMs: Date.now() - start };
+		return {
+			name: "google_sa",
+			ok: true,
+			status: "healthy",
+			durationMs: Date.now() - start,
+		};
 	} catch {
 		return {
 			name: "google_sa",
 			ok: false,
+			status: "unhealthy",
 			durationMs: Date.now() - start,
 			error: "Invalid service account JSON format",
 		};
 	}
 }
 
-/** Only probe configured providers. Additional provider probes belong to #432. */
+function classifyProbeError(error: unknown): CheckResult["errorKind"] {
+	if (!(error instanceof ExternalServiceError)) return "transport";
+	if (error.kind === "timeout") return "timeout";
+	if (error.status === 401 || error.status === 403) return "authentication";
+	return error.kind === "transport" ? "transport" : "capability";
+}
+
+async function checkLlmTarget(
+	selection: LlmSelection,
+	purposes: HealthPurpose[],
+	gateway: ILlmGateway,
+): Promise<CheckResult> {
+	const start = Date.now();
+	const name = `llm:${selection.provider}:${selection.model}:${purposes.join("+")}`;
+	if (!gateway.probe) {
+		return {
+			name,
+			ok: false,
+			status: "unverified",
+			durationMs: Date.now() - start,
+			error: "A safe non-generating health probe is not implemented",
+			errorKind: "probe_unavailable",
+			provider: selection.provider,
+			model: selection.model,
+			purposes,
+		};
+	}
+	try {
+		const result = await gateway.probe({
+			model: selection.model,
+			timeoutMs: LLM_PROBE_TIMEOUT_MS,
+		});
+		const status: HealthStatus =
+			result.status === "available"
+				? "healthy"
+				: result.status === "unavailable"
+					? "unhealthy"
+					: "unverified";
+		return {
+			name,
+			ok: status === "healthy",
+			status,
+			durationMs: Date.now() - start,
+			...(status !== "healthy" && result.detail
+				? { error: result.detail }
+				: {}),
+			...(status === "unhealthy" ? { errorKind: "capability" as const } : {}),
+			...(status === "unverified"
+				? { errorKind: "probe_unavailable" as const }
+				: {}),
+			provider: selection.provider,
+			model: selection.model,
+			purposes,
+			probeScope: result.scope,
+			generationSupport: result.generationSupport,
+			detail: status === "healthy" ? result.detail : undefined,
+		};
+	} catch (error) {
+		return {
+			name,
+			ok: false,
+			status: "unhealthy",
+			durationMs: Date.now() - start,
+			error: getErrorMessage(error),
+			errorKind: classifyProbeError(error),
+			provider: selection.provider,
+			model: selection.model,
+			purposes,
+			probeScope: "model_metadata",
+		};
+	}
+}
+
+/** Probe each selected provider/model once, combining shared answer/summary use. */
 function checkConfiguredLlms(
 	config: LlmRoutingConfig,
+	log: Logger,
+	gatewayFactory: GatewayFactory,
 ): Array<Promise<CheckResult>> {
-	const selections = [
-		config.answer,
-		...(config.summary ? [config.summary] : []),
-	];
-	const seen = new Set<string>();
-	return selections
-		.filter((selection) => {
-			if (seen.has(selection.provider)) return false;
-			seen.add(selection.provider);
-			return true;
-		})
-		.map((selection) =>
-			selection.provider === "gemini"
-				? checkGemini(selection.apiKey)
-				: Promise.resolve({
-						name: `llm:${selection.provider}` as const,
-						ok: false,
-						durationMs: 0,
-						error:
-							"Health probe is not implemented for the configured provider",
-					}),
-		);
+	const targets = new Map<
+		string,
+		{ selection: LlmSelection; purposes: HealthPurpose[] }
+	>();
+	for (const [selection, purpose] of [
+		[config.answer, "answer"],
+		...(config.summary ? [[config.summary, "summary"]] : []),
+	] as Array<[LlmSelection, HealthPurpose]>) {
+		const key = JSON.stringify([selection.provider, selection.model]);
+		const target = targets.get(key);
+		if (target) target.purposes.push(purpose);
+		else targets.set(key, { selection, purposes: [purpose] });
+	}
+	const gateways = new Map<string, ILlmGateway>();
+	return [...targets.values()].map(async ({ selection, purposes }) => {
+		try {
+			let gateway = gateways.get(selection.provider);
+			if (!gateway) {
+				gateway = gatewayFactory(selection, log);
+				gateways.set(selection.provider, gateway);
+			}
+			return await checkLlmTarget(selection, purposes, gateway);
+		} catch (error) {
+			return {
+				name: `llm:${selection.provider}:${selection.model}:${purposes.join("+")}`,
+				ok: false,
+				status: "unverified" as const,
+				durationMs: 0,
+				error: getErrorMessage(error),
+				errorKind: "probe_unavailable" as const,
+				provider: selection.provider,
+				model: selection.model,
+				purposes,
+			};
+		}
+	});
 }
 
 async function reportHealthCheckToGitHub(
@@ -151,48 +239,87 @@ async function reportHealthCheckToGitHub(
 			log,
 			config.githubRepository,
 		);
-		const failedNames = failedChecks
-			.map((c) => c.name)
-			.sort()
-			.join(",");
-		const fingerprint = `health_check:${failedNames}`;
-		const kvKey = `error_reported:${fingerprint}`;
 		const deduplicationStore = createDeduplicationStore(env.sushanshan_bot);
+		const infrastructureFailures = failedChecks.filter(
+			(check) => !check.provider,
+		);
+		const incidentGroups = [
+			...(infrastructureFailures.length > 0 ? [infrastructureFailures] : []),
+			...failedChecks.filter((check) => check.provider).map((check) => [check]),
+		];
+		for (const incidentChecks of incidentGroups) {
+			const identity = incidentChecks
+				.map((check) =>
+					check.provider
+						? [
+								check.status,
+								check.provider,
+								check.model,
+								check.purposes?.join("+"),
+								check.errorKind,
+							]
+								.map((part) => encodeURIComponent(part ?? ""))
+								.join(":")
+						: `${check.status}:${encodeURIComponent(check.name)}:${check.errorKind ?? ""}`,
+				)
+				.sort()
+				.join(",");
+			const fingerprint = `health_check:v2:${identity}`;
+			const kvKey = `error_reported:${fingerprint}`;
 
-		// Layer 1: KV deduplication
-		if (await deduplicationStore.isMarked(kvKey)) {
-			log.debug("Health check already reported (KV cache hit)", {
-				fingerprint,
-			});
-			return;
+			try {
+				if (await deduplicationStore.isMarked(kvKey)) {
+					log.debug("Health check already reported (KV cache hit)", {
+						fingerprint,
+					});
+					continue;
+				}
+				if (await github.isDuplicate(fingerprint)) {
+					log.debug("Health check already reported (GitHub search hit)", {
+						fingerprint,
+					});
+					await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
+					continue;
+				}
+
+				const report: HealthCheckReport = {
+					failedChecks: incidentChecks.map((check) => ({
+						name: check.name,
+						error: check.error ?? "Unknown error",
+						durationMs: check.durationMs,
+						status: check.status === "unverified" ? "unverified" : "unhealthy",
+						provider: check.provider,
+						model: check.model,
+						purposes: check.purposes,
+						errorKind: check.errorKind,
+						probeScope: check.probeScope,
+						generationSupport: check.generationSupport,
+						detail: check.detail,
+					})),
+					passedChecks: passedChecks.map((check) => ({
+						name: check.name,
+						durationMs: check.durationMs,
+						status: "healthy" as const,
+						provider: check.provider,
+						model: check.model,
+						purposes: check.purposes,
+						probeScope: check.probeScope,
+						generationSupport: check.generationSupport,
+						detail: check.detail,
+					})),
+					timestamp: new Date().toISOString(),
+				};
+
+				await github.createHealthCheckIssue(report, fingerprint);
+				await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
+				log.info("Health check reported to GitHub Issues", { fingerprint });
+			} catch (error) {
+				log.warn("Failed to report health check incident (non-fatal)", {
+					fingerprint,
+					...getExternalErrorLogContext(error),
+				});
+			}
 		}
-
-		// Layer 2: GitHub Issues search deduplication
-		const isDup = await github.isDuplicate(fingerprint);
-		if (isDup) {
-			log.debug("Health check already reported (GitHub search hit)", {
-				fingerprint,
-			});
-			await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
-			return;
-		}
-
-		const report: HealthCheckReport = {
-			failedChecks: failedChecks.map((c) => ({
-				name: c.name,
-				error: c.error ?? "Unknown error",
-				durationMs: c.durationMs,
-			})),
-			passedChecks: passedChecks.map((c) => ({
-				name: c.name,
-				durationMs: c.durationMs,
-			})),
-			timestamp: new Date().toISOString(),
-		};
-
-		await github.createHealthCheckIssue(report, fingerprint);
-		await deduplicationStore.mark(kvKey, ERROR_REPORTED_TTL_SECONDS);
-		log.info("Health check reported to GitHub Issues", { fingerprint });
 	} catch (error) {
 		log.warn("Failed to report health check to GitHub (non-fatal)", {
 			...getExternalErrorLogContext(error),
@@ -203,6 +330,7 @@ async function reportHealthCheckToGitHub(
 export async function runHealthCheck(
 	env: Bindings,
 	log: Logger,
+	gatewayFactory: GatewayFactory = createLlmGateway,
 ): Promise<HealthCheckResult> {
 	const config = loadConfig(env);
 	const metrics: IMetricsClient = env.METRICS
@@ -210,23 +338,11 @@ export async function runHealthCheck(
 		: new NoOpMetricsClient();
 
 	// Run all checks in parallel
-	const results = await Promise.allSettled([
+	const checks = await Promise.all([
 		checkKV(env.sushanshan_bot),
-		...checkConfiguredLlms(config.llm),
+		...checkConfiguredLlms(config.llm, log, gatewayFactory),
 		Promise.resolve(checkGoogleSA(config.googleServiceAccount)),
 	]);
-
-	const checks: CheckResult[] = results.map((result) => {
-		if (result.status === "fulfilled") {
-			return result.value;
-		}
-		return {
-			name: "kv" as CheckName,
-			ok: false,
-			durationMs: 0,
-			error: getErrorMessage(result.reason),
-		};
-	});
 
 	// Record metrics for each check
 	for (const check of checks) {
@@ -234,6 +350,13 @@ export async function runHealthCheck(
 			checkName: check.name,
 			success: check.ok,
 			durationMs: check.durationMs,
+			status: check.status,
+			provider: check.provider,
+			model: check.model,
+			purposes: check.purposes,
+			errorKind: check.errorKind,
+			probeScope: check.probeScope,
+			generationSupport: check.generationSupport,
 		});
 	}
 

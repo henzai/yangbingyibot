@@ -101,9 +101,16 @@ The `AnswerQuestionWorkflow` export and persisted step IDs, including `streamGem
 
 ## Monitoring compatibility and next stages
 
-The common metrics entry point translates Gemini usage to its existing positional `gemini_api_call` schema; missing counters become zero only at this legacy metrics/facade boundary. Separate summary-call usage aggregation otherwise preserves unknown counters as `null`. A non-Gemini event uses `llm_api_call`, appends provider to blobs, and uses `-1` for missing counters. The health check probes each configured provider once; Gemini behavior is unchanged. An unimplemented provider probe reports failure rather than silently claiming health.
+Selected provider/model targets now expose non-generating health probes, and
+answer/summary usage is recorded in the versioned common metrics schema. See
+[`docs/llm-observability.md`](llm-observability.md) for probe guarantees,
+ordered Analytics Engine fields, missing-value rules, fingerprint migration,
+and legacy Gemini dual-write guidance.
 
-Full monitoring migration and the OpenAI health probe remain [#432](https://github.com/henzai/yangbingyibot/issues/432); selecting OpenAI therefore produces an explicit `llm:openai` health-check failure until that stage lands. [#433](https://github.com/henzai/yangbingyibot/issues/433) covers evaluations, account-verified model selection, and operating guidance. The production model is unchanged by #431.
+[#433](https://github.com/henzai/yangbingyibot/issues/433) covers real API
+evaluation, account-verified model selection, cost/quality comparison, and the
+production switch decision. Metadata health does not replace that explicit
+generation test. The production provider and model remain unchanged.
 
 ## Verification
 

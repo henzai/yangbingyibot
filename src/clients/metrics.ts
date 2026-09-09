@@ -4,12 +4,29 @@ import type { LlmUsage } from "../llm/types";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
+const ANALYTICS_INDEX_MAX_BYTES = 96;
+
+function toAnalyticsIndex(value: string): string {
+	const encoder = new TextEncoder();
+	if (encoder.encode(value).byteLength <= ANALYTICS_INDEX_MAX_BYTES)
+		return value;
+	let result = "";
+	for (const character of value) {
+		if (
+			encoder.encode(result + character).byteLength > ANALYTICS_INDEX_MAX_BYTES
+		)
+			break;
+		result += character;
+	}
+	return result;
+}
+
 /**
  * Metric event types for categorizing data points
  */
 export type MetricEventType =
 	| "gemini_api_call"
-	| "llm_api_call"
+	| "llm_api_call_v2"
 	| "workflow_complete"
 	| "kv_cache_access"
 	| "discord_webhook"
@@ -36,9 +53,19 @@ export interface GeminiMetricData extends MetricData {
 	callCount?: number;
 }
 
-export interface LlmMetricData extends Omit<GeminiMetricData, "usage"> {
+export interface LlmMetricData
+	extends Omit<
+		GeminiMetricData,
+		"usage" | "purpose" | "retryCount" | "callCount"
+	> {
 	provider: string;
+	purpose: "answer" | "summary";
 	usage?: LlmUsage | null;
+	/** null means unavailable; it is encoded as -1, never as zero. */
+	retryCount?: number | null;
+	callCount: number;
+	/** Time to the first answer text delta. Not applicable to summary calls. */
+	firstTextDurationMs?: number | null;
 }
 
 /**
@@ -76,6 +103,13 @@ export interface HealthCheckMetricData {
 	checkName: string;
 	success: boolean;
 	durationMs: number;
+	status?: "healthy" | "unhealthy" | "unverified";
+	provider?: string;
+	model?: string;
+	purposes?: string[];
+	errorKind?: string;
+	probeScope?: string;
+	generationSupport?: string;
 }
 
 /**
@@ -108,12 +142,38 @@ export class MetricsClient implements IMetricsClient {
 		this.log = log ?? defaultLogger;
 	}
 
-	/** Keep the existing positional schema until #432, with provider appended. */
+	/**
+	 * Common schema v2. Gemini is also dual-written to the legacy event so
+	 * existing dashboards keep working during migration.
+	 */
 	recordLlmCall(data: LlmMetricData): void {
 		const usage = data.usage;
+		this.writeDataPoint("llm_api_call_v2", {
+			indexes: [toAnalyticsIndex(data.requestId)],
+			blobs: [
+				data.requestId,
+				data.provider,
+				data.model ?? "unknown",
+				data.purpose,
+			],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.callCount,
+				data.retryCount ?? -1,
+				data.firstTextDurationMs ?? -1,
+				usage?.inputTokens ?? -1,
+				usage?.cachedInputTokens ?? -1,
+				usage?.outputTokens ?? -1,
+				usage?.reasoningTokens ?? -1,
+				usage?.totalTokens ?? -1,
+			],
+		});
 		if (data.provider === "gemini") {
 			this.recordGeminiCall({
 				...data,
+				purpose: data.purpose === "summary" ? "thinking_summary" : "answer",
+				retryCount: data.retryCount ?? undefined,
 				usage: usage && {
 					promptTokens: usage.inputTokens ?? 0,
 					cachedTokens: usage.cachedInputTokens ?? 0,
@@ -122,28 +182,7 @@ export class MetricsClient implements IMetricsClient {
 					totalTokens: usage.totalTokens ?? 0,
 				},
 			});
-			return;
 		}
-		this.writeDataPoint("llm_api_call", {
-			indexes: [data.requestId.substring(0, 96)],
-			blobs: [
-				data.requestId,
-				data.model ?? "unknown",
-				data.purpose ?? "answer",
-				data.provider,
-			],
-			doubles: [
-				data.durationMs,
-				data.success ? 1 : 0,
-				data.retryCount ?? 0,
-				usage?.inputTokens ?? -1,
-				usage?.cachedInputTokens ?? -1,
-				usage?.reasoningTokens ?? -1,
-				usage?.outputTokens ?? -1,
-				usage?.totalTokens ?? -1,
-				data.callCount ?? 1,
-			],
-		});
 	}
 
 	/**
@@ -154,7 +193,7 @@ export class MetricsClient implements IMetricsClient {
 	recordGeminiCall(data: GeminiMetricData): void {
 		const usage = data.usage;
 		this.writeDataPoint("gemini_api_call", {
-			indexes: [data.requestId.substring(0, 96)],
+			indexes: [toAnalyticsIndex(data.requestId)],
 			blobs: [
 				data.requestId,
 				data.model ?? "unknown",
@@ -180,7 +219,7 @@ export class MetricsClient implements IMetricsClient {
 	 */
 	recordWorkflowComplete(data: WorkflowMetricData): void {
 		this.writeDataPoint("workflow_complete", {
-			indexes: [data.requestId.substring(0, 96)],
+			indexes: [toAnalyticsIndex(data.requestId)],
 			blobs: [data.requestId, data.workflowId],
 			doubles: [
 				data.durationMs,
@@ -197,7 +236,7 @@ export class MetricsClient implements IMetricsClient {
 	 */
 	recordKVCacheAccess(data: KVCacheMetricData): void {
 		this.writeDataPoint("kv_cache_access", {
-			indexes: [data.requestId.substring(0, 96)],
+			indexes: [toAnalyticsIndex(data.requestId)],
 			blobs: [data.requestId, data.operation],
 			doubles: [data.durationMs, data.success ? 1 : 0, data.cacheHit ? 1 : 0],
 		});
@@ -209,7 +248,7 @@ export class MetricsClient implements IMetricsClient {
 	 */
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void {
 		this.writeDataPoint("discord_webhook", {
-			indexes: [data.requestId.substring(0, 96)],
+			indexes: [toAnalyticsIndex(data.requestId)],
 			blobs: [data.requestId, data.deliveryStatus ?? "unknown"],
 			doubles: [
 				data.durationMs,
@@ -228,7 +267,7 @@ export class MetricsClient implements IMetricsClient {
 	 */
 	recordSheetsApiCall(data: MetricData): void {
 		this.writeDataPoint("sheets_api_call", {
-			indexes: [data.requestId.substring(0, 96)],
+			indexes: [toAnalyticsIndex(data.requestId)],
 			blobs: [data.requestId],
 			doubles: [data.durationMs, data.success ? 1 : 0],
 		});
@@ -240,8 +279,17 @@ export class MetricsClient implements IMetricsClient {
 	 */
 	recordHealthCheck(data: HealthCheckMetricData): void {
 		this.writeDataPoint("health_check", {
-			indexes: [data.checkName],
-			blobs: [data.checkName],
+			indexes: [toAnalyticsIndex(data.checkName)],
+			blobs: [
+				data.checkName,
+				data.status ?? (data.success ? "healthy" : "unhealthy"),
+				data.provider ?? "",
+				data.model ?? "",
+				data.purposes?.join("+") ?? "",
+				data.errorKind ?? "",
+				data.probeScope ?? "",
+				data.generationSupport ?? "",
+			],
 			doubles: [data.durationMs, data.success ? 1 : 0],
 		});
 	}
