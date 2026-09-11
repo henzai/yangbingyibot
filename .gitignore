@@ -171,5 +171,8 @@ dist
 .dev.vars
 .wrangler/
 
+# Local LLM evaluation answers and human judgments
+.llm-eval/
+
 # Agent-local operational configuration
 .agents/local/

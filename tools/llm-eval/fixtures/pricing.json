@@ -1,0 +1,45 @@
+{
+	"version": "standard-list-prices-2026-09-12",
+	"effectiveDate": "2026-09-12",
+	"currency": "USD",
+	"maxAgeDays": 7,
+	"sources": [
+		"https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+		"https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+		"https://ai.google.dev/gemini-api/docs/pricing"
+	],
+	"entries": [
+		{
+			"provider": "gemini",
+			"model": "gemini-3.5-flash-lite",
+			"inputPerMillionUsd": 0.3,
+			"cachedInputPerMillionUsd": 0.03,
+			"outputPerMillionUsd": 2.5,
+			"reasoningPerMillionUsd": 2.5
+		},
+		{
+			"provider": "gemini",
+			"model": "gemini-2.5-flash-lite",
+			"inputPerMillionUsd": 0.1,
+			"cachedInputPerMillionUsd": 0.01,
+			"outputPerMillionUsd": 0.4,
+			"reasoningPerMillionUsd": 0.4
+		},
+		{
+			"provider": "openai",
+			"model": "gpt-5.6-luna",
+			"inputPerMillionUsd": 0.2,
+			"cachedInputPerMillionUsd": 0.02,
+			"outputPerMillionUsd": 1.2,
+			"reasoningPerMillionUsd": 1.2
+		},
+		{
+			"provider": "openai",
+			"model": "gpt-5.6-terra",
+			"inputPerMillionUsd": 2,
+			"cachedInputPerMillionUsd": 0.2,
+			"outputPerMillionUsd": 12,
+			"reasoningPerMillionUsd": 12
+		}
+	]
+}
