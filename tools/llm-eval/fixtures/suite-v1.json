@@ -1,0 +1,212 @@
+{
+	"version": "llm-switch-v1",
+	"promptVersion": "answer-prompt-2026-09-12",
+	"seed": "yangbingyibot-433-v1",
+	"description": "これは架空の『北辰文化アーカイブ』について回答するボットです。回答は下記の資料だけを根拠にしてください。資料にない事実を推測せず、人物を特定できない場合は確認し、資料にない人物についてはその旨を明示してください。",
+	"knowledge": "北辰文化アーカイブ・固定スナップショット v1\n\n[人物: 八雲 零士]\n識別子: P-001\n読み: やくも れいじ\n別名: 零号、ゼロ号\n分野: 舞台照明設計\n経歴: 2012年に北辰劇場へ参加。2016年に可動式の月光装置を設計。2021年に地域巡回公演『夜の羅針盤』の照明監督を務めた。\n備考: 同姓で名前が似る八雲玲司とは別人。\n\n[人物: 八雲 玲司]\n識別子: P-002\n読み: やくも れいじ\n別名: レイジ先生\n分野: 木版画\n経歴: 2011年に工房青葉を設立。2018年に連作『雨の標本』を発表。2023年に木版画の保存技法講座を開始した。\n備考: 八雲零士とは別人で、舞台照明には関わっていない。\n\n[人物: 七瀬 美南]\n識別子: P-003\n読み: ななせ みなみ\n別名: ミナ、星渡り\n分野: 天文教育\n経歴: 2014年に移動式プラネタリウムを始めた。2019年に児童向け教材『星の郵便箱』を制作。2024年に離島観測会を主催した。\n備考: 『星渡り』は観測会参加者が付けた呼称。\n\n[人物: 三枝 永久]\n識別子: P-004\n読み: さえぐさ とわ\n別名: トワ\n分野: 音響記録\n経歴: 2010年に野外音の採集を開始。2017年に作品『風の目録』を公開。2022年に北辰音響資料室の主任となった。\n備考: 録音地には必ず日付と気象条件を付記する。\n\n[人物: 四宮 こよみ]\n識別子: P-005\n読み: しのみや こよみ\n別名: 暦さん\n分野: 衣装復元\n経歴: 2013年に染色研究を開始。2020年に植物染め衣装『薄明』を復元。2025年に巡回展示の監修を担当した。\n備考: 展示照明の設計者ではない。\n\n[人物: 六波羅 透]\n識別子: P-006\n読み: ろくはら とおる\n別名: トオル\n分野: 建築模型\n経歴: 2009年に紙模型工房へ入所。2015年に旧駅舎模型を制作。2020年に触察用模型の共同研究を始めた。\n備考: 模型は縮尺50分の1を基本とする。\n\n[人物: 十文字 澄]\n識別子: P-007\n読み: じゅうもんじ すみ\n別名: スミ\n分野: 口承記録\n経歴: 2012年に聞き取り調査を開始。2019年に方言集『川辺のことば』を編集。2022年に音声索引を公開した。\n備考: 記録対象者の匿名希望を優先する。\n\n[人物: 百瀬 千景]\n識別子: P-008\n読み: ももせ ちかげ\n別名: 千景\n分野: 紙芝居\n経歴: 2016年に創作紙芝居を始めた。2020年に『百の窓』を発表。2024年に多言語上演を実施した。\n備考: 数字の百は姓の一部で、活動回数ではない。\n\n[人物: 一色 青]\n識別子: P-009\n読み: いっしき あお\n別名: 青さん\n分野: 陶芸\n経歴: 2008年に登り窯の修復へ参加。2016年に青灰釉の器を発表。2023年に共同窯の管理者となった。\n備考: 作品名『青い航路』は本人の別名ではない。\n\n[人物: 二階堂 景]\n識別子: P-010\n読み: にかいどう けい\n別名: ケイ\n分野: 写真修復\n経歴: 2015年に乾板写真の整理を開始。2018年に湿度管理箱を設計。2021年に修復記録を公開した。\n備考: 百瀬千景とは別人。\n\n[人物: 五十嵐 円]\n識別子: P-011\n読み: いがらし まどか\n別名: 円さん\n分野: 舞踊譜\n経歴: 2011年に舞踊の採譜を始めた。2017年に記譜法『輪郭譜』を整理。2024年に公開講座を開いた。\n備考: 通貨や価格の研究者ではない。\n\n[人物: 九鬼 里緒]\n識別子: P-012\n読み: くき りお\n別名: リオ\n分野: 展示翻訳\n経歴: 2013年に英語字幕制作を開始。2019年にやさしい日本語の案内を導入。2025年に三言語展示『境界の庭』を監修した。\n備考: 資料内で最後に登録された人物。\n\n[補助記録 D-01]\n北辰劇場は2001年開館。客席は240席。月光装置は照明機材であり、天体観測機材ではない。\n[補助記録 D-02]\n工房青葉は木版画の制作と保存を行う。北辰劇場とは別組織である。\n[補助記録 D-03]\n移動式プラネタリウムは学校、公民館、離島を巡回する。『星の郵便箱』は紙芝居ではなく天文教材である。\n[補助記録 D-04]\n北辰音響資料室は環境音を保存する。舞台の音響操作を担当する部署ではない。\n[補助記録 D-05]\n巡回展示『薄明』では植物染めの退色を防ぐため照度を抑えた。照明設計そのものは八雲零士が助言した。\n[補助記録 D-06]\n旧駅舎模型は触察用模型とは別作品。触察用模型は視覚に頼らず形を確認できるよう角を丸めている。\n[補助記録 D-07]\n『川辺のことば』は印刷版と音声索引がある。匿名希望者の実名は収録しない。\n[補助記録 D-08]\n『百の窓』の題名は作者の姓に由来するが、全100話という意味ではない。\n[補助記録 D-09]\n青灰釉は一色青が地域の灰を調合して作った。作品『青い航路』は2019年の展示作品である。\n[補助記録 D-10]\n乾板写真の湿度管理箱は二階堂景が設計し、温度記録装置は別の技術者が担当した。\n[補助記録 D-11]\n『輪郭譜』は足運びを線、身体の向きを矢印で記す。五十嵐円が2017年に整理した。\n[補助記録 D-12]\n『境界の庭』は日本語、英語、架空言語ルメア語の三言語展示。九鬼里緒が2025年に監修した。",
+	"repetitions": 3,
+	"maxOutputTokens": 1024,
+	"maxPromptBytes": 16384,
+	"maxSummaryCallsPerAnswer": 4,
+	"budgetUsd": 5,
+	"candidates": [
+		{
+			"id": "gemini-current",
+			"label": "Current Gemini production configuration",
+			"provider": "gemini",
+			"model": "gemini-3.5-flash-lite",
+			"temperature": 0,
+			"reasoningSetting": "provider_default",
+			"summary": {
+				"provider": "gemini",
+				"model": "gemini-2.5-flash-lite"
+			}
+		},
+		{
+			"id": "openai-luna",
+			"label": "OpenAI low-cost candidate",
+			"provider": "openai",
+			"model": "gpt-5.6-luna",
+			"temperature": null,
+			"reasoningSetting": "provider_default",
+			"summary": null
+		},
+		{
+			"id": "openai-terra",
+			"label": "OpenAI balanced candidate",
+			"provider": "openai",
+			"model": "gpt-5.6-terra",
+			"temperature": null,
+			"reasoningSetting": "provider_default",
+			"summary": null
+		}
+	],
+	"cases": [
+		{
+			"id": "numeric-alias-zero",
+			"category": "numeric_alias",
+			"question": "ゼロ号の本名と、2021年に担当した仕事を教えてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["八雲零士"], ["夜の羅針盤"], ["照明監督"]],
+				"forbiddenTerms": ["八雲玲司", "雨の標本"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "alias-star-walker",
+			"category": "numeric_alias",
+			"question": "星渡りとは誰で、その呼び名はどう付いたのですか。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [
+					["七瀬美南"],
+					["観測会参加者", "観測会の参加者"]
+				],
+				"forbiddenTerms": ["百瀬千景"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "similar-name-lighting",
+			"category": "similar_name",
+			"question": "八雲零士の月光装置について説明してください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["八雲零士"], ["2016"], ["照明機材"]],
+				"forbiddenTerms": ["八雲玲司", "木版画"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "similar-name-printmaker",
+			"category": "similar_name",
+			"question": "八雲玲司が2018年に発表した作品は何ですか。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["八雲玲司"], ["雨の標本"]],
+				"forbiddenTerms": ["八雲零士", "夜の羅針盤"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "ambiguous-yakumo",
+			"category": "ambiguous",
+			"question": "八雲さんの代表作を教えてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "clarify",
+				"requiredTermGroups": [["どちら", "確認", "特定"]],
+				"forbiddenTerms": [],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "unknown-person",
+			"category": "unknown",
+			"question": "資料にいるはずの九条アキラの経歴を教えてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "abstain",
+				"requiredTermGroups": [
+					[
+						"情報がありません",
+						"確認できません",
+						"記載されていません",
+						"根拠がありません"
+					]
+				],
+				"forbiddenTerms": ["2019年に受賞", "北辰劇場へ参加"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "conversation-pronoun",
+			"category": "conversation",
+			"question": "その人が2019年に作ったものは何ですか。",
+			"history": [
+				{ "role": "user", "text": "七瀬美南について教えてください。" },
+				{ "role": "assistant", "text": "七瀬美南は天文教育を行う人物です。" }
+			],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["星の郵便箱"]],
+				"forbiddenTerms": ["川辺のことば", "百の窓"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "conversation-correction",
+			"category": "conversation",
+			"question": "すみません、零士ではなく玲司の方です。2023年の活動は？",
+			"history": [
+				{ "role": "user", "text": "八雲零士について教えてください。" },
+				{ "role": "assistant", "text": "八雲零士は舞台照明設計者です。" }
+			],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["八雲玲司"], ["保存技法講座"]],
+				"forbiddenTerms": ["照明監督", "夜の羅針盤"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "japanese-biography",
+			"category": "japanese_format",
+			"question": "三枝永久の経歴を日本語で簡潔にまとめてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["三枝永久"], ["2010"], ["2017"], ["2022"]],
+				"forbiddenTerms": ["舞台音響操作"],
+				"format": "timeline"
+			}
+		},
+		{
+			"id": "japanese-biography-lacquer",
+			"category": "japanese_format",
+			"question": "四宮こよみの経歴を、概要と年表で答えてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["四宮こよみ"], ["2013"], ["2020"], ["2025"]],
+				"forbiddenTerms": ["展示照明の設計者です"],
+				"format": "timeline"
+			}
+		},
+		{
+			"id": "long-context-final-record",
+			"category": "long_context",
+			"question": "最後に登録された人物が2025年に監修した展示名と使用言語をすべて挙げてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [
+					["九鬼里緒"],
+					["境界の庭"],
+					["日本語"],
+					["英語"],
+					["ルメア語"]
+				],
+				"forbiddenTerms": ["星の郵便箱", "雨の標本"],
+				"format": "plain"
+			}
+		},
+		{
+			"id": "long-context-cross-record",
+			"category": "long_context",
+			"question": "植物染め衣装『薄明』を復元した人物と、展示照明を助言した人物を区別して答えてください。",
+			"history": [],
+			"expectation": {
+				"behavior": "answer",
+				"requiredTermGroups": [["四宮こよみ"], ["八雲零士"]],
+				"forbiddenTerms": ["八雲玲司"],
+				"format": "plain"
+			}
+		}
+	]
+}

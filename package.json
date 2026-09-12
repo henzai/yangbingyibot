@@ -5,8 +5,10 @@
 	"scripts": {
 		"deploy": "wrangler deploy --minify src/index.ts",
 		"dev": "wrangler dev src/index.ts",
+		"eval:llm": "node --import tsx tools/llm-eval/cli.ts",
+		"eval:llm:report": "node --import tsx tools/llm-eval/report-cli.ts",
 		"start": "wrangler dev",
-		"test": "vitest run",
+		"test": "vitest run && vitest run --config vitest.eval.config.mts",
 		"test:watch": "vitest",
 		"cf-typegen": "wrangler types",
 		"register": "node scripts/register.js",
@@ -14,13 +16,15 @@
 		"format": "biome format --write .",
 		"check": "biome check --write .",
 		"check:ci": "biome check .",
-		"typecheck": "tsc --noEmit",
+		"typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.eval.json",
 		"verify": "npm run check:ci && npm run typecheck && npm test && wrangler deploy --dry-run --minify src/index.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",
 		"@cloudflare/vitest-pool-workers": "^0.21.0",
+		"@types/node": "^24.13.0",
 		"dotenv": "^17.0.0",
+		"tsx": "^4.23.13",
 		"typescript": "^7.0.0",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.0.0"

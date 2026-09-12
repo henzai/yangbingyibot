@@ -76,6 +76,20 @@ Set `OPENAI_API_KEY` as a Worker secret and leave `GEMINI_API_KEY` unset when Ge
 
 `src/llm/providerCatalog.ts` holds SDK-free configuration metadata. `src/llm/factory.ts` constructs only the selected adapter. New providers register in both places; tests inject a fake catalog/factory without enabling another real API. Answer and summary models may differ, and a shared provider reuses its gateway. Configuration is resolved at the start of `run` for generation and metrics; SDK clients and API keys stay outside serialized step results and Workflow payloads.
 
+To add a third provider, keep the boundary explicit:
+
+1. Add its provider/key/default metadata to `providerCatalog.ts` and resolve only
+   selected credentials in `config.ts`.
+2. Implement `ILlmGateway` in a provider adapter, including common finish and
+   nullable-usage semantics, bounded lifetime/retries, safe error normalization,
+   and a non-generating exact-model probe when the API supports one.
+3. Register lazy construction in `factory.ts`; do not place SDK types in the
+   shared contract or Workflow payload.
+4. Run the shared Gateway contract tests plus adapter tests for prompt mapping,
+   streaming, usage, refusal/block, failure, cancellation, and retry behavior.
+5. Extend health/metrics dimensions, configuration documentation, and the fixed
+   evaluation candidate/price catalog in a separately reviewed change.
+
 ## OpenAI Responses adapter
 
 The adapter uses the official JavaScript SDK `openai@7.10.0` and the Responses API. The installed SDK declares Node.js 22/24 and Cloudflare Workers support; this repository verifies the actual Worker bundle with Node.js 24 and Wrangler dry-run. The 2026-09-08 dry-run produced a 909.87 KiB upload (220.05 KiB gzip), below the Worker bundle limit enforced by Wrangler.
@@ -111,6 +125,8 @@ and legacy Gemini dual-write guidance.
 evaluation, account-verified model selection, cost/quality comparison, and the
 production switch decision. Metadata health does not replace that explicit
 generation test. The production provider and model remain unchanged.
+The pre-registered offline runner, privacy rules, scoring gates, and regression
+matrix are documented in [`docs/llm-evaluation.md`](llm-evaluation.md).
 
 ## Verification
 

@@ -43,7 +43,7 @@ Discordはインタラクションに3秒以内の応答を要求するため、
 
 ### 必要なもの
 
-- Node.js
+- Node.js 24
 - Cloudflareアカウント
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
@@ -71,7 +71,7 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 - `HISTORY_TTL_SECONDS`（60〜86400秒、既定値300秒）
 
 本番環境では `wrangler secret` でシークレットを設定してください。
-OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、未実装のOpenAIヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
+OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、モデル単位のヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
 
 ### 起動
 
@@ -89,6 +89,14 @@ npm run check      # Biomeでフォーマット + Lint（コミット前に実�
 ```
 
 その他のスクリプトは `package.json` を参照してください。
+
+### LLM評価
+
+```bash
+npm run eval:llm     # 検証済みの計画だけを表示（APIは呼ばない）
+```
+
+12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。評価結果だけで本番provider/modelは切り替えません。
 
 ## デプロイ
 
