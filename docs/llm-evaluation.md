@@ -91,10 +91,15 @@ Observed cost keeps these components separate:
 - a conservative reserve for billed retry attempts whose usage was not returned.
 
 `inputTokens` already includes cached input, while `outputTokens` excludes
-reasoning under the common gateway contract. If any required usage component is
-missing, the run stops immediately and is marked cost-unknown. A failed request
-without usage may still have been billed; the USD 5.00 control cannot guarantee
-that unknown external charge.
+reasoning under the common gateway contract. If the entire usage record is
+missing, or the returned counters are insufficient or inconsistent for a safe
+upper bound, the run stops immediately and is marked cost-unknown. When only the
+cached-input counter is omitted, the runner prices all input as uncached. When
+the output/reasoning split is omitted but the total is present and both
+categories have the same unit price, it prices the remaining generated tokens
+at that shared rate. These conservative portions are recorded separately from
+observed usage. A failed request without usable usage may still have been billed;
+the USD 5.00 control cannot guarantee that unknown external charge.
 
 ## Local artifacts and blinded review
 

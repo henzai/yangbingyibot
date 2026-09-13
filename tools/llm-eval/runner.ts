@@ -7,7 +7,7 @@ import { ExternalServiceError } from "../../src/utils/errors";
 import {
 	assertFreshPricing,
 	calculateCallCost,
-	calculateObservedCost,
+	calculateUsageCost,
 	estimateRequestUpperBound,
 	estimateSuiteUpperBound,
 	findPrice,
@@ -108,15 +108,28 @@ function combineCosts(costs: EvalCallCost[]): EvalCallCost {
 		(total, cost) => total + cost.observedUsageUsd,
 		0,
 	);
+	const missingUsageEstimateUsd = costs.reduce(
+		(total, cost) => total + cost.missingUsageEstimateUsd,
+		0,
+	);
 	const retryReserveUsd = costs.reduce(
 		(total, cost) => total + cost.retryReserveUsd,
 		0,
 	);
 	return {
 		observedUsageUsd,
+		missingUsageEstimateUsd,
 		retryReserveUsd,
-		totalEstimatedUsd: observedUsageUsd + retryReserveUsd,
-		kind: retryReserveUsd === 0 ? "observed" : "observed_plus_retry_estimate",
+		totalEstimatedUsd:
+			observedUsageUsd + missingUsageEstimateUsd + retryReserveUsd,
+		kind:
+			missingUsageEstimateUsd > 0 && retryReserveUsd > 0
+				? "observed_plus_usage_and_retry_estimate"
+				: missingUsageEstimateUsd > 0
+					? "observed_plus_usage_estimate"
+					: retryReserveUsd > 0
+						? "observed_plus_retry_estimate"
+						: "observed",
 	};
 }
 
@@ -246,7 +259,7 @@ async function runOne(
 				const summaryCallUsage = summaryResult.usage;
 				if (
 					!summaryCallUsage ||
-					calculateObservedCost(summaryCallUsage, summaryPrice) === null
+					calculateUsageCost(summaryCallUsage, summaryPrice) === null
 				) {
 					throw new EvaluationStopError("usage_missing");
 				}
@@ -273,10 +286,7 @@ async function runOne(
 		const completedAt = performance.now();
 		const result = coordinator.getResult();
 		const answerUsage = result.usage;
-		if (
-			!answerUsage ||
-			calculateObservedCost(answerUsage, answerPrice) === null
-		) {
+		if (!answerUsage || calculateUsageCost(answerUsage, answerPrice) === null) {
 			throw new EvaluationStopError("usage_missing");
 		}
 		const answerCost = calculateCallCost(

@@ -54,6 +54,12 @@ async function main(): Promise<void> {
 		judgments.judgments,
 		suite.candidates[0].id,
 	);
+	const usageEstimatedRuns = artifact.results.filter(
+		({ cost }) => (cost?.missingUsageEstimateUsd ?? 0) > 0,
+	).length;
+	const retryEstimatedRuns = artifact.results.filter(
+		({ cost }) => (cost?.retryReserveUsd ?? 0) > 0,
+	).length;
 	const lines = [
 		"# LLM evaluation summary",
 		"",
@@ -65,6 +71,7 @@ async function main(): Promise<void> {
 		`- Execution: \`${artifact.executionOrder}\`; cache: \`${artifact.cachePolicy}\``,
 		`- Trials: ${artifact.results.length} (${artifact.repetitions} repetitions per case/model)`,
 		`- Small-sample warning: per-case p95 is based on only ${artifact.repetitions} observations.`,
+		`- Cost qualification: ${usageEstimatedRuns}/${artifact.results.length} runs include conservative estimates for omitted usage counters; ${retryEstimatedRuns}/${artifact.results.length} include retry reserves.`,
 		"",
 		"| Candidate | Runs | Mix-up | Unsupported person/bio | Grounded | Deferral | Format | Failure | First text med/p95 | Answer med/p95 | Total med/p95 | Median cost | Gate |",
 		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
