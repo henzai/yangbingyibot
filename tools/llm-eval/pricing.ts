@@ -67,6 +67,63 @@ export function calculateObservedCost(
 	);
 }
 
+export function calculateUsageCost(
+	usage: LlmUsage | null,
+	price: PriceCatalogEntry,
+): Pick<EvalCallCost, "observedUsageUsd" | "missingUsageEstimateUsd"> | null {
+	if (!usage || usage.inputTokens === null || usage.inputTokens < 0)
+		return null;
+	if (
+		usage.cachedInputTokens !== null &&
+		(usage.cachedInputTokens < 0 || usage.cachedInputTokens > usage.inputTokens)
+	) {
+		return null;
+	}
+	if (usage.outputTokens !== null && usage.outputTokens < 0) return null;
+	if (usage.reasoningTokens !== null && usage.reasoningTokens < 0) return null;
+
+	const cachedInput = usage.cachedInputTokens ?? 0;
+	const observedInputUsd =
+		usage.cachedInputTokens === null
+			? 0
+			: ((usage.inputTokens - cachedInput) * price.inputPerMillionUsd +
+					cachedInput * price.cachedInputPerMillionUsd) /
+				MILLION;
+	const estimatedInputUsd =
+		usage.cachedInputTokens === null
+			? (usage.inputTokens * price.inputPerMillionUsd) / MILLION
+			: 0;
+
+	const knownOutputTokens = usage.outputTokens ?? 0;
+	const knownReasoningTokens = usage.reasoningTokens ?? 0;
+	let missingGeneratedTokens = 0;
+	if (usage.outputTokens === null || usage.reasoningTokens === null) {
+		if (
+			usage.totalTokens === null ||
+			price.outputPerMillionUsd !== price.reasoningPerMillionUsd
+		) {
+			return null;
+		}
+		missingGeneratedTokens =
+			usage.totalTokens -
+			usage.inputTokens -
+			knownOutputTokens -
+			knownReasoningTokens;
+		if (missingGeneratedTokens < 0) return null;
+	}
+
+	return {
+		observedUsageUsd:
+			observedInputUsd +
+			(knownOutputTokens * price.outputPerMillionUsd +
+				knownReasoningTokens * price.reasoningPerMillionUsd) /
+				MILLION,
+		missingUsageEstimateUsd:
+			estimatedInputUsd +
+			(missingGeneratedTokens * price.outputPerMillionUsd) / MILLION,
+	};
+}
+
 export function estimateRequestUpperBound(
 	inputBytes: number,
 	maxOutputTokens: number,
@@ -87,18 +144,30 @@ export function calculateCallCost(
 	maxOutputTokens: number,
 	price: PriceCatalogEntry,
 ): EvalCallCost {
-	const observedUsageUsd = calculateObservedCost(usage, price);
-	if (observedUsageUsd === null) {
+	const usageCost = calculateUsageCost(usage, price);
+	if (usageCost === null) {
 		throw new Error("usage is incomplete; stopping to avoid an unknown cost");
 	}
 	const retryCount = Math.max(0, attemptCount - 1);
 	const retryReserveUsd =
 		retryCount * estimateRequestUpperBound(inputBytes, maxOutputTokens, price);
+	const hasUsageEstimate = usageCost.missingUsageEstimateUsd > 0;
+	const hasRetryEstimate = retryReserveUsd > 0;
 	return {
-		observedUsageUsd,
+		...usageCost,
 		retryReserveUsd,
-		totalEstimatedUsd: observedUsageUsd + retryReserveUsd,
-		kind: retryCount === 0 ? "observed" : "observed_plus_retry_estimate",
+		totalEstimatedUsd:
+			usageCost.observedUsageUsd +
+			usageCost.missingUsageEstimateUsd +
+			retryReserveUsd,
+		kind:
+			hasUsageEstimate && hasRetryEstimate
+				? "observed_plus_usage_and_retry_estimate"
+				: hasUsageEstimate
+					? "observed_plus_usage_estimate"
+					: hasRetryEstimate
+						? "observed_plus_retry_estimate"
+						: "observed",
 	};
 }
 

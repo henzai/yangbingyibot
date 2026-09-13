@@ -96,7 +96,7 @@ npm run check      # Biomeでフォーマット + Lint（コミット前に実�
 npm run eval:llm     # 検証済みの計画だけを表示（APIは呼ばない）
 ```
 
-12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。評価結果だけで本番provider/modelは切り替えません。
+12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。2026-09-13の比較結果とGemini維持の判断は [`docs/llm-evaluation-result-2026-09-13.md`](docs/llm-evaluation-result-2026-09-13.md) に記録しています。評価結果だけで本番provider/modelは切り替えません。
 
 ## デプロイ
 

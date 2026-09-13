@@ -81,9 +81,14 @@ export type AutomaticChecks = {
 
 export type EvalCallCost = {
 	observedUsageUsd: number;
+	missingUsageEstimateUsd: number;
 	retryReserveUsd: number;
 	totalEstimatedUsd: number;
-	kind: "observed" | "observed_plus_retry_estimate";
+	kind:
+		| "observed"
+		| "observed_plus_retry_estimate"
+		| "observed_plus_usage_estimate"
+		| "observed_plus_usage_and_retry_estimate";
 };
 
 export type EvalRunResult = {

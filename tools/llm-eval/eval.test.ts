@@ -11,6 +11,7 @@ import {
 	assertFreshPricing,
 	calculateCallCost,
 	calculateObservedCost,
+	calculateUsageCost,
 	estimateSuiteUpperBound,
 } from "./pricing";
 import { runEvaluation } from "./runner";
@@ -178,12 +179,44 @@ describe("cost and statistics", () => {
 			totalTokens: 130,
 		};
 		expect(calculateObservedCost(usage, price)).toBeCloseTo(0.000488);
-		expect(calculateCallCost(usage, 2, 100, 50, price)).toEqual({
-			observedUsageUsd: 0.000488,
+		const cost = calculateCallCost(usage, 2, 100, 50, price);
+		expect(cost.observedUsageUsd).toBeCloseTo(0.000488);
+		expect(cost).toMatchObject({
+			missingUsageEstimateUsd: 0,
 			retryReserveUsd: 0.0008,
 			totalEstimatedUsd: 0.001288,
 			kind: "observed_plus_retry_estimate",
 		});
+	});
+
+	it("uses a conservative price when optional usage counters are omitted", () => {
+		const cost = calculateUsageCost(
+			{
+				inputTokens: 100,
+				cachedInputTokens: null,
+				outputTokens: 20,
+				reasoningTokens: null,
+				totalTokens: 125,
+			},
+			price,
+		);
+		expect(cost?.observedUsageUsd).toBeCloseTo(0.00024);
+		expect(cost?.missingUsageEstimateUsd).toBeCloseTo(0.00026);
+	});
+
+	it("rejects usage that cannot produce a safe cost bound", () => {
+		expect(
+			calculateUsageCost(
+				{ ...completeUsage, reasoningTokens: null, totalTokens: null },
+				price,
+			),
+		).toBeNull();
+		expect(
+			calculateUsageCost(
+				{ ...completeUsage, reasoningTokens: null, totalTokens: 100 },
+				price,
+			),
+		).toBeNull();
 	});
 
 	it("treats nullable usage as unknown cost", () => {
@@ -306,6 +339,25 @@ describe("evaluation runner with fake gateways", () => {
 		expect(gateways.gemini.streamCalls + gateways.openai.streamCalls).toBe(1);
 	});
 
+	it("continues with a conservative estimate for recoverable usage gaps", async () => {
+		const { artifact } = await runWithFakes({
+			usage: {
+				inputTokens: 100,
+				cachedInputTokens: null,
+				outputTokens: 20,
+				reasoningTokens: null,
+				totalTokens: 125,
+			},
+		});
+		expect(artifact.results).toHaveLength(108);
+		expect(artifact.abortedReason).toBeUndefined();
+		expect(
+			artifact.results.every(
+				({ cost }) => cost?.kind === "observed_plus_usage_estimate",
+			),
+		).toBe(true);
+	});
+
 	it("stops before the next request can exceed the runtime budget", async () => {
 		const expensiveUsage: LlmUsage = {
 			inputTokens: 10_000_000,
@@ -360,6 +412,7 @@ function scoredResult(candidateId: string, runId: string): EvalRunResult {
 		totalCompletionMs: 20,
 		cost: {
 			observedUsageUsd: 0.001,
+			missingUsageEstimateUsd: 0,
 			retryReserveUsd: 0,
 			totalEstimatedUsd: 0.001,
 			kind: "observed",
