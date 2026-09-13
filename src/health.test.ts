@@ -96,7 +96,7 @@ describe("health check", () => {
 		const createGateway = factory({ openai: openaiProbe });
 		const env = createMockEnv({
 			LLM_PROVIDER: "openai",
-			LLM_MODEL: "openai-answer",
+			LLM_MODEL: "gpt-5.6-luna",
 			LLM_SUMMARY_ENABLED: "false",
 			OPENAI_API_KEY: "test-openai-key",
 		});
@@ -106,10 +106,13 @@ describe("health check", () => {
 		expect(result.allHealthy).toBe(true);
 		expect(createGateway).toHaveBeenCalledOnce();
 		expect(createGateway).toHaveBeenCalledWith(
-			expect.objectContaining({ provider: "openai", model: "openai-answer" }),
+			expect.objectContaining({
+				provider: "openai",
+				model: "gpt-5.6-luna",
+			}),
 			log,
 		);
-		expect(openaiProbe).toHaveBeenCalledWith("openai-answer");
+		expect(openaiProbe).toHaveBeenCalledWith("gpt-5.6-luna");
 	});
 
 	it("deduplicates a shared provider/model used for answer and summary", async () => {

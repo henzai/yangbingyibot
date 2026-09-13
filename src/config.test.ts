@@ -142,7 +142,7 @@ describe("LLM routing configuration", () => {
 		const config = loadConfig(
 			createBindings({
 				LLM_PROVIDER: "openai",
-				LLM_MODEL: "gpt-4.1-mini",
+				LLM_MODEL: "gpt-5.6-luna",
 				OPENAI_API_KEY: "openai-key",
 				GEMINI_API_KEY: undefined,
 				LLM_SUMMARY_ENABLED: "false",
@@ -151,7 +151,7 @@ describe("LLM routing configuration", () => {
 		expect(config.llm).toEqual({
 			answer: {
 				provider: "openai",
-				model: "gpt-4.1-mini",
+				model: "gpt-5.6-luna",
 				apiKey: "openai-key",
 			},
 			summary: null,

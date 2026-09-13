@@ -9,7 +9,7 @@ Use the Chrome control skill and the user's authenticated Discord session to
 exercise the real slash-command path:
 
 Discord client → signed Interaction → production Cloudflare Worker → Answer
-Question Workflow → Gemini and Google Sheets → Discord response.
+Question Workflow → configured LLM and Google Sheets → Discord response.
 
 This is the production E2E check. Do not replace it with a fabricated
 Interaction POST, a plain Discord message, a bot-token command invocation, or a
