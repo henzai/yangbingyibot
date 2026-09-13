@@ -1,6 +1,6 @@
 # LLM gateway boundary
 
-This documents stages [#429](https://github.com/henzai/yangbingyibot/issues/429), [#430](https://github.com/henzai/yangbingyibot/issues/430), and [#431](https://github.com/henzai/yangbingyibot/issues/431) of [#428](https://github.com/henzai/yangbingyibot/issues/428). Gemini and OpenAI are registered production adapters. The production deployment still defaults to Gemini; registering OpenAI does not switch it.
+This documents stages [#429](https://github.com/henzai/yangbingyibot/issues/429), [#430](https://github.com/henzai/yangbingyibot/issues/430), and [#431](https://github.com/henzai/yangbingyibot/issues/431) of [#428](https://github.com/henzai/yangbingyibot/issues/428). Gemini and OpenAI are registered production adapters. The application keeps its Gemini-compatible defaults when LLM variables are absent, while the production deployment explicitly selects OpenAI `gpt-5.6-luna` with summaries disabled under [#449](https://github.com/henzai/yangbingyibot/issues/449).
 
 `src/llm/types.ts` defines the text-only `ILlmGateway`. It has no SDK, Cloudflare binding, Discord, or KV dependencies. `src/llm/promptBuilder.ts` keeps application instructions, knowledge context, and `user`/`assistant` messages separate. The Gemini adapter owns wire conversion, SDK configuration, and provider-specific instruction placement.
 
@@ -48,7 +48,7 @@ Values are trimmed. An explicitly blank value, unknown provider, missing selecte
 
 Only enabled answer/summary providers require their credentials. Unused keys and unused legacy Gemini model settings are ignored. `GEMINI_API_KEY` is optional in the binding type but required whenever Gemini is selected. `OPENAI_API_KEY` is required whenever OpenAI is selected. Google Sheets still requires `GOOGLE_SERVICE_ACCOUNT` regardless of LLM choice.
 
-OpenAI deliberately has no default answer or summary model. Model evaluation and production selection belong to [#433](https://github.com/henzai/yangbingyibot/issues/433), so an OpenAI selection must set `LLM_MODEL` and, when OpenAI is selected for summaries, `LLM_SUMMARY_MODEL`. Model IDs are API identifiers, not Codex display names. Before enabling production, use the authenticated [Models API](https://developers.openai.com/api/reference/ruby/resources/models) to verify that the target account can access the chosen ID. This implementation session had no `OPENAI_API_KEY` in its process environment, so account-specific availability was not tested and no real API request or charge was made.
+OpenAI deliberately has no application-level default answer or summary model. The evaluation was completed in [#433](https://github.com/henzai/yangbingyibot/issues/433), and the later production selection is tracked in [#449](https://github.com/henzai/yangbingyibot/issues/449), so an OpenAI selection must set `LLM_MODEL` and, when OpenAI is selected for summaries, `LLM_SUMMARY_MODEL`. Model IDs are API identifiers, not Codex display names. Before enabling production, use the authenticated [Models API](https://developers.openai.com/api/reference/ruby/resources/models) to verify that the target account can access the chosen ID.
 
 An existing deployment needs no configuration changes. To use common Gemini settings:
 
@@ -63,16 +63,16 @@ LLM_SUMMARY_MODEL = "gemini-2.5-flash-lite"
 
 Supply API keys through Worker secrets, never `[vars]`. To disable summary generation, set `LLM_SUMMARY_ENABLED = "false"` and **unset** `LLM_SUMMARY_PROVIDER` and `LLM_SUMMARY_MODEL`; supplying either is a contradictory configuration. Existing `GEMINI_SUMMARY_MODEL` can remain and is ignored when disabled.
 
-An OpenAI answer with summaries disabled is configured as follows; replace the example with an account-verified API model ID before deployment:
+The production OpenAI answer with summaries disabled is configured as follows:
 
 ```toml
 [vars]
 LLM_PROVIDER = "openai"
-LLM_MODEL = "account-verified-model-id"
+LLM_MODEL = "gpt-5.6-luna"
 LLM_SUMMARY_ENABLED = "false"
 ```
 
-Set `OPENAI_API_KEY` as a Worker secret and leave `GEMINI_API_KEY` unset when Gemini is otherwise unused.
+Set `OPENAI_API_KEY` as a Worker secret. The current production deployment retains `GEMINI_API_KEY` only to support an explicitly approved rollback; it is not required or contacted by the selected OpenAI-only configuration.
 
 `src/llm/providerCatalog.ts` holds SDK-free configuration metadata. `src/llm/factory.ts` constructs only the selected adapter. New providers register in both places; tests inject a fake catalog/factory without enabling another real API. Answer and summary models may differ, and a shared provider reuses its gateway. Configuration is resolved at the start of `run` for generation and metrics; SDK clients and API keys stay outside serialized step results and Workflow payloads.
 
@@ -121,10 +121,12 @@ answer/summary usage is recorded in the versioned common metrics schema. See
 ordered Analytics Engine fields, missing-value rules, fingerprint migration,
 and legacy Gemini dual-write guidance.
 
-[#433](https://github.com/henzai/yangbingyibot/issues/433) covers real API
-evaluation, account-verified model selection, cost/quality comparison, and the
-production switch decision. Metadata health does not replace that explicit
-generation test. The production provider and model remain unchanged.
+[#433](https://github.com/henzai/yangbingyibot/issues/433) records the real API
+evaluation and its pre-registered Gemini-retention result. The later
+cost-and-speed-prioritized product decision to deploy OpenAI `gpt-5.6-luna` is
+tracked separately in [#449](https://github.com/henzai/yangbingyibot/issues/449).
+Metadata health does not replace the completed explicit generation test or the
+post-deployment Discord E2E check.
 The pre-registered offline runner, privacy rules, scoring gates, and regression
 matrix are documented in [`docs/llm-evaluation.md`](llm-evaluation.md).
 

@@ -1,6 +1,6 @@
 # yangbingyibot
 
-Google Sheetsのナレッジベースと設定可能なLLM（既定はGoogle Gemini、OpenAI Responses APIにも対応）を使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
+Google Sheetsのナレッジベースと設定可能なLLM（未設定時はGoogle Gemini、本番デプロイ設定はOpenAI GPT-5.6 Luna）を使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
 
 ## 機能
 
@@ -10,7 +10,7 @@ Google Sheetsのナレッジベースと設定可能なLLM（既定はGoogle Gem
 - providerが公開する推論要約の表示（対応時のみ、💭 AI要約で表示）
 - 利用者＋チャンネル単位の会話履歴と、接続先別のシートデータをKVに保持
 - Analytics Engineでメトリクス収集
-- Cronヘルスチェック（5分間隔でKV・Gemini API・サービスアカウントを監視）
+- Cronヘルスチェック（5分間隔でKV・選択したLLM・サービスアカウントを監視）
 - エラー・障害の自動GitHub Issues報告（重複排除付き）
 
 ## アーキテクチャ
@@ -62,7 +62,7 @@ GOOGLE_SERVICE_ACCOUNT=<Google Service Account credentials (JSON文字列)>
 GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動報告用）>
 ```
 
-以下は任意設定です。未設定時は現在の本番値へフォールバックします。
+以下は任意設定です。未設定時はアプリケーションのGemini互換既定値へフォールバックします。
 
 - `LLM_PROVIDER`, `LLM_MODEL`, `LLM_SUMMARY_ENABLED`, `LLM_SUMMARY_PROVIDER`, `LLM_SUMMARY_MODEL`
 - `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`
@@ -72,6 +72,7 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 
 本番環境では `wrangler secret` でシークレットを設定してください。
 OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、モデル単位のヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
+このリポジトリの本番デプロイは `LLM_PROVIDER=openai`、`LLM_MODEL=gpt-5.6-luna`、`LLM_SUMMARY_ENABLED=false` を明示し、Geminiを使った進捗要約を行いません。
 
 ### 起動
 
@@ -96,7 +97,7 @@ npm run check      # Biomeでフォーマット + Lint（コミット前に実�
 npm run eval:llm     # 検証済みの計画だけを表示（APIは呼ばない）
 ```
 
-12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。2026-09-13の比較結果とGemini維持の判断は [`docs/llm-evaluation-result-2026-09-13.md`](docs/llm-evaluation-result-2026-09-13.md) に記録しています。評価結果だけで本番provider/modelは切り替えません。
+12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。2026-09-13の比較結果と事前ルールに基づくGemini維持の判断は [`docs/llm-evaluation-result-2026-09-13.md`](docs/llm-evaluation-result-2026-09-13.md) に記録しています。その後の本番Luna切替は、品質リスクを把握したうえで費用・速度を優先した別の製品判断として [#449](https://github.com/henzai/yangbingyibot/issues/449) で追跡します。
 
 ## デプロイ
 
