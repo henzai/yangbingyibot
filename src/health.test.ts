@@ -248,6 +248,78 @@ describe("health check", () => {
 		);
 	});
 
+	it("classifies an isolate memory-limit failure as capability", async () => {
+		const mockKV = {
+			get: vi
+				.fn()
+				.mockRejectedValue(new Error("Worker exceeded memory limit.")),
+			put: vi.fn(),
+		} as unknown as KVNamespace;
+		const result = await runHealthCheck(
+			createMockEnv({ sushanshan_bot: mockKV, LLM_SUMMARY_ENABLED: "false" }),
+			log,
+			factory({ gemini: vi.fn().mockResolvedValue(available) }),
+		);
+
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({
+				name: "kv",
+				status: "unhealthy",
+				errorKind: "capability",
+			}),
+		);
+	});
+
+	it("classifies a generic KV failure as transport", async () => {
+		const mockKV = {
+			get: vi.fn().mockRejectedValue(new Error("KV unavailable")),
+			put: vi.fn(),
+		} as unknown as KVNamespace;
+		const result = await runHealthCheck(
+			createMockEnv({ sushanshan_bot: mockKV, LLM_SUMMARY_ENABLED: "false" }),
+			log,
+			factory({ gemini: vi.fn().mockResolvedValue(available) }),
+		);
+
+		expect(result.checks).toContainEqual(
+			expect.objectContaining({
+				name: "kv",
+				status: "unhealthy",
+				errorKind: "transport",
+			}),
+		);
+	});
+
+	it("times out a hanging KV read after 3 seconds", async () => {
+		vi.useFakeTimers();
+		try {
+			const mockKV = {
+				get: vi.fn().mockReturnValue(new Promise(() => {})),
+				put: vi.fn(),
+			} as unknown as KVNamespace;
+			const pending = runHealthCheck(
+				createMockEnv({ sushanshan_bot: mockKV, LLM_SUMMARY_ENABLED: "false" }),
+				log,
+				factory({ gemini: vi.fn().mockResolvedValue(available) }),
+			);
+
+			await vi.advanceTimersByTimeAsync(3_000);
+			const result = await pending;
+
+			expect(result.allHealthy).toBe(false);
+			expect(result.checks).toContainEqual(
+				expect.objectContaining({
+					name: "kv",
+					status: "unhealthy",
+					errorKind: "timeout",
+					error: "KV probe timed out after 3000ms",
+				}),
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("records provider/model/purpose in health metrics", async () => {
 		const env = createMockEnv({ LLM_SUMMARY_ENABLED: "false" });
 		await runHealthCheck(
