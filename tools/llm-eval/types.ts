@@ -1,4 +1,8 @@
-import type { LlmMessage, LlmUsage } from "../../src/llm/types";
+import type {
+	LlmMessage,
+	LlmReasoningEffort,
+	LlmUsage,
+} from "../../src/llm/types";
 
 export type EvalProvider = "gemini" | "openai";
 
@@ -8,7 +12,9 @@ export type CandidateConfig = {
 	provider: EvalProvider;
 	model: string;
 	temperature: 0 | null;
-	reasoningSetting: "provider_default";
+	reasoningSetting: "provider_default" | LlmReasoningEffort;
+	/** Overrides the suite default when reasoning needs a larger token budget. */
+	maxOutputTokens?: number;
 	summary: {
 		provider: EvalProvider;
 		model: string;
@@ -50,6 +56,13 @@ export type EvalSuite = {
 	budgetUsd: number;
 	candidates: CandidateConfig[];
 	cases: EvalCase[];
+};
+
+export type EvalSuiteProfile = Pick<
+	EvalSuite,
+	"version" | "seed" | "budgetUsd" | "candidates"
+> & {
+	extends: string;
 };
 
 export type PriceCatalogEntry = {

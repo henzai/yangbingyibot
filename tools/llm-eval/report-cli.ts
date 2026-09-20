@@ -2,15 +2,17 @@ import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { summarizeEvaluation } from "./scoring";
-import { loadJsonFile, suiteHash } from "./suite";
-import type {
-	EvalSuite,
-	EvaluationArtifact,
-	ManualJudgmentArtifact,
-} from "./types";
+import { loadEvalSuite, loadJsonFile, suiteHash } from "./suite";
+import type { EvaluationArtifact, ManualJudgmentArtifact } from "./types";
 
 const toolDirectory = dirname(fileURLToPath(import.meta.url));
-const suitePath = resolve(toolDirectory, "fixtures/suite-v1.json");
+const suitePathsByVersion = {
+	"llm-switch-v1": resolve(toolDirectory, "fixtures/suite-v1.json"),
+	"llm-switch-v2-luna-max": resolve(
+		toolDirectory,
+		"fixtures/suite-v2-luna-max.json",
+	),
+} as const;
 
 function parseRunDirectory(args: string[]): string {
 	const index = args.indexOf("--run");
@@ -32,7 +34,14 @@ async function main(): Promise<void> {
 	const judgments = await loadJsonFile<ManualJudgmentArtifact>(
 		`${runDirectory}/judgments.json`,
 	);
-	const suite = await loadJsonFile<EvalSuite>(suitePath);
+	const suitePath =
+		suitePathsByVersion[
+			artifact.suiteVersion as keyof typeof suitePathsByVersion
+		];
+	if (!suitePath) {
+		throw new Error(`unknown evaluation suite: ${artifact.suiteVersion}`);
+	}
+	const suite = await loadEvalSuite(suitePath);
 	if (artifact.abortedReason) throw new Error(artifact.abortedReason);
 	const expectedRuns =
 		suite.candidates.length * suite.cases.length * suite.repetitions;

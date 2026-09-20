@@ -172,6 +172,7 @@ async function runOne(
 	if (!gateway) throw new Error(`gateway is missing for ${candidate.provider}`);
 	const prompt = buildPrompt(suite, testCase);
 	const commonPromptBytes = promptBytes(prompt);
+	const maxOutputTokens = candidate.maxOutputTokens ?? suite.maxOutputTokens;
 	const answerPrice = findPrice(prices, candidate.provider, candidate.model);
 	const coordinator = new StreamCoordinator();
 	const start = performance.now();
@@ -197,17 +198,20 @@ async function runOne(
 		const answerReservation = budget.reserve(
 			estimateRequestUpperBound(
 				commonPromptBytes,
-				suite.maxOutputTokens,
+				maxOutputTokens,
 				answerPrice,
 			) * pricingConstants.maxProviderAttempts,
 		);
 		for await (const event of gateway.generateStream({
 			model: candidate.model,
 			prompt,
+			...(candidate.reasoningSetting === "provider_default"
+				? {}
+				: { reasoningEffort: candidate.reasoningSetting }),
 			...(candidate.temperature === null
 				? {}
 				: { temperature: candidate.temperature }),
-			maxOutputTokens: suite.maxOutputTokens,
+			maxOutputTokens,
 			includeReasoningSummary: summarizer !== null,
 			telemetry: {
 				onAttempt: () => answerAttemptCount++,
@@ -293,7 +297,7 @@ async function runOne(
 			answerUsage,
 			Math.max(1, answerAttemptCount),
 			commonPromptBytes,
-			suite.maxOutputTokens,
+			maxOutputTokens,
 			answerPrice,
 		);
 		costs.unshift(answerCost);

@@ -1,0 +1,40 @@
+{
+	"extends": "suite-v1.json",
+	"version": "llm-switch-v2-luna-max",
+	"seed": "yangbingyibot-luna-max-v2",
+	"budgetUsd": 12,
+	"candidates": [
+		{
+			"id": "gemini-current",
+			"label": "Current Gemini comparison baseline",
+			"provider": "gemini",
+			"model": "gemini-3.5-flash-lite",
+			"temperature": 0,
+			"reasoningSetting": "provider_default",
+			"summary": {
+				"provider": "gemini",
+				"model": "gemini-2.5-flash-lite"
+			}
+		},
+		{
+			"id": "openai-luna-medium",
+			"label": "OpenAI Luna with medium reasoning",
+			"provider": "openai",
+			"model": "gpt-5.6-luna",
+			"temperature": null,
+			"reasoningSetting": "medium",
+			"maxOutputTokens": 25000,
+			"summary": null
+		},
+		{
+			"id": "openai-luna-max",
+			"label": "OpenAI Luna with max reasoning",
+			"provider": "openai",
+			"model": "gpt-5.6-luna",
+			"temperature": null,
+			"reasoningSetting": "max",
+			"maxOutputTokens": 25000,
+			"summary": null
+		}
+	]
+}

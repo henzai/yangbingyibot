@@ -8,6 +8,7 @@ import { createLlmGateway } from "../../src/llm/factory";
 import { assertFreshPricing, estimateSuiteUpperBound } from "./pricing";
 import { runEvaluation } from "./runner";
 import {
+	loadEvalSuite,
 	loadJsonFile,
 	suiteHash,
 	validatePriceCoverage,
@@ -24,16 +25,36 @@ import type {
 const execFileAsync = promisify(execFile);
 const toolDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(toolDirectory, "../..");
-const suitePath = resolve(toolDirectory, "fixtures/suite-v1.json");
 const pricingPath = resolve(toolDirectory, "fixtures/pricing.json");
 
-function parseExecuteFlag(args: string[]): boolean {
-	const allowed = new Set(["--execute"]);
-	for (const argument of args) {
-		if (!allowed.has(argument))
-			throw new Error(`unknown argument: ${argument}`);
+const suitePaths = {
+	v1: resolve(toolDirectory, "fixtures/suite-v1.json"),
+	"luna-max-v2": resolve(toolDirectory, "fixtures/suite-v2-luna-max.json"),
+} as const;
+
+function parseOptions(args: string[]): {
+	execute: boolean;
+	suitePath: string;
+} {
+	let execute = false;
+	let suiteName: keyof typeof suitePaths = "v1";
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index];
+		if (argument === "--execute") {
+			execute = true;
+			continue;
+		}
+		if (argument === "--suite") {
+			const value = args[++index];
+			if (!value || !(value in suitePaths)) {
+				throw new Error(`unknown evaluation suite: ${value ?? "missing"}`);
+			}
+			suiteName = value as keyof typeof suitePaths;
+			continue;
+		}
+		throw new Error(`unknown argument: ${argument}`);
 	}
-	return args.includes("--execute");
+	return { execute, suitePath: suitePaths[suiteName] };
 }
 
 function printPlan(
@@ -50,11 +71,12 @@ function printPlan(
 	);
 	console.log(`max output tokens: ${suite.maxOutputTokens}`);
 	console.log(`price effective date: ${prices.effectiveDate}`);
-	console.log(`approved budget: ${suite.budgetUsd.toFixed(2)} USD`);
+	console.log(`suite budget limit: ${suite.budgetUsd.toFixed(2)} USD`);
 	console.log(`worst-case estimate: ${upperBound.toFixed(4)} USD`);
 	for (const candidate of suite.candidates) {
+		const maxOutputTokens = candidate.maxOutputTokens ?? suite.maxOutputTokens;
 		console.log(
-			`candidate: ${candidate.id} (${candidate.provider}:${candidate.model}, summary ${candidate.summary ? `${candidate.summary.provider}:${candidate.summary.model}` : "disabled"})`,
+			`candidate: ${candidate.id} (${candidate.provider}:${candidate.model}, reasoning ${candidate.reasoningSetting}, max output ${maxOutputTokens}, summary ${candidate.summary ? `${candidate.summary.provider}:${candidate.summary.model}` : "disabled"})`,
 		);
 	}
 }
@@ -97,8 +119,8 @@ function blindedReview(artifact: EvaluationArtifact): object {
 }
 
 async function main(): Promise<void> {
-	const execute = parseExecuteFlag(process.argv.slice(2));
-	const suite = await loadJsonFile<EvalSuite>(suitePath);
+	const { execute, suitePath } = parseOptions(process.argv.slice(2));
+	const suite = await loadEvalSuite(suitePath);
 	const prices = await loadJsonFile<PriceCatalog>(pricingPath);
 	validateSuite(suite);
 	validatePriceCoverage(suite, prices);

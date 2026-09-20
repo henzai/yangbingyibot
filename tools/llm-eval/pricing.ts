@@ -177,12 +177,13 @@ function candidateWorstCase(
 	catalog: PriceCatalog,
 ): number {
 	const answerPrice = findPrice(catalog, candidate.provider, candidate.model);
+	const maxOutputTokens = candidate.maxOutputTokens ?? suite.maxOutputTokens;
 	const answerCost = suite.cases.reduce(
 		(total, testCase) =>
 			total +
 			estimateRequestUpperBound(
 				promptBytes(buildPrompt(suite, testCase)),
-				suite.maxOutputTokens,
+				maxOutputTokens,
 				answerPrice,
 			) *
 				MAX_PROVIDER_ATTEMPTS *

@@ -35,6 +35,21 @@ provider-default reasoning setting, criteria, output limit, and repetitions
 must not change after the first evaluation PR is merged. A change requires a new
 suite version and a fresh comparison of every candidate.
 
+### Luna max follow-up
+
+`luna-max-v2` preserves the v1 synthetic questions, prompt, criteria, and three
+repetitions, but creates a new suite version for a fresh comparison of:
+
+- `gemini-3.5-flash-lite` with its existing production-compatible settings;
+- `gpt-5.6-luna` with explicit `medium` reasoning; and
+- `gpt-5.6-luna` with explicit `max` reasoning.
+
+The two Luna candidates receive a 25,000-token reasoning-and-output allowance.
+OpenAI reasoning tokens count against `max_output_tokens`, so retaining v1's
+1,024-token limit could end a max-effort response before visible text is
+produced. Gemini retains the v1 1,024-token answer limit. The v2 suite has a
+USD 12 conservative safety ceiling; that ceiling is not authorization to spend.
+
 ## Safe commands
 
 Use Node.js 24. The default command performs validation and prints only the plan:
@@ -44,9 +59,15 @@ npm run eval:llm
 ```
 
 It does not load credentials or call an API. It prints the candidate model IDs,
-trial count, output limit, price date, approved budget, and a conservative
+trial count, output limit, price date, suite budget limit, and a conservative
 maximum estimate. Normal tests use only fake gateways, so `npm test`,
 `npm run verify`, and GitHub Actions do not call a real LLM.
+
+Preview the Luna reasoning comparison separately:
+
+```bash
+npm run eval:llm -- --suite luna-max-v2
+```
 
 Before an authorized paid run, update `tools/llm-eval/fixtures/pricing.json`
 from the linked official price pages without changing its field semantics. The
@@ -65,16 +86,24 @@ plan and obtaining explicit approval for the paid run, execute:
 npm run eval:llm -- --execute
 ```
 
+After separately approving the printed v2 price ceiling, execute it with:
+
+```bash
+npm run eval:llm -- --suite luna-max-v2 --execute
+```
+
 `--execute` is the only flag that enables calls. Candidates are interleaved in a
 deterministic order and run serially. The runner first performs a non-generating
 metadata probe for every exact provider/model target. It then uses the production
 `PromptBuilder`, provider `ILlmGateway`, `StreamCoordinator`, and
-`ThinkingSummarizer`. The answer request limit is 1,024 tokens; summary requests
-are limited to 128 tokens and four calls per answer.
+`ThinkingSummarizer`. The v1 answer request limit is 1,024 tokens. A candidate
+may declare a larger limit in a later suite when reasoning tokens share that
+allowance. Summary requests are limited to 128 tokens and four calls per answer.
 
 ## Budget and usage rules
 
-The approved maximum is USD 5.00. The preflight estimate assumes up to two
+The v1 maximum is USD 5.00; later suites record their own safety ceiling. The
+preflight estimate assumes up to two
 provider attempts for every answer and summary call, treats UTF-8 input bytes as
 a conservative token ceiling, and allows at most 64 KiB of serialized summary
 input. Before each real request, the runner reserves that request's two-attempt
