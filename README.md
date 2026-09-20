@@ -47,7 +47,7 @@ Discordはインタラクションに3秒以内の応答を要求するため、
 - Cloudflareアカウント
 - Discordアプリケーション
 - Google Cloud Platform サービスアカウント
-- Google Gemini APIキー（既定構成）またはOpenAI APIキー
+- OpenAI APIキー（このリポジトリに入っている構成）、またはGeminiへ切り替える場合はGoogle Gemini APIキー
 
 ### 環境変数
 
@@ -57,12 +57,16 @@ Discordはインタラクションに3秒以内の応答を要求するため、
 DISCORD_TOKEN=<Discord Bot Token>
 DISCORD_PUBLIC_KEY=<Discord Public Key>
 DISCORD_APPLICATION_ID=<Discord Application ID>
-GEMINI_API_KEY=<Google Gemini API Key>
+OPENAI_API_KEY=<OpenAI API Key>
 GOOGLE_SERVICE_ACCOUNT=<Google Service Account credentials (JSON文字列)>
 GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動報告用）>
 ```
 
-以下は任意設定です。未設定時はアプリケーションのGemini互換既定値へフォールバックします。
+`wrangler.toml` の `[vars]` が `LLM_PROVIDER=openai` を指定しており、この値は `wrangler dev` でも適用されます。
+そのためローカル開発でも `OPENAI_API_KEY` が必要で、未設定のまま起動すると設定エラーになります。
+ローカルでGeminiを使う場合は `.dev.vars` に `LLM_PROVIDER=gemini` と `GEMINI_API_KEY` を設定して上書きしてください。
+
+以下は任意設定です。`wrangler.toml` と `.dev.vars` のどちらにも無い場合、アプリケーションのGemini互換既定値へフォールバックします。
 
 - `LLM_PROVIDER`, `LLM_MODEL`, `LLM_SUMMARY_ENABLED`, `LLM_SUMMARY_PROVIDER`, `LLM_SUMMARY_MODEL`
 - `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`
