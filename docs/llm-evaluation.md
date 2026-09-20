@@ -50,6 +50,17 @@ OpenAI reasoning tokens count against `max_output_tokens`, so retaining v1's
 produced. Gemini retains the v1 1,024-token answer limit. The v2 suite has a
 USD 12 conservative safety ceiling; that ceiling is not authorization to spend.
 
+The v2 comparison uses deterministic automatic scoring only. It checks the
+fixture's required terms, forbidden terms, clarification or abstention signals,
+Japanese/timeline format, API failures, latency, and cost. The reported
+grounding, deferral, and format rates are explicitly **ceilings**: term matching
+cannot establish that every free-form assertion is supported or that an answer
+is hallucination-free. No human reviewer or LLM judge is required. This avoids
+an impractical manual review step without pretending that a weaker automated
+signal is equivalent to semantic fact checking.
+An API failure counts as a failure for every applicable automatic rate rather
+than receiving credit for an empty response.
+
 ## Safe commands
 
 Use Node.js 24. The default command performs validation and prints only the plan:
@@ -137,25 +148,38 @@ gitignored `.llm-eval/<timestamp>/` directory:
 
 - `evaluation.json`: full local machine-readable result and candidate mapping;
 - `review.json`: responses identified only by stable blinded candidate IDs; and
-- `judgments.json`: editable human-scoring template.
+- `judgments.json`: editable human-scoring template (v1/manual suites only).
 
-The reviewer should use `review.json`, the fixed fixture, and the rubric below;
+For `luna-max-v2`, the runner does not create `judgments.json`. The report
+command calculates the automatic ceilings directly from `evaluation.json` and
+the immutable suite expectations:
+
+```bash
+npm run eval:llm:report -- --run .llm-eval/<timestamp>
+```
+
+It refuses aborted or incomplete runs and suite/scoring-mode mismatches, then
+writes `summary.json` and `summary.md`. The aggregate report states the limits
+of term-based scoring and must not be described as verified factual accuracy.
+
+For a manual suite, the reviewer should use `review.json`, the fixed fixture,
+and the rubric below;
 do not inspect `evaluation.json` until scoring is complete. Set every nullable
 field in `judgments.json` to `true` or `false`. Do not paste answers, private
 knowledge, keys, or provider error bodies into an issue, pull request, log, or
 committed file. The runner stores only normalized error kinds, never raw provider
 errors.
 
-Generate the local report after all successful responses have been graded:
+Generate the local manual report after all successful responses have been
+graded:
 
 ```bash
 npm run eval:llm:report -- --run .llm-eval/<timestamp>
 ```
 
-The report command refuses aborted runs, incomplete trials, suite-hash mismatch,
-or incomplete human judgments. It writes `summary.json` and `summary.md` in the
-same ignored directory. Only a manually inspected, sanitized aggregate may be
-copied into the result PR; raw answers remain local.
+For manual suites, the report command also refuses incomplete human judgments.
+Only a sanitized aggregate may be copied into the result PR; raw answers remain
+local.
 
 ### Human rubric
 
@@ -171,10 +195,11 @@ For each successful answer, record:
 - `formatCorrect`: Japanese and the requested structure are followed; and
 - `notes`: optional concise rationale containing no private data.
 
-Automatic checks verify required/forbidden terms, Japanese text, clarification
-or abstention signals, and timeline shape. They assist review but do not replace
-the human judgment. Grounding, behavior, and format pass only when both the
-applicable automatic check and human judgment pass. No LLM judge is used.
+In manual suites, automatic checks verify required/forbidden terms, Japanese
+text, clarification or abstention signals, and timeline shape. They assist
+review but do not replace the human judgment. Grounding, behavior, and format
+pass only when both the applicable automatic check and human judgment pass. No
+LLM judge is used.
 
 ## Pre-registered decision rule
 

@@ -19,6 +19,7 @@ import {
 	median,
 	nearestRankPercentile,
 	runAutomaticChecks,
+	summarizeAutomaticEvaluation,
 	summarizeEvaluation,
 } from "./scoring";
 import {
@@ -165,6 +166,7 @@ describe("fixed evaluation fixtures", () => {
 		expect(() => validateSuite(suite)).not.toThrow();
 		expect(() => validatePriceCoverage(suite, prices)).not.toThrow();
 		expect(suite.version).toBe("llm-switch-v2-luna-max");
+		expect(suite.scoringMode).toBe("automatic_only");
 		expect(suite.candidates).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -268,6 +270,42 @@ describe("cost and statistics", () => {
 });
 
 describe("automatic and manual scoring", () => {
+	it("summarizes deterministic checks without claiming human verification", () => {
+		const passing = scoredResult("candidate", "run-passing");
+		const failing = scoredResult("candidate", "run-failing");
+		failing.category = "unknown";
+		failing.automaticChecks.requiredTermsPresent = false;
+		failing.automaticChecks.behaviorSignalPresent = false;
+		const summary = summarizeAutomaticEvaluation([passing, failing]);
+		expect(summary.scoringMode).toBe("automatic_only");
+		expect(summary.candidates[0]).toMatchObject({
+			requiredTermsRate: 0.5,
+			forbiddenTermsRate: 1,
+			groundingCeiling: 0.5,
+			deferralCeiling: 0,
+			formatCeiling: 1,
+		});
+		expect(summary.candidates[0]).not.toHaveProperty("personMixupRate");
+		expect(summary.candidates[0]).not.toHaveProperty(
+			"unsupportedPersonOrBiographyCount",
+		);
+	});
+
+	it("counts an API failure as failing every applicable automatic ceiling", () => {
+		const failed = scoredResult("candidate", "run-failed");
+		failed.success = false;
+		failed.category = "unknown";
+		const [candidate] = summarizeAutomaticEvaluation([failed]).candidates;
+		expect(candidate).toMatchObject({
+			requiredTermsRate: 0,
+			forbiddenTermsRate: 0,
+			groundingCeiling: 0,
+			deferralCeiling: 0,
+			formatCeiling: 0,
+			failureRate: 1,
+		});
+	});
+
 	it("normalizes Japanese names and checks timeline formatting", async () => {
 		const { suite } = await fixtures();
 		const testCase = suite.cases.find(({ id }) => id === "japanese-biography");

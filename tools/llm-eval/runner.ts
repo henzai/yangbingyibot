@@ -440,6 +440,7 @@ export async function runEvaluation(
 		repetitions: options.suite.repetitions,
 		maxOutputTokens: options.suite.maxOutputTokens,
 		budgetUsd: options.suite.budgetUsd,
+		scoringMode: options.suite.scoringMode ?? "manual",
 		results,
 		...(abortedReason ? { abortedReason } : {}),
 	};

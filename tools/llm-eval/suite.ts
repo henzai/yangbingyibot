@@ -36,6 +36,7 @@ export async function loadEvalSuite(path: string): Promise<EvalSuite> {
 		version: value.version,
 		seed: value.seed,
 		budgetUsd: value.budgetUsd,
+		scoringMode: value.scoringMode,
 		candidates: value.candidates,
 	};
 }
@@ -132,6 +133,13 @@ export function validateSuite(suite: EvalSuite): void {
 	}
 	if (!Number.isFinite(suite.budgetUsd) || suite.budgetUsd <= 0) {
 		throw new Error("evaluation suite has an invalid budget");
+	}
+	if (
+		suite.scoringMode !== undefined &&
+		suite.scoringMode !== "manual" &&
+		suite.scoringMode !== "automatic_only"
+	) {
+		throw new Error("evaluation suite has an invalid scoring mode");
 	}
 	if (
 		suite.version === "llm-switch-v1" &&

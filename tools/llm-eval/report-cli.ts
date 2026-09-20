@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { summarizeEvaluation } from "./scoring";
+import { summarizeAutomaticEvaluation, summarizeEvaluation } from "./scoring";
 import { loadEvalSuite, loadJsonFile, suiteHash } from "./suite";
 import type { EvaluationArtifact, ManualJudgmentArtifact } from "./types";
 
@@ -26,13 +26,57 @@ function percent(value: number): string {
 	return `${(value * 100).toFixed(1)}%`;
 }
 
+async function writeAutomaticReport(
+	runDirectory: string,
+	artifact: EvaluationArtifact,
+): Promise<void> {
+	const summary = summarizeAutomaticEvaluation(artifact.results);
+	const lines = [
+		"# LLM automatic evaluation summary",
+		"",
+		`- Suite: \`${artifact.suiteVersion}\` (\`${artifact.suiteHash}\`)`,
+		`- Commit: \`${artifact.gitCommit}\``,
+		`- Pricing snapshot: \`${artifact.pricingVersion}\` (${artifact.pricingEffectiveDate})`,
+		`- Trials: ${artifact.results.length} (${artifact.repetitions} repetitions per case/model)`,
+		"- Scoring: deterministic required terms, forbidden terms, deferral signals, Japanese/timeline format, failures, latency, and cost.",
+		"- Limitation: these rates are automatic ceilings. They do not verify that every free-form claim is supported and do not establish a zero hallucination rate.",
+		"",
+		"| Candidate | Runs | Required terms | Forbidden terms absent | Grounding ceiling | Deferral ceiling | Format ceiling | Failure | First text med/p95 | Total med/p95 | Median cost |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+		...summary.candidates.map((candidate) =>
+			[
+				candidate.candidateId,
+				candidate.runCount,
+				percent(candidate.requiredTermsRate),
+				percent(candidate.forbiddenTermsRate),
+				percent(candidate.groundingCeiling),
+				percent(candidate.deferralCeiling),
+				percent(candidate.formatCeiling),
+				percent(candidate.failureRate),
+				`${candidate.medianFirstTextMs.toFixed(0)} / ${candidate.p95FirstTextMs.toFixed(0)} ms`,
+				`${candidate.medianTotalCompletionMs.toFixed(0)} / ${candidate.p95TotalCompletionMs.toFixed(0)} ms`,
+				`$${candidate.medianCostUsd.toFixed(6)}`,
+			]
+				.join(" | ")
+				.replace(/^/, "| ")
+				.concat(" |"),
+		),
+		"",
+	];
+	await writeFile(
+		`${runDirectory}/summary.json`,
+		`${JSON.stringify(summary, null, 2)}\n`,
+		{ mode: 0o600 },
+	);
+	await writeFile(`${runDirectory}/summary.md`, lines.join("\n"), {
+		mode: 0o600,
+	});
+}
+
 async function main(): Promise<void> {
 	const runDirectory = parseRunDirectory(process.argv.slice(2));
 	const artifact = await loadJsonFile<EvaluationArtifact>(
 		`${runDirectory}/evaluation.json`,
-	);
-	const judgments = await loadJsonFile<ManualJudgmentArtifact>(
-		`${runDirectory}/judgments.json`,
 	);
 	const suitePath =
 		suitePathsByVersion[
@@ -43,6 +87,12 @@ async function main(): Promise<void> {
 	}
 	const suite = await loadEvalSuite(suitePath);
 	if (artifact.abortedReason) throw new Error(artifact.abortedReason);
+	const scoringMode = suite.scoringMode ?? "manual";
+	if (artifact.scoringMode !== scoringMode) {
+		throw new Error(
+			"scoring mode mismatch; do not grade changed evaluation data",
+		);
+	}
 	const expectedRuns =
 		suite.candidates.length * suite.cases.length * suite.repetitions;
 	if (artifact.results.length !== expectedRuns) {
@@ -50,10 +100,20 @@ async function main(): Promise<void> {
 			`evaluation is incomplete: ${artifact.results.length}/${expectedRuns} runs`,
 		);
 	}
-	if (
-		artifact.suiteHash !== suiteHash(suite) ||
-		judgments.suiteHash !== artifact.suiteHash
-	) {
+	if (artifact.suiteHash !== suiteHash(suite)) {
+		throw new Error(
+			"suite hash mismatch; do not grade changed evaluation data",
+		);
+	}
+	if (scoringMode === "automatic_only") {
+		await writeAutomaticReport(runDirectory, artifact);
+		console.log(`sanitized automatic summary: ${runDirectory}/summary.md`);
+		return;
+	}
+	const judgments = await loadJsonFile<ManualJudgmentArtifact>(
+		`${runDirectory}/judgments.json`,
+	);
+	if (judgments.suiteHash !== artifact.suiteHash) {
 		throw new Error(
 			"suite hash mismatch; do not grade changed evaluation data",
 		);

@@ -3,6 +3,7 @@
 	"version": "llm-switch-v2-luna-max",
 	"seed": "yangbingyibot-luna-max-v2",
 	"budgetUsd": 12,
+	"scoringMode": "automatic_only",
 	"candidates": [
 		{
 			"id": "gemini-current",

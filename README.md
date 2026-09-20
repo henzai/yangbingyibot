@@ -97,7 +97,7 @@ npm run check      # Biomeでフォーマット + Lint（コミット前に実�
 npm run eval:llm     # 検証済みの計画だけを表示（APIは呼ばない）
 ```
 
-12件の合成fixture、費用上限、人手採点、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。2026-09-13の比較結果と事前ルールに基づくGemini維持の判断は [`docs/llm-evaluation-result-2026-09-13.md`](docs/llm-evaluation-result-2026-09-13.md) に記録しています。その後の本番Luna切替は、品質リスクを把握したうえで費用・速度を優先した別の製品判断として [#449](https://github.com/henzai/yangbingyibot/issues/449) で追跡します。
+12件の合成fixture、費用上限、採点方法、実API実行手順は [`docs/llm-evaluation.md`](docs/llm-evaluation.md) に記載しています。Luna max比較は人手採点やLLM judgeを使わず、正解語・禁止語・保留表現・形式の自動判定を限界付きのceilingとして報告します。通常のテストとCIはfake Gatewayだけを使い、実APIを呼びません。2026-09-13の比較結果と事前ルールに基づくGemini維持の判断は [`docs/llm-evaluation-result-2026-09-13.md`](docs/llm-evaluation-result-2026-09-13.md) に記録しています。その後の本番Luna切替は、品質リスクを把握したうえで費用・速度を優先した別の製品判断として [#449](https://github.com/henzai/yangbingyibot/issues/449) で追跡します。
 
 ## デプロイ
 

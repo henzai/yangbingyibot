@@ -72,6 +72,7 @@ function printPlan(
 	console.log(`max output tokens: ${suite.maxOutputTokens}`);
 	console.log(`price effective date: ${prices.effectiveDate}`);
 	console.log(`suite budget limit: ${suite.budgetUsd.toFixed(2)} USD`);
+	console.log(`scoring: ${suite.scoringMode ?? "manual"}`);
 	console.log(`worst-case estimate: ${upperBound.toFixed(4)} USD`);
 	for (const candidate of suite.candidates) {
 		const maxOutputTokens = candidate.maxOutputTokens ?? suite.maxOutputTokens;
@@ -171,11 +172,13 @@ async function main(): Promise<void> {
 		`${JSON.stringify(artifact, null, 2)}\n`,
 		{ mode: 0o600 },
 	);
-	await writeFile(
-		`${runDirectory}/judgments.json`,
-		`${JSON.stringify(judgmentTemplate(artifact), null, 2)}\n`,
-		{ mode: 0o600 },
-	);
+	if (artifact.scoringMode === "manual") {
+		await writeFile(
+			`${runDirectory}/judgments.json`,
+			`${JSON.stringify(judgmentTemplate(artifact), null, 2)}\n`,
+			{ mode: 0o600 },
+		);
+	}
 	await writeFile(
 		`${runDirectory}/review.json`,
 		`${JSON.stringify(blindedReview(artifact), null, 2)}\n`,
@@ -183,7 +186,11 @@ async function main(): Promise<void> {
 	);
 	console.log(`local evaluation artifact: ${runDirectory}/evaluation.json`);
 	console.log(`blinded answers: ${runDirectory}/review.json`);
-	console.log(`blinded judgment template: ${runDirectory}/judgments.json`);
+	if (artifact.scoringMode === "manual") {
+		console.log(`blinded judgment template: ${runDirectory}/judgments.json`);
+	} else {
+		console.log("automatic-only scoring; no human judgment file was created");
+	}
 	if (artifact.abortedReason) {
 		throw new Error(artifact.abortedReason);
 	}
