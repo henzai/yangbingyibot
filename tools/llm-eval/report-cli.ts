@@ -40,6 +40,7 @@ async function writeAutomaticReport(
 		`- Trials: ${artifact.results.length} (${artifact.repetitions} repetitions per case/model)`,
 		"- Scoring: deterministic required terms, forbidden terms, deferral signals, Japanese/timeline format, failures, latency, and cost.",
 		"- Limitation: these rates are automatic ceilings. They do not verify that every free-form claim is supported and do not establish a zero hallucination rate.",
+		"- Decision: automatic-only scoring does not assign a quality-gate pass or model recommendation.",
 		"",
 		"| Candidate | Runs | Required terms | Forbidden terms absent | Grounding ceiling | Deferral ceiling | Format ceiling | Failure | First text med/p95 | Total med/p95 | Median cost |",
 		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",

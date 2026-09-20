@@ -161,6 +161,8 @@ npm run eval:llm:report -- --run .llm-eval/<timestamp>
 It refuses aborted or incomplete runs and suite/scoring-mode mismatches, then
 writes `summary.json` and `summary.md`. The aggregate report states the limits
 of term-based scoring and must not be described as verified factual accuracy.
+It does not claim that a candidate passes the manual quality gates or emit a
+model recommendation; the v2 numbers are comparative regression signals only.
 
 For a manual suite, the reviewer should use `review.json`, the fixed fixture,
 and the rubric below;
@@ -202,6 +204,10 @@ pass only when both the applicable automatic check and human judgment pass. No
 LLM judge is used.
 
 ## Pre-registered decision rule
+
+This rule applies to manually reviewed suites such as v1. The automatic-only v2
+follow-up reports ceilings and does not substitute them for the human-validated
+rates below.
 
 For every candidate, the report aggregates person-mix-up rate, supported-fact
 rate, appropriate clarification/abstention rate, Japanese/format rate, API
