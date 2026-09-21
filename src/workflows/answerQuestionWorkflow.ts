@@ -131,13 +131,51 @@ export async function getSheetDataStep(
 	const cache = createSheetCacheRepository(env.sushanshan_bot, log);
 
 	const cachedData = await cache.get(config.spreadsheet);
-	if (cachedData) {
+	if (cachedData?.structuredSheet !== undefined) {
 		log.info("Sheet data loaded from cache");
 		return {
 			sheetInfo: cachedData.sheetInfo,
 			description: cachedData.description,
 			fromCache: true,
 		};
+	}
+
+	if (cachedData) {
+		log.info("Legacy sheet cache found; refreshing structured snapshot");
+		try {
+			const refreshedData = await getSheetData(
+				config.googleServiceAccount,
+				log,
+				config.spreadsheet,
+			);
+			try {
+				await cache.save(
+					config.spreadsheet,
+					refreshedData.sheetInfo,
+					refreshedData.description,
+					refreshedData.structuredSheet,
+				);
+				log.info("Structured sheet cache refreshed");
+			} catch (error) {
+				log.warn("Failed to save refreshed cache (non-fatal)", {
+					error: getErrorMessage(error),
+				});
+			}
+			return {
+				sheetInfo: refreshedData.sheetInfo,
+				description: refreshedData.description,
+				fromCache: false,
+			};
+		} catch (error) {
+			log.warn("Failed to refresh legacy sheet cache; using legacy TSV", {
+				error: getErrorMessage(error),
+			});
+			return {
+				sheetInfo: cachedData.sheetInfo,
+				description: cachedData.description,
+				fromCache: true,
+			};
+		}
 	}
 
 	log.info("Fetching sheet data from Google Sheets");
@@ -149,7 +187,12 @@ export async function getSheetDataStep(
 
 	// Save to cache (best effort)
 	try {
-		await cache.save(config.spreadsheet, data.sheetInfo, data.description);
+		await cache.save(
+			config.spreadsheet,
+			data.sheetInfo,
+			data.description,
+			data.structuredSheet,
+		);
 		log.info("Sheet data cached");
 	} catch (error) {
 		log.warn("Failed to save cache (non-fatal)", {

@@ -8,6 +8,13 @@ const SOURCE: SpreadsheetConfig = {
 	descriptionSheetName: "description",
 };
 
+const STRUCTURE = {
+	status: "unavailable" as const,
+	schemaVersion: 1 as const,
+	catalogVersion: 1 as const,
+	reason: "schema_mismatch" as const,
+};
+
 const createMockKVNamespace = () =>
 	({
 		get: vi.fn(),
@@ -79,6 +86,20 @@ describe("SheetCacheRepository", () => {
 		await expect(repository.get(SOURCE)).resolves.toBeNull();
 	});
 
+	it("keeps a valid structured status alongside legacy fields", async () => {
+		(mockKV.get as Mock).mockResolvedValue({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: STRUCTURE,
+		});
+
+		await expect(repository.get(SOURCE)).resolves.toEqual({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: STRUCTURE,
+		});
+	});
+
 	it("saves cache with its own TTL", async () => {
 		await repository.save(SOURCE, "sheet", "description");
 
@@ -87,6 +108,33 @@ describe("SheetCacheRepository", () => {
 			JSON.stringify({ sheetInfo: "sheet", description: "description" }),
 			{ expirationTtl: 300 },
 		);
+	});
+
+	it("saves the structured snapshot without changing the key or TTL", async () => {
+		await repository.save(SOURCE, "sheet", "description", STRUCTURE);
+
+		expect(mockKV.put).toHaveBeenCalledWith(
+			expect.stringMatching(/^sheet_info:v2:[0-9a-f]{64}$/),
+			JSON.stringify({
+				sheetInfo: "sheet",
+				description: "description",
+				structuredSheet: STRUCTURE,
+			}),
+			{ expirationTtl: 300 },
+		);
+	});
+
+	it("treats malformed structured data as a legacy entry", async () => {
+		(mockKV.get as Mock).mockResolvedValue({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: { status: "ready", schemaVersion: 999 },
+		});
+
+		await expect(repository.get(SOURCE)).resolves.toEqual({
+			sheetInfo: "sheet",
+			description: "description",
+		});
 	});
 
 	it("throws a stable error when KV save fails", async () => {

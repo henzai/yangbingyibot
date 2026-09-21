@@ -113,6 +113,12 @@ describe("spreadSheet", () => {
 			expect(result).toEqual({
 				sheetInfo: "col1\tcol2\nval1\tval2",
 				description: "Bot description",
+				structuredSheet: {
+					status: "unavailable",
+					schemaVersion: 1,
+					catalogVersion: 1,
+					reason: "unsupported_schema",
+				},
 			});
 		});
 
@@ -240,6 +246,12 @@ describe("spreadSheet", () => {
 			await expect(promise).resolves.toEqual({
 				sheetInfo: "col1\tcol2\nval1\tval2",
 				description: "Bot description",
+				structuredSheet: {
+					status: "unavailable",
+					schemaVersion: 1,
+					catalogVersion: 1,
+					reason: "unsupported_schema",
+				},
 			});
 			expect(mockLoadInfo).toHaveBeenCalledTimes(2);
 		});

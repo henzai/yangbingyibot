@@ -117,6 +117,13 @@ const mockKVNamespace = {
 	put: vi.fn(),
 } as unknown as KVNamespace;
 
+const unavailableSheetStructure = {
+	status: "unavailable" as const,
+	schemaVersion: 1 as const,
+	catalogVersion: 1 as const,
+	reason: "unsupported_schema" as const,
+};
+
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: "test-token",
 	DISCORD_PUBLIC_KEY: "test-public-key",
@@ -155,6 +162,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -172,11 +180,53 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			});
 		});
 
+		it("refreshes a legacy cache entry to obtain structured data", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockResolvedValue({
+				sheetInfo: "fresh sheet",
+				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
+			});
+
+			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
+				sheetInfo: "fresh sheet",
+				description: "fresh desc",
+				fromCache: false,
+			});
+			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
+				expect.anything(),
+				"fresh sheet",
+				"fresh desc",
+				unavailableSheetStructure,
+			);
+		});
+
+		it("keeps legacy TSV when the structured refresh fails", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockRejectedValue(
+				new Error("Sheets unavailable"),
+			);
+
+			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+				fromCache: true,
+			});
+			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
+		});
+
 		it("fetches from Google Sheets when cache is empty", async () => {
 			mockSheetCacheRepository.get.mockResolvedValue(null);
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -202,6 +252,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
@@ -214,6 +265,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				},
 				"fresh sheet",
 				"fresh desc",
+				unavailableSheetStructure,
 			);
 		});
 
@@ -221,6 +273,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);

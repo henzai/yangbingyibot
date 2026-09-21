@@ -9,7 +9,7 @@ const PRESERVED_HEADER_ROWS = 3;
 // 列位置や見出し名に依存しないため、シートのレイアウト変更に強い。
 const MIN_NON_EMPTY_CELLS = 2;
 
-function parseCsv(csv: string): string[][] {
+export function parseCsv(csv: string): string[][] {
 	const rows: string[][] = [];
 	let row: string[] = [];
 	let cell = "";
@@ -58,7 +58,7 @@ function parseCsv(csv: string): string[][] {
 }
 
 // HTML改行を意味のある区切りへ変換し、TSVを壊す制御文字は空白に潰す
-function sanitizeCell(value: string | undefined): string {
+export function sanitizeCell(value: string | undefined): string {
 	return (value ?? "")
 		.replace(/\s*<br\s*\/?>\s*/gi, " / ")
 		.replace(/[\t\r\n]+/g, " ")

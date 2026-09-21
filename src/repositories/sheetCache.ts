@@ -1,4 +1,8 @@
 import type { SpreadsheetConfig } from "../config";
+import {
+	isSheetStructure,
+	type SheetStructure,
+} from "../sheets/structuredSheet";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -8,6 +12,8 @@ const SHEET_CACHE_TTL_SECONDS = 5 * 60;
 export type SheetCacheEntry = {
 	sheetInfo: string;
 	description: string;
+	/** Optional because entries written before the structured-sheet rollout lack it. */
+	structuredSheet?: SheetStructure;
 };
 
 async function sourceFingerprint(source: SpreadsheetConfig): Promise<string> {
@@ -45,19 +51,38 @@ export class SheetCacheRepository {
 				return null;
 			}
 
+			const record = cachedData as Record<string, unknown>;
 			if (
 				typeof cachedData !== "object" ||
-				typeof (cachedData as Record<string, unknown>).sheetInfo !== "string" ||
-				typeof (cachedData as Record<string, unknown>).description !== "string"
+				typeof record.sheetInfo !== "string" ||
+				typeof record.description !== "string"
 			) {
 				this.log.warn("Invalid cache data structure, ignoring cache");
 				return null;
 			}
 
-			const entry = cachedData as SheetCacheEntry;
+			if (
+				record.structuredSheet !== undefined &&
+				!isSheetStructure(record.structuredSheet)
+			) {
+				this.log.warn(
+					"Invalid structured sheet cache data, refreshing legacy sheet data",
+				);
+			}
+
+			const entry: SheetCacheEntry = {
+				sheetInfo: record.sheetInfo,
+				description: record.description,
+			};
+			if (isSheetStructure(record.structuredSheet)) {
+				entry.structuredSheet = record.structuredSheet;
+			}
 			return {
 				sheetInfo: entry.sheetInfo,
 				description: entry.description,
+				...(entry.structuredSheet === undefined
+					? {}
+					: { structuredSheet: entry.structuredSheet }),
 			};
 		} catch (error) {
 			this.log.error("Failed to get cache from KV", {
@@ -71,9 +96,13 @@ export class SheetCacheRepository {
 		source: SpreadsheetConfig,
 		sheetInfo: string,
 		description: string,
+		structuredSheet?: SheetStructure,
 	): Promise<void> {
 		try {
 			const entry: SheetCacheEntry = { sheetInfo, description };
+			if (structuredSheet !== undefined) {
+				entry.structuredSheet = structuredSheet;
+			}
 			await this.kv.put(await cacheKey(source), JSON.stringify(entry), {
 				expirationTtl: SHEET_CACHE_TTL_SECONDS,
 			});
