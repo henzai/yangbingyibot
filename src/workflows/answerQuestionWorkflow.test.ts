@@ -227,7 +227,43 @@ describe("AnswerQuestionWorkflow Steps", () => {
 					durationMs: expect.any(Number),
 				},
 			});
-			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
+			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
+				expect.anything(),
+				"legacy sheet",
+				"legacy desc",
+				{
+					status: "unavailable",
+					schemaVersion: 1,
+					catalogVersion: 1,
+					reason: "invalid_snapshot",
+				},
+			);
+		});
+
+		it("still returns legacy TSV when caching the refresh failure fails", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockRejectedValue(
+				new Error("Sheets unavailable"),
+			);
+			mockSheetCacheRepository.save.mockRejectedValueOnce(
+				new Error("KV unavailable"),
+			);
+
+			await expect(
+				getSheetDataStep(mockEnv, mockLogger),
+			).resolves.toMatchObject({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+				fromCache: true,
+				sheetsApiCall: { success: false },
+			});
+			expect(mockLogger.warn).toHaveBeenCalledWith(
+				"Failed to cache legacy sheet fallback (non-fatal)",
+				expect.objectContaining({ error: "KV unavailable" }),
+			);
 		});
 
 		it("fetches from Google Sheets when cache is empty", async () => {

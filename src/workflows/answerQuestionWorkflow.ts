@@ -35,6 +35,7 @@ import {
 } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
+import { createUnavailableSheetStructure } from "../sheets/structuredSheet";
 import {
 	ExternalServiceError,
 	getErrorMessage,
@@ -149,6 +150,7 @@ export async function getSheetDataStep(
 				log,
 				config.spreadsheet,
 			);
+			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 			try {
 				await cache.save(
 					config.spreadsheet,
@@ -168,20 +170,34 @@ export async function getSheetDataStep(
 				fromCache: false,
 				sheetsApiCall: {
 					success: true,
-					durationMs: Date.now() - sheetsApiStartTime,
+					durationMs: sheetsApiDurationMs,
 				},
 			};
 		} catch (error) {
+			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 			log.warn("Failed to refresh legacy sheet cache; using legacy TSV", {
 				error: getErrorMessage(error),
 			});
+			try {
+				await cache.save(
+					config.spreadsheet,
+					cachedData.sheetInfo,
+					cachedData.description,
+					createUnavailableSheetStructure("invalid_snapshot"),
+				);
+				log.info("Legacy sheet fallback cached after refresh failure");
+			} catch (cacheError) {
+				log.warn("Failed to cache legacy sheet fallback (non-fatal)", {
+					error: getErrorMessage(cacheError),
+				});
+			}
 			return {
 				sheetInfo: cachedData.sheetInfo,
 				description: cachedData.description,
 				fromCache: true,
 				sheetsApiCall: {
 					success: false,
-					durationMs: Date.now() - sheetsApiStartTime,
+					durationMs: sheetsApiDurationMs,
 				},
 			};
 		}
@@ -194,6 +210,7 @@ export async function getSheetDataStep(
 		log,
 		config.spreadsheet,
 	);
+	const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 
 	// Save to cache (best effort)
 	try {
@@ -216,7 +233,7 @@ export async function getSheetDataStep(
 		fromCache: false,
 		sheetsApiCall: {
 			success: true,
-			durationMs: Date.now() - sheetsApiStartTime,
+			durationMs: sheetsApiDurationMs,
 		},
 	};
 }

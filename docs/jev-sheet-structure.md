@@ -25,8 +25,11 @@ alongside it in the existing `sheet_info:v2:<sourceFingerprint>` KV entry.
 Entries written before this field existed remain readable as legacy entries.
 `getSheetDataStep` refreshes a legacy entry once so that a new snapshot is
 available. If refresh fails, the legacy TSV is returned and the structured
-route treats the snapshot as unavailable. Malformed structured data follows
-the same refresh path; it is never interpreted as a different column.
+route treats the snapshot as unavailable. The legacy data is written back with
+an `invalid_snapshot` sentinel so subsequent requests use the fallback without
+repeating the failed Sheets call during the 300-second TTL. Malformed
+structured data follows the same refresh path; it is never interpreted as a
+different column.
 
 Schema validation rejects missing/shifted anchors, renamed anchors, and
 schemas shorter than the catalog. Source column 6 is intentionally outside the

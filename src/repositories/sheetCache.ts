@@ -77,13 +77,7 @@ export class SheetCacheRepository {
 			if (isSheetStructure(record.structuredSheet)) {
 				entry.structuredSheet = record.structuredSheet;
 			}
-			return {
-				sheetInfo: entry.sheetInfo,
-				description: entry.description,
-				...(entry.structuredSheet === undefined
-					? {}
-					: { structuredSheet: entry.structuredSheet }),
-			};
+			return entry;
 		} catch (error) {
 			this.log.error("Failed to get cache from KV", {
 				error: getErrorMessage(error),

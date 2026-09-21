@@ -177,7 +177,7 @@ const SHEET_SCHEMA_VALUE_RULES: readonly SchemaValueRule[] = [
 	},
 ];
 
-function unavailable(
+export function createUnavailableSheetStructure(
 	reason: SheetStructureUnavailableReason,
 ): UnavailableSheetStructure {
 	return {
@@ -192,7 +192,11 @@ function cell(row: string[] | undefined, column: number): string {
 	return row?.[column] ?? "";
 }
 
-function matchesSchema(rows: string[][], columnCount: number): boolean {
+function matchesSchema(
+	rows: string[][],
+	personRows: string[][],
+	columnCount: number,
+): boolean {
 	if (columnCount < 48 || rows.length < PRESERVED_HEADER_ROWS) {
 		return false;
 	}
@@ -202,9 +206,6 @@ function matchesSchema(rows: string[][], columnCount: number): boolean {
 	);
 	if (!anchorsMatch) return false;
 
-	const personRows = rows
-		.filter(shouldKeepSheetRow)
-		.slice(PRESERVED_HEADER_ROWS);
 	const valueShapesMatch = SHEET_SCHEMA_VALUE_RULES.every((rule) =>
 		personRows.every((row) => rule.matches(cell(row, rule.column))),
 	);
@@ -225,28 +226,29 @@ function isPositiveRank(value: string): boolean {
 
 export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 	if (rows.length === 0) {
-		return unavailable("empty");
+		return createUnavailableSheetStructure("empty");
 	}
 
 	const columnCount = Math.max(...rows.map((row) => row.length));
-	if (!matchesSchema(rows, columnCount)) {
-		return unavailable(
+	const keptRows = rows.filter(shouldKeepSheetRow);
+	const sourcePersonRows = keptRows.slice(PRESERVED_HEADER_ROWS);
+	if (!matchesSchema(rows, sourcePersonRows, columnCount)) {
+		return createUnavailableSheetStructure(
 			rows.length < PRESERVED_HEADER_ROWS || columnCount < 48
 				? "unsupported_schema"
 				: "schema_mismatch",
 		);
 	}
 
-	const keptRows = rows.filter(shouldKeepSheetRow);
 	const projectRow = (row: string[]): string[] =>
 		SHEET_SOURCE_INDICES.map((sourceIndex) => cell(row, sourceIndex));
 	const headerRows = keptRows.slice(0, PRESERVED_HEADER_ROWS).map(projectRow);
-	const personRows = keptRows.slice(PRESERVED_HEADER_ROWS).map(projectRow);
+	const personRows = sourcePersonRows.map(projectRow);
 	const electionYears = Array.from({ length: 13 }, (_, offset) => {
 		const sourceIndex = 34 + offset;
-		return keptRows
-			.slice(PRESERVED_HEADER_ROWS)
-			.some((row) => isPositiveRank(cell(row, sourceIndex)))
+		return sourcePersonRows.some((row) =>
+			isPositiveRank(cell(row, sourceIndex)),
+		)
 			? 2014 + offset
 			: null;
 	}).filter((year): year is number => year !== null);
