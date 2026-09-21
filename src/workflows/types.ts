@@ -9,6 +9,11 @@ export interface SheetDataOutput {
 	sheetInfo: string;
 	description: string;
 	fromCache: boolean;
+	/** Missing on checkpoints created before Sheets refresh telemetry was added. */
+	sheetsApiCall?: {
+		success: boolean;
+		durationMs: number;
+	};
 }
 
 export interface HistoryOutput {

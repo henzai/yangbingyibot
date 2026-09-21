@@ -4,10 +4,10 @@ import GoogleAuth, {
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { DEFAULT_RUNTIME_CONFIG, type SpreadsheetConfig } from "../config";
 import {
-	buildSheetStructure,
+	buildSheetStructureFromRows,
 	type SheetStructure,
 } from "../sheets/structuredSheet";
-import { compactSheetCsv } from "../utils/compactSheet";
+import { compactSheetRows, parseCsv } from "../utils/compactSheet";
 import {
 	ExternalServiceError,
 	getExternalErrorLogContext,
@@ -166,8 +166,9 @@ async function fetchSheetInfo(
 		}
 
 		// CSVはGeminiへの入力トークンの大半を占めるため、渡す前に圧縮する
-		const compacted = compactSheetCsv(csvContent);
-		const structuredSheet = buildSheetStructure(csvContent);
+		const rows = parseCsv(csvContent);
+		const compacted = compactSheetRows(rows);
+		const structuredSheet = buildSheetStructureFromRows(rows);
 		if (structuredSheet.status === "unavailable") {
 			log.warn("Sheet structure is unavailable; legacy TSV remains usable", {
 				reason: structuredSheet.reason,

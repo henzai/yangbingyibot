@@ -1,4 +1,8 @@
-import { parseCsv, sanitizeCell } from "../utils/compactSheet";
+import {
+	PRESERVED_HEADER_ROWS,
+	parseCsv,
+	shouldKeepSheetRow,
+} from "../utils/compactSheet";
 import {
 	COLUMN_CATALOG_VERSION,
 	SHEET_COLUMN_KEYS,
@@ -7,7 +11,6 @@ import {
 } from "./columnCatalog";
 
 export const SHEET_STRUCTURE_VERSION = 1 as const;
-export const PRESERVED_HEADER_ROWS = 3 as const;
 
 export type SheetStructureUnavailableReason =
 	| "empty"
@@ -41,9 +44,14 @@ export type SchemaAnchor = {
 	value: string;
 };
 
+type SchemaValueRule = {
+	column: number;
+	matches: (value: string) => boolean;
+};
+
 // These anchors are the stable metadata/header cells in the current sheet.
 // Some source columns intentionally have blank headers; their source indexes
-// remain part of the catalog and are protected by the surrounding anchors.
+// remain part of the catalog and are protected by the value rules below.
 export const SHEET_SCHEMA_ANCHORS: readonly SchemaAnchor[] = [
 	{ row: 1, column: 3, value: "メンバーの所属チームを示しています。" },
 	{ row: 1, column: 4, value: "メンバーの所属チームその2です。" },
@@ -117,10 +125,56 @@ export const SHEET_SCHEMA_ANCHORS: readonly SchemaAnchor[] = [
 	{ row: 2, column: 31, value: "応援色1詳細" },
 	{ row: 2, column: 32, value: "応援色2" },
 	{ row: 2, column: 33, value: "応援色2詳細" },
-	{ row: 2, column: 44, value: "2024" },
-	{ row: 2, column: 45, value: "2025" },
-	{ row: 2, column: 46, value: "2026" },
+	...Array.from({ length: 13 }, (_, offset) => ({
+		row: 2 as const,
+		column: 34 + offset,
+		value: String(2014 + offset),
+	})),
 	{ row: 2, column: 47, value: "経歴" },
+];
+
+const PLACEHOLDER_VALUE = /^(?:-|—|–|不明|不詳|unknown|#?n\/a)$/i;
+
+function isPlaceholder(value: string): boolean {
+	const trimmed = value.trim();
+	return trimmed === "" || PLACEHOLDER_VALUE.test(trimmed);
+}
+
+function isNumberInRange(
+	value: string,
+	minimum: number,
+	maximum: number,
+): boolean {
+	if (isPlaceholder(value)) return true;
+	const number = Number(
+		value.replaceAll(",", "").replace(/\s*(?:cm|歳)$/i, ""),
+	);
+	return Number.isFinite(number) && number >= minimum && number <= maximum;
+}
+
+function parseYear(value: string): number | null {
+	const year = value.match(/(?:19|20)\d{2}/)?.[0];
+	return year === undefined ? null : Number(year);
+}
+
+// Some live-sheet columns intentionally have blank metadata/header cells. They
+// cannot be identified by a text anchor, so fail closed when their person-cell
+// shapes no longer match the catalog meaning. This catches local swaps between
+// blank-header columns instead of silently projecting them under the wrong key.
+const SHEET_SCHEMA_VALUE_RULES: readonly SchemaValueRule[] = [
+	{
+		column: 8,
+		matches: (value) =>
+			isPlaceholder(value) ||
+			/^[\p{Script=Latin}\p{Mark}\s.'’·-]+$/u.test(value.trim()),
+	},
+	{ column: 9, matches: (value) => isNumberInRange(value, 0, 120) },
+	{ column: 16, matches: (value) => isNumberInRange(value, 120, 220) },
+	{ column: 28, matches: (value) => isNumberInRange(value, 0, 100) },
+	{
+		column: 29,
+		matches: (value) => isPlaceholder(value) || /^\d[\d,]*$/.test(value.trim()),
+	},
 ];
 
 function unavailable(
@@ -143,21 +197,33 @@ function matchesSchema(rows: string[][], columnCount: number): boolean {
 		return false;
 	}
 
-	return SHEET_SCHEMA_ANCHORS.every(
+	const anchorsMatch = SHEET_SCHEMA_ANCHORS.every(
 		(anchor) => cell(rows[anchor.row], anchor.column).trim() === anchor.value,
 	);
-}
+	if (!anchorsMatch) return false;
 
-function keepDataRow(row: string[]): boolean {
-	return row.filter((value) => sanitizeCell(value)).length >= 2;
+	const personRows = rows
+		.filter(shouldKeepSheetRow)
+		.slice(PRESERVED_HEADER_ROWS);
+	const valueShapesMatch = SHEET_SCHEMA_VALUE_RULES.every((rule) =>
+		personRows.every((row) => rule.matches(cell(row, rule.column))),
+	);
+	if (!valueShapesMatch) return false;
+
+	// Birthday and debut date have the same general shape, so validate their
+	// relationship: when both years are present, birth cannot follow debut.
+	return personRows.every((row) => {
+		const birthYear = parseYear(cell(row, 13));
+		const debutYear = parseYear(cell(row, 14));
+		return birthYear === null || debutYear === null || birthYear <= debutYear;
+	});
 }
 
 function isPositiveRank(value: string): boolean {
 	return /^[1-9]\d*$/.test(value.trim());
 }
 
-export function buildSheetStructure(csv: string): SheetStructure {
-	const rows = parseCsv(csv);
+export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 	if (rows.length === 0) {
 		return unavailable("empty");
 	}
@@ -171,16 +237,14 @@ export function buildSheetStructure(csv: string): SheetStructure {
 		);
 	}
 
-	const keptRows = rows.filter(
-		(row, index) => index < PRESERVED_HEADER_ROWS || keepDataRow(row),
-	);
+	const keptRows = rows.filter(shouldKeepSheetRow);
 	const projectRow = (row: string[]): string[] =>
 		SHEET_SOURCE_INDICES.map((sourceIndex) => cell(row, sourceIndex));
 	const headerRows = keptRows.slice(0, PRESERVED_HEADER_ROWS).map(projectRow);
 	const personRows = keptRows.slice(PRESERVED_HEADER_ROWS).map(projectRow);
 	const electionYears = Array.from({ length: 13 }, (_, offset) => {
 		const sourceIndex = 34 + offset;
-		return rows
+		return keptRows
 			.slice(PRESERVED_HEADER_ROWS)
 			.some((row) => isPositiveRank(cell(row, sourceIndex)))
 			? 2014 + offset
@@ -197,6 +261,10 @@ export function buildSheetStructure(csv: string): SheetStructure {
 		availableYears: electionYears,
 		latestDataYear: electionYears.at(-1) ?? null,
 	};
+}
+
+export function buildSheetStructure(csv: string): SheetStructure {
+	return buildSheetStructureFromRows(parseCsv(csv));
 }
 
 function isStringArray(value: unknown): value is string[] {

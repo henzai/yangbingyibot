@@ -101,6 +101,7 @@ import {
 	getHistoryStep,
 	getSheetDataStep,
 	normalizeStreamingOutput,
+	recordSheetDataAccessMetrics,
 	reportErrorToGitHub,
 	saveHistoryStep,
 	sendDiscordResponseStep,
@@ -195,6 +196,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
 				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: expect.any(Number),
+				},
 			});
 			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
 				expect.anything(),
@@ -217,6 +222,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sheetInfo: "legacy sheet",
 				description: "legacy desc",
 				fromCache: true,
+				sheetsApiCall: {
+					success: false,
+					durationMs: expect.any(Number),
+				},
 			});
 			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
 		});
@@ -235,6 +244,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
 				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: expect.any(Number),
+				},
 			});
 			expect(getSheetData).toHaveBeenCalledWith(
 				mockEnv.GOOGLE_SERVICE_ACCOUNT,
@@ -279,6 +292,40 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("recordSheetDataAccessMetrics", () => {
+		it("records a failed Sheets refresh separately from a legacy cache hit", () => {
+			const metrics = {
+				recordKVCacheAccess: vi.fn(),
+				recordSheetsApiCall: vi.fn(),
+			} as unknown as import("../clients/metrics").IMetricsClient;
+
+			recordSheetDataAccessMetrics(
+				metrics,
+				"request-id",
+				{
+					sheetInfo: "legacy sheet",
+					description: "legacy desc",
+					fromCache: true,
+					sheetsApiCall: { success: false, durationMs: 321 },
+				},
+				500,
+			);
+
+			expect(metrics.recordKVCacheAccess).toHaveBeenCalledWith({
+				requestId: "request-id",
+				success: true,
+				durationMs: 500,
+				cacheHit: true,
+				operation: "get",
+			});
+			expect(metrics.recordSheetsApiCall).toHaveBeenCalledWith({
+				requestId: "request-id",
+				success: false,
+				durationMs: 321,
+			});
 		});
 	});
 

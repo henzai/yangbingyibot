@@ -12,6 +12,9 @@ alongside it in the existing `sheet_info:v2:<sourceFingerprint>` KV entry.
 - The snapshot keeps the first three metadata/header rows and person rows in
   catalog order. Values are kept before TSV sanitization so identity indexes
   can preserve nickname separators and embedded line breaks.
+- The legacy TSV and structured snapshot share one CSV parse and the same row
+  retention rule (the first three rows plus data rows with at least two
+  non-empty cells).
 - `availableYears` contains only election columns with at least one positive
   integer rank in a retained person row. `latestDataYear` is the last such
   year, or `null`.
@@ -30,6 +33,16 @@ schemas shorter than the catalog. Source column 6 is intentionally outside the
 44-column contract even though the live sheet may contain values there. A
 trailing unrelated source column is safe because it cannot shift a catalog
 index.
+
+All thirteen election headings are anchored to their year. Columns whose live
+metadata/header cells are blank are additionally checked against conservative
+person-value shapes (for example pinyin versus age), and birthday must not be
+later than debut when both years are present. A mismatch makes the structured
+snapshot unavailable while preserving the legacy TSV fallback.
+
+Legacy-cache refresh telemetry records the Sheets attempt independently from
+the data source. A failed refresh therefore remains a KV cache hit for the
+returned TSV while also emitting a failed Sheets API metric.
 
 When the serialized meaning changes, increment `schemaVersion` or
 `catalogVersion` and add a compatibility test. Do not change the cache prefix

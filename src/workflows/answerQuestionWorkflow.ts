@@ -142,6 +142,7 @@ export async function getSheetDataStep(
 
 	if (cachedData) {
 		log.info("Legacy sheet cache found; refreshing structured snapshot");
+		const sheetsApiStartTime = Date.now();
 		try {
 			const refreshedData = await getSheetData(
 				config.googleServiceAccount,
@@ -165,6 +166,10 @@ export async function getSheetDataStep(
 				sheetInfo: refreshedData.sheetInfo,
 				description: refreshedData.description,
 				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: Date.now() - sheetsApiStartTime,
+				},
 			};
 		} catch (error) {
 			log.warn("Failed to refresh legacy sheet cache; using legacy TSV", {
@@ -174,11 +179,16 @@ export async function getSheetDataStep(
 				sheetInfo: cachedData.sheetInfo,
 				description: cachedData.description,
 				fromCache: true,
+				sheetsApiCall: {
+					success: false,
+					durationMs: Date.now() - sheetsApiStartTime,
+				},
 			};
 		}
 	}
 
 	log.info("Fetching sheet data from Google Sheets");
+	const sheetsApiStartTime = Date.now();
 	const data = await getSheetData(
 		config.googleServiceAccount,
 		log,
@@ -204,7 +214,36 @@ export async function getSheetDataStep(
 		sheetInfo: data.sheetInfo,
 		description: data.description,
 		fromCache: false,
+		sheetsApiCall: {
+			success: true,
+			durationMs: Date.now() - sheetsApiStartTime,
+		},
 	};
+}
+
+export function recordSheetDataAccessMetrics(
+	metrics: IMetricsClient,
+	requestId: string,
+	sheetData: SheetDataOutput,
+	stepDurationMs: number,
+): void {
+	metrics.recordKVCacheAccess({
+		requestId,
+		success: true,
+		durationMs: stepDurationMs,
+		cacheHit: sheetData.fromCache,
+		operation: "get",
+	});
+
+	// New checkpoints report an attempted refresh separately from the data
+	// source. Fall back to the old fromCache behavior for older checkpoints.
+	if (sheetData.sheetsApiCall || !sheetData.fromCache) {
+		metrics.recordSheetsApiCall({
+			requestId,
+			success: sheetData.sheetsApiCall?.success ?? true,
+			durationMs: sheetData.sheetsApiCall?.durationMs ?? stepDurationMs,
+		});
+	}
 }
 
 // Step 2: Get conversation history from KV
@@ -606,23 +645,12 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 
 			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
 
-			// Record cache access metric
-			metrics.recordKVCacheAccess({
+			recordSheetDataAccessMetrics(
+				metrics,
 				requestId,
-				success: true,
-				durationMs: sheetDataDurationMs,
-				cacheHit: sheetData.fromCache,
-				operation: "get",
-			});
-
-			// Record sheets API metric if cache was missed
-			if (!sheetData.fromCache) {
-				metrics.recordSheetsApiCall({
-					requestId,
-					success: true,
-					durationMs: sheetDataDurationMs,
-				});
-			}
+				sheetData,
+				sheetDataDurationMs,
+			);
 
 			// Step 2: Get conversation history
 			const historyOutput = await step.do("getHistory", async () => {

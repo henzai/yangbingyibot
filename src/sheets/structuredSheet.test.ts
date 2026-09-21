@@ -71,6 +71,24 @@ describe("structured sheet snapshot", () => {
 		expect(result.latestDataYear).toBeNull();
 	});
 
+	it("ignores ranks that belong to rows removed by the shared row filter", () => {
+		const result = buildSheetStructure(
+			createCsv({
+				includeRanks: false,
+				mutate: (rows) => {
+					rows[4][7] = "";
+					rows[4][45] = "3";
+				},
+			}),
+		);
+
+		expect(result.status).toBe("ready");
+		if (result.status !== "ready") return;
+		expect(result.personRows).toHaveLength(1);
+		expect(result.availableYears).toEqual([]);
+		expect(result.latestDataYear).toBeNull();
+	});
+
 	it("rejects a moved or renamed anchored column", () => {
 		const result = buildSheetStructure(
 			createCsv({
@@ -86,6 +104,41 @@ describe("structured sheet snapshot", () => {
 			catalogVersion: 1,
 			reason: "schema_mismatch",
 		});
+	});
+
+	it("rejects a swap between blank-header pinyin and age columns", () => {
+		const result = buildSheetStructure(
+			createCsv({
+				mutate: (rows) => {
+					for (const row of rows.slice(3)) {
+						[row[8], row[9]] = [row[9], row[8]];
+					}
+				},
+			}),
+		);
+
+		expect(result).toEqual({
+			status: "unavailable",
+			schemaVersion: 1,
+			catalogVersion: 1,
+			reason: "schema_mismatch",
+		});
+	});
+
+	it("rejects a swap between blank-header birthday and debut columns", () => {
+		const result = buildSheetStructure(
+			createCsv({
+				mutate: (rows) => {
+					rows[3][13] = "2018-04-18";
+					rows[3][14] = "2000-01-02";
+				},
+			}),
+		);
+
+		expect(result.status).toBe("unavailable");
+		if (result.status === "unavailable") {
+			expect(result.reason).toBe("schema_mismatch");
+		}
 	});
 
 	it("rejects an unsupported short schema", () => {

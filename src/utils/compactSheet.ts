@@ -3,11 +3,11 @@
 // 内訳: 全行が空の列を除去、情報量のない行を除去、CSV -> TSV。
 
 // 先頭から保持する行数（メタ行・列説明行・ヘッダ行）
-const PRESERVED_HEADER_ROWS = 3;
+export const PRESERVED_HEADER_ROWS = 3;
 
 // これ未満の非空セルしか持たない行は情報量がないとみなして除去する。
 // 列位置や見出し名に依存しないため、シートのレイアウト変更に強い。
-const MIN_NON_EMPTY_CELLS = 2;
+export const MIN_NON_EMPTY_CELLS = 2;
 
 export function parseCsv(csv: string): string[][] {
 	const rows: string[][] = [];
@@ -65,8 +65,15 @@ export function sanitizeCell(value: string | undefined): string {
 		.trim();
 }
 
-export function compactSheetCsv(csv: string): string {
-	const rows = parseCsv(csv).map((row) => row.map(sanitizeCell));
+export function shouldKeepSheetRow(row: string[], index: number): boolean {
+	if (index < PRESERVED_HEADER_ROWS) return true;
+	return (
+		row.filter((value) => sanitizeCell(value)).length >= MIN_NON_EMPTY_CELLS
+	);
+}
+
+export function compactSheetRows(sourceRows: string[][]): string {
+	const rows = sourceRows.map((row) => row.map(sanitizeCell));
 	if (rows.length === 0) return "";
 
 	const columnCount = Math.max(...rows.map((row) => row.length));
@@ -79,13 +86,13 @@ export function compactSheetCsv(csv: string): string {
 		}
 	}
 
-	const keptRows = rows.filter((row, index) => {
-		if (index < PRESERVED_HEADER_ROWS) return true;
-		const nonEmpty = row.filter(Boolean).length;
-		return nonEmpty >= MIN_NON_EMPTY_CELLS;
-	});
+	const keptRows = rows.filter(shouldKeepSheetRow);
 
 	return keptRows
 		.map((row) => liveColumns.map((column) => row[column] ?? "").join("\t"))
 		.join("\n");
+}
+
+export function compactSheetCsv(csv: string): string {
+	return compactSheetRows(parseCsv(csv));
 }
