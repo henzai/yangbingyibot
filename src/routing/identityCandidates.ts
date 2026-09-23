@@ -105,6 +105,10 @@ const LATIN_OR_DIGIT = /[a-z0-9]/u;
 const HAN_OR_KATAKANA = /[\p{Script=Han}\p{Script=Katakana}]/u;
 const PUNCTUATION_OR_SPACE = /[\s\p{P}\p{S}]/u;
 const WHOLE_QUESTION_PREFIX = /^[\s\p{P}\p{S}]*$/u;
+// Single letters such as K, C or X are also team names; "Kのメンバー" or
+// "Team C" refers to the team, not to a member nicknamed K or C.
+const GROUP_CONTEXT_AFTER = /^(?:の?メンバー|チーム|組|班|队|隊|team)/u;
+const GROUP_CONTEXT_BEFORE = /(?:team|チーム|ちーむ) ?$/u;
 const WHOLE_QUESTION_SUFFIX = /^(?:って誰|は誰|って|は)?[\s\p{P}\p{S}]*$/u;
 
 const METHOD_RANK: Record<IdentityMatchMethod, number> = {
@@ -147,7 +151,7 @@ function isWholeQuestion(
 /**
  * Whether the span reads as a name in a normalized question: it is quoted,
  * it is the whole question, or it stands alone before a particle, punctuation
- * or the end of the question.
+ * or the end of the question and is not used as a team name.
  */
 export function hasNameContext(
 	question: string,
@@ -156,6 +160,12 @@ export function hasNameContext(
 ): boolean {
 	if (isQuoted(question, start, end) || isWholeQuestion(question, start, end)) {
 		return true;
+	}
+	if (
+		GROUP_CONTEXT_AFTER.test(question.slice(end)) ||
+		GROUP_CONTEXT_BEFORE.test(question.slice(0, start))
+	) {
+		return false;
 	}
 	const before = question[start - 1];
 	if (before !== undefined && HAN_OR_KATAKANA.test(before)) return false;
@@ -239,13 +249,21 @@ function findExactMatches(
 ): IdentityCandidate[] {
 	const englishDominant = isEnglishDominant(question);
 	const matches: IdentityCandidate[] = [];
+	const accept = (term: IdentityTerm, start: number, end: number) => {
+		if (isAcceptedExactMatch(question, term, start, end, englishDominant)) {
+			matches.push(toCandidate(term, question, start, end, "exact"));
+		}
+	};
 	for (const term of index.terms) {
+		if (term.pattern) {
+			for (const match of question.matchAll(term.pattern)) {
+				accept(term, match.index, match.index + match[0].length);
+			}
+			continue;
+		}
 		let start = question.indexOf(term.text);
 		while (start !== -1) {
-			const end = start + term.text.length;
-			if (isAcceptedExactMatch(question, term, start, end, englishDominant)) {
-				matches.push(toCandidate(term, question, start, end, "exact"));
-			}
+			accept(term, start, start + term.text.length);
 			start = question.indexOf(term.text, start + 1);
 		}
 	}
@@ -255,7 +273,9 @@ function findExactMatches(
 /**
  * Longest spans win over shorter overlapping spans (earlier start on a tie).
  * Matches on the identical span are all kept so that people sharing a name or
- * nickname are not dropped, then one entry per person/spelling/span remains.
+ * nickname are not dropped. Finally one entry per person and spelling remains:
+ * the same source on the same span, or a repeated occurrence later in the
+ * question, adds nothing for the state.
  */
 function resolveOverlaps(matches: IdentityCandidate[]): IdentityCandidate[] {
 	const byLength = [...matches].sort(
@@ -266,7 +286,6 @@ function resolveOverlaps(matches: IdentityCandidate[]): IdentityCandidate[] {
 			a.personIndex - b.personIndex,
 	);
 	const accepted: IdentityCandidate[] = [];
-	const seen = new Set<string>();
 	for (const match of byLength) {
 		const { start, end } = match.span;
 		const conflicts = accepted.some(
@@ -275,13 +294,20 @@ function resolveOverlaps(matches: IdentityCandidate[]): IdentityCandidate[] {
 				start < other.span.end &&
 				(other.span.start !== start || other.span.end !== end),
 		);
-		if (conflicts) continue;
-		const key = `${match.personIndex}\u0000${match.matchedText}\u0000${start}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		accepted.push(match);
+		if (!conflicts) accepted.push(match);
 	}
-	return accepted;
+	const byPosition = accepted.sort(
+		(a, b) =>
+			a.span.start - b.span.start ||
+			IDENTITY_SOURCE_RANK[a.source] - IDENTITY_SOURCE_RANK[b.source],
+	);
+	const seen = new Set<string>();
+	return byPosition.filter((match) => {
+		const key = `${match.personIndex}\u0000${match.matchedText.replaceAll(" ", "")}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 }
 
 // Name-search requests are the only questions that allow partial/approximate

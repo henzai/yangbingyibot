@@ -160,6 +160,37 @@ describe("findIdentityCandidates: exact matches", () => {
 		]);
 	});
 
+	it("matches pinyin regardless of syllable spacing and tone marks", () => {
+		expect(
+			find("Who is the same age as Xing Ye Yi?").candidates.map((c) => [
+				c.matchedText,
+				c.source,
+			]),
+		).toEqual([["xing ye yi", "pinyin"]]);
+		expect(find("Xīng Yèyīの誕生日").candidates.map((c) => c.fullName)).toEqual(
+			["星野一"],
+		);
+		expect(find("xingyeyizの話").candidates).toEqual([]);
+	});
+
+	it("does not read a single letter used as a team name as a member", () => {
+		expect(find("Cのメンバーリスト").candidates).toEqual([]);
+		expect(find("Team Cの人").candidates).toEqual([]);
+		expect(find("チームCの公演").candidates).toEqual([]);
+		expect(find("「C」って誰").candidates.map((c) => c.fullName)).toEqual([
+			"空山六",
+		]);
+	});
+
+	it("reports a repeated spelling of the same person once", () => {
+		expect(
+			find("絶死って絶死のこと？").candidates.map((c) => [
+				c.matchedText,
+				c.span.start,
+			]),
+		).toEqual([["絶死", 0]]);
+	});
+
 	it("rejects Latin matches inside a longer word", () => {
 		expect(find("youtubeの動画").candidates).toEqual([]);
 		expect(find("xyyzの話").candidates).toEqual([]);

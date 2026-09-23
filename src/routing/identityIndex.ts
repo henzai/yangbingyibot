@@ -25,6 +25,11 @@ export type IdentityTerm = {
 	isLatin: boolean;
 	/** A single character, which is too short to identify a person alone. */
 	isShortAmbiguous: boolean;
+	/**
+	 * Pinyin is stored without spaces and matched with optional spaces between
+	 * letters, because questions split syllables freely ("lin en tong").
+	 */
+	pattern?: RegExp;
 };
 
 export type IdentityIndex = {
@@ -49,12 +54,24 @@ const INITIALS_COLUMN = SHEET_COLUMN_KEYS.indexOf("initials");
 const NICKNAMES_COLUMN = SHEET_COLUMN_KEYS.indexOf("community_nicknames");
 
 /**
- * NFKC, lower-case Latin letters, collapse whitespace (including full-width
- * spaces) and trim. The original question must be kept separately for the
- * answer prompt; this form is only used for matching.
+ * NFKC, strip tone/diacritic marks from Latin letters ("Zhāng" -> "zhang"),
+ * lower-case, collapse whitespace (including full-width spaces) and trim.
+ * Marks on kana are kept. The original question must be kept separately for
+ * the answer prompt; this form is only used for matching.
  */
 export function normalizeIdentityText(value: string): string {
-	return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
+	return value
+		.normalize("NFKC")
+		.normalize("NFD")
+		.replace(/(?<=[A-Za-z])\p{M}+/gu, "")
+		.normalize("NFKC")
+		.toLowerCase()
+		.replace(/\s+/gu, " ")
+		.trim();
+}
+
+function flexibleSpacePattern(text: string): RegExp {
+	return new RegExp([...text].join(" ?"), "gu");
 }
 
 function spellings(source: IdentitySource, raw: string): string[] {
@@ -65,8 +82,7 @@ function spellings(source: IdentitySource, raw: string): string[] {
 		.map(normalizeIdentityText)
 		.filter((part) => part !== "");
 	if (source !== "pinyin") return normalized;
-	// Pinyin is written both as "zhang san" and "zhangsan" in questions.
-	return normalized.flatMap((part) => [part, part.replaceAll(" ", "")]);
+	return normalized.map((part) => part.replaceAll(" ", ""));
 }
 
 export function buildIdentityIndex(
@@ -89,13 +105,17 @@ export function buildIdentityIndex(
 				const key = `${source}\u0000${text}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
+				const isLatin = LATIN_TERM.test(text);
 				terms.push({
 					text,
 					source,
 					personIndex,
 					fullName,
-					isLatin: LATIN_TERM.test(text),
+					isLatin,
 					isShortAmbiguous: [...text].length === 1,
+					...(source === "pinyin" && isLatin
+						? { pattern: flexibleSpacePattern(text) }
+						: {}),
 				});
 			}
 		}

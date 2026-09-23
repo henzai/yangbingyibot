@@ -19,6 +19,11 @@ describe("normalizeIdentityText", () => {
 		expect(normalizeIdentityText("　ＺＨＡＮＧ　 Ｓａｎ\t")).toBe("zhang san");
 		expect(normalizeIdentityText("ﾒﾝﾔﾝ")).toBe("メンヤン");
 	});
+
+	it("strips Latin tone marks but keeps kana voicing marks", () => {
+		expect(normalizeIdentityText("Zhāng Yǔ Xīn")).toBe("zhang yu xin");
+		expect(normalizeIdentityText("がぱ")).toBe("がぱ");
+	});
 });
 
 describe("buildIdentityIndex", () => {
@@ -40,7 +45,6 @@ describe("buildIdentityIndex", () => {
 
 		expect(termsOf(index)).toEqual([
 			{ text: "張三", source: "full_name", personIndex: 0 },
-			{ text: "zhang san", source: "pinyin", personIndex: 0 },
 			{ text: "zhangsan", source: "pinyin", personIndex: 0 },
 			{ text: "zs", source: "initials", personIndex: 0 },
 			{ text: "めんやんに", source: "community_nicknames", personIndex: 0 },
@@ -120,7 +124,6 @@ describe("buildIdentityIndex", () => {
 
 		expect(flags).toEqual({
 			赵六: [false, false],
-			"zhao liu": [true, false],
 			zhaoliu: [true, false],
 			赤: [false, true],
 			c: [true, true],

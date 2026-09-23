@@ -16,10 +16,13 @@ Code: `src/routing/identityIndex.ts` (dictionary) and
   affiliations, generations, ages, and other attributes are never indexed.
 - Community nicknames are split on `<br>`, line breaks, `/`, `／`, `,`, `，`,
   `、`, `;`, `；`, `|`, and `｜`. Blank and placeholder values are dropped.
-- Spellings are normalized with Unicode NFKC, lower-cased, and whitespace
-  (including full-width spaces) is collapsed and trimmed. Pinyin is indexed
-  both with and without spaces. The original question is kept separately for
-  the answer prompt.
+- Spellings and the question are normalized with Unicode NFKC, tone and
+  diacritic marks on Latin letters are removed (`Zhāng` becomes `zhang`; kana
+  voicing marks are kept), text is lower-cased, and whitespace (including
+  full-width spaces) is collapsed and trimmed. The original question is kept
+  separately for the answer prompt.
+- Pinyin is stored without spaces and matched with an optional space between
+  letters, so `Lin En Tong`, `lin entong`, and `linentong` all match.
 - Each person is identified by `personIndex` (position in `personRows`), so
   people who share a full name are never merged.
 - The index is built from one snapshot per request and holds no global
@@ -37,7 +40,9 @@ Code: `src/routing/identityIndex.ts` (dictionary) and
    preceded by kanji/katakana and followed by punctuation, the end of the
    question, or a particle/honorific (`って`, `さん`, `ちゃん`, `くん`, `の`, `と`,
    `は`, `が`, `も`, `に`, `を`, `や`). `赤の名前` matches; `赤色` and `C言語` do
-   not.
+   not. Because single letters are also team names, a form followed by
+   `メンバー`/`のメンバー`/`チーム`/`組`/`班`/`队`/`隊`/`team` or preceded by
+   `team`/`チーム` is not a name context (`Kのメンバーリスト`, `Team Cの人`).
 4. A spelling in `COMMON_ENGLISH_WORDS` is ignored in an English-dominant
    question (at least half of the letters are Latin) unless it is directly
    followed by a Japanese particle, quoted, or the whole question. `youと赤`
@@ -45,8 +50,9 @@ Code: `src/routing/identityIndex.ts` (dictionary) and
 5. Overlapping matches keep the longest span (earliest start on a tie).
    Matches on the identical span are all kept, so shared names and shared
    nicknames still produce every person.
-6. The same person, spelling, and span is reported once, preferring
-   `full_name`, then `community_nicknames`, `initials`, and `pinyin`.
+6. Each person and spelling is reported once: the same span found through
+   several columns keeps `full_name`, then `community_nicknames`, `initials`,
+   and `pinyin`, and a repeated occurrence keeps the earliest one.
 
 ## Name-search matching
 
@@ -72,6 +78,16 @@ ambiguous, source, longer match, earlier position, full name, and
 `personIndex`, then truncated to 8 (`IDENTITY_CANDIDATE_LIMIT`).
 `overflowCount` is diagnostic. The limit only bounds the Jev state; it never
 narrows the rows given to the answer LLM.
+
+## Local check against the study set
+
+Run locally against the 180 study questions and the study sheet snapshot (not
+committed): 90 questions had candidates, as in the study, with at most 3
+candidates and no overflow. The remaining differences from the study script
+are intended: English `you` is excluded, name-search matching is skipped when
+an exact candidate exists, and the longer overlapping nickname wins. Building
+the index and searching took about 1.5 ms per request for 717 people. This is
+a behavior comparison, not an accuracy measurement.
 
 ## Non-goals
 
