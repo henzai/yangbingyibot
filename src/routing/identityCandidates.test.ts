@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	extractNameSearchFragment,
 	findIdentityCandidates,
 	hasNameContext,
 	IDENTITY_CANDIDATE_LIMIT,
 	type IdentityCandidate,
 	isEnglishDominant,
+	isWithinOneEdit,
 } from "./identityCandidates";
 import { buildIdentityIndex } from "./identityIndex";
 import { createStructure, type FixturePerson } from "./testFixtures";
@@ -271,5 +273,96 @@ describe("name context helpers", () => {
 		expect(hasNameContext("赤さんの年齢", 0, 1)).toBe(true);
 		expect(hasNameContext("赤色", 0, 1)).toBe(false);
 		expect(hasNameContext("深紅赤の", 2, 3)).toBe(false);
+	});
+});
+
+describe("findIdentityCandidates: name-search matching", () => {
+	const index = buildIdentityIndex(
+		createStructure([
+			{ full_name: "沈心七", pinyin: "Shen Xin", initials: "SX" },
+			{ full_name: "蝶舞八", community_nicknames: "ちょうちょ" },
+			{ full_name: "九条九", community_nicknames: "胡蝶舞" },
+			{ full_name: "絶死十", community_nicknames: "絶死" },
+		]),
+	);
+	const search = (question: string) =>
+		summarize(findIdentityCandidates(question, index).candidates);
+
+	it("finds a Latin prefix or a spelling within one edit", () => {
+		expect(search("shenxiみたいな名前の人いる？")).toEqual([
+			{
+				matchedText: "shenxi",
+				fullName: "沈心七",
+				source: "pinyin",
+				method: "partial",
+				ambiguousShortForm: false,
+			},
+		]);
+		expect(search("is there a member with a name like shenxi?")).toHaveLength(
+			1,
+		);
+		expect(search("shemxinみたいな名前").map((c) => c.method)).toEqual([
+			"approximate",
+		]);
+	});
+
+	it("finds names and nicknames containing a non-Latin fragment", () => {
+		expect(search("あの蝶舞みたいな名前の人いる？")).toEqual([
+			{
+				matchedText: "蝶舞",
+				fullName: "蝶舞八",
+				source: "full_name",
+				method: "partial",
+				ambiguousShortForm: false,
+			},
+			{
+				matchedText: "蝶舞",
+				fullName: "九条九",
+				source: "community_nicknames",
+				method: "partial",
+				ambiguousShortForm: false,
+			},
+		]);
+	});
+
+	it("returns nothing when no spelling is similar", () => {
+		expect(findIdentityCandidates("秋野みたいな名前の人いる？", index)).toEqual(
+			{
+				candidates: [],
+				overflowCount: 0,
+			},
+		);
+		expect(search("sxmみたいな名前")).toEqual([]);
+	});
+
+	it("never runs outside a name-search question", () => {
+		expect(search("shenxiの誕生日")).toEqual([]);
+		expect(search("蝶舞の誕生日")).toEqual([]);
+	});
+
+	it("skips name-search matching when an exact candidate exists", () => {
+		expect(search("絶死と蝶舞みたいな名前の人いる？")).toEqual([
+			{
+				matchedText: "絶死",
+				fullName: "絶死十",
+				source: "community_nicknames",
+				method: "exact",
+				ambiguousShortForm: false,
+			},
+		]);
+	});
+
+	it("bounds the fragment length", () => {
+		expect(
+			extractNameSearchFragment(`${"長".repeat(50)}みたいな名前`)?.text,
+		).toHaveLength(20);
+		expect(extractNameSearchFragment("蝶舞の誕生日")).toBeNull();
+	});
+
+	it("checks edit distance in linear time", () => {
+		expect(isWithinOneEdit("shenxi", "shenxin")).toBe(true);
+		expect(isWithinOneEdit("shenxa", "shenxi")).toBe(true);
+		expect(isWithinOneEdit("shenx", "shenxin")).toBe(false);
+		expect(isWithinOneEdit("abcd", "abdc")).toBe(false);
 	});
 });

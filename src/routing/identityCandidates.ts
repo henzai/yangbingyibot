@@ -284,14 +284,141 @@ function resolveOverlaps(matches: IdentityCandidate[]): IdentityCandidate[] {
 	return accepted;
 }
 
+// Name-search requests are the only questions that allow partial/approximate
+// matching, e.g. 「shenxiみたいな名前の人いる？」 or "a name like shenxi".
+const NAME_SEARCH_SUFFIX =
+	/(?:みたいな|ような|に似た|に似てる|似た|っぽい)名前/u;
+const NAME_SEARCH_ENGLISH = /\bnames?\s+like\s+/u;
+const FRAGMENT_BEFORE = /[^\s\p{P}\p{S}]{2,20}$/u;
+const FRAGMENT_AFTER = /^[^\s\p{P}\p{S}]{2,20}/u;
+const TRAILING_LATIN = /[a-z0-9]+$/u;
+const LATIN_ONLY = /^[a-z0-9]+$/u;
+const MIN_PARTIAL_LENGTH = 2;
+const MIN_LATIN_PARTIAL_LENGTH = 4;
+const MIN_APPROXIMATE_LENGTH = 3;
+const MAX_APPROXIMATE_LENGTH = 20;
+
+type NameFragment = { text: string; start: number };
+
+/** The spelling the user asked about, bounded to 20 characters. */
+export function extractNameSearchFragment(
+	question: string,
+): NameFragment | null {
+	const suffix = NAME_SEARCH_SUFFIX.exec(question);
+	if (suffix) {
+		const before = question.slice(0, suffix.index);
+		const fragment = FRAGMENT_BEFORE.exec(before);
+		return fragment ? { text: fragment[0], start: fragment.index } : null;
+	}
+	const english = NAME_SEARCH_ENGLISH.exec(question);
+	if (english) {
+		const start = english.index + english[0].length;
+		const fragment = FRAGMENT_AFTER.exec(question.slice(start));
+		return fragment ? { text: fragment[0], start } : null;
+	}
+	return null;
+}
+
+/** Linear check for Levenshtein distance <= 1. */
+export function isWithinOneEdit(a: string, b: string): boolean {
+	if (Math.abs(a.length - b.length) > 1) return false;
+	let i = 0;
+	let j = 0;
+	let edits = 0;
+	while (i < a.length && j < b.length) {
+		if (a[i] === b[j]) {
+			i++;
+			j++;
+			continue;
+		}
+		if (++edits > 1) return false;
+		if (a.length > b.length) i++;
+		else if (a.length < b.length) j++;
+		else {
+			i++;
+			j++;
+		}
+	}
+	return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+function findNonLatinPartialMatches(
+	question: string,
+	fragment: NameFragment,
+	index: IdentityIndex,
+): IdentityCandidate[] {
+	const end = fragment.start + fragment.text.length;
+	// Try the longest suffix first so "あの蝶舞" still finds "蝶舞".
+	for (let start = fragment.start; end - start >= MIN_PARTIAL_LENGTH; start++) {
+		const part = question.slice(start, end);
+		// Pure Latin parts are handled by the bounded Latin comparison below.
+		if (LATIN_ONLY.test(part)) continue;
+		const matches = index.terms
+			.filter(
+				(term) =>
+					!term.isLatin &&
+					(term.source === "full_name" ||
+						term.source === "community_nicknames") &&
+					term.text.includes(part),
+			)
+			.map((term) => toCandidate(term, question, start, end, "partial"));
+		if (matches.length > 0) return matches;
+	}
+	return [];
+}
+
+function findLatinNameSearchMatches(
+	question: string,
+	fragment: NameFragment,
+	index: IdentityIndex,
+): IdentityCandidate[] {
+	const latin = TRAILING_LATIN.exec(fragment.text);
+	if (!latin || latin[0].length < MIN_APPROXIMATE_LENGTH) return [];
+	const text = latin[0];
+	const start = fragment.start + latin.index;
+	const end = start + text.length;
+	const matches: IdentityCandidate[] = [];
+	for (const term of index.terms) {
+		// Initials are too short to compare by edit distance.
+		if (!term.isLatin || term.source === "initials") continue;
+		const spelling = term.text.replaceAll(" ", "");
+		if (
+			spelling.length < MIN_APPROXIMATE_LENGTH ||
+			spelling.length > MAX_APPROXIMATE_LENGTH
+		) {
+			continue;
+		}
+		if (text.length >= MIN_LATIN_PARTIAL_LENGTH && spelling.startsWith(text)) {
+			matches.push(toCandidate(term, question, start, end, "partial"));
+		} else if (isWithinOneEdit(text, spelling)) {
+			matches.push(toCandidate(term, question, start, end, "approximate"));
+		}
+	}
+	return matches;
+}
+
+function findNameSearchMatches(
+	question: string,
+	index: IdentityIndex,
+): IdentityCandidate[] {
+	const fragment = extractNameSearchFragment(question);
+	if (!fragment) return [];
+	return [
+		...findNonLatinPartialMatches(question, fragment, index),
+		...findLatinNameSearchMatches(question, fragment, index),
+	];
+}
+
 export function findIdentityCandidates(
 	question: string,
 	index: IdentityIndex,
 ): IdentityCandidateResult {
 	const normalized = normalizeIdentityText(question);
-	const candidates = resolveOverlaps(findExactMatches(normalized, index)).sort(
-		compareCandidates,
-	);
+	let matches = resolveOverlaps(findExactMatches(normalized, index));
+	if (matches.length === 0) {
+		matches = resolveOverlaps(findNameSearchMatches(normalized, index));
+	}
+	const candidates = matches.sort(compareCandidates);
 	return {
 		candidates: candidates.slice(0, IDENTITY_CANDIDATE_LIMIT),
 		overflowCount: Math.max(0, candidates.length - IDENTITY_CANDIDATE_LIMIT),
