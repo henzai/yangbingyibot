@@ -19,10 +19,12 @@ import {
 	median,
 	nearestRankPercentile,
 	runAutomaticChecks,
+	summarizeAutomaticEvaluation,
 	summarizeEvaluation,
 } from "./scoring";
 import {
 	buildPrompt,
+	loadEvalSuite,
 	loadJsonFile,
 	promptBytes,
 	validatePriceCoverage,
@@ -46,9 +48,7 @@ async function fixtures(): Promise<{
 	prices: PriceCatalog;
 }> {
 	return {
-		suite: await loadJsonFile<EvalSuite>(
-			resolve(fixtureDirectory, "suite-v1.json"),
-		),
+		suite: await loadEvalSuite(resolve(fixtureDirectory, "suite-v1.json")),
 		prices: await loadJsonFile<PriceCatalog>(
 			resolve(fixtureDirectory, "pricing.json"),
 		),
@@ -73,14 +73,20 @@ type FakeOptions = {
 function fakeGateway(
 	provider: "gemini" | "openai",
 	options: FakeOptions = {},
-): ILlmGateway & { streamCalls: number; probeCalls: string[] } {
+): ILlmGateway & {
+	streamCalls: number;
+	streamRequests: LlmRequest[];
+	probeCalls: string[];
+} {
 	const gateway = {
 		provider,
 		capabilities: { reasoningSummary: provider === "gemini" },
 		streamCalls: 0,
+		streamRequests: [] as LlmRequest[],
 		probeCalls: [] as string[],
 		async *generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
 			gateway.streamCalls++;
+			gateway.streamRequests.push(request);
 			for (let attempt = 0; attempt < (options.attempts ?? 1); attempt++) {
 				request.telemetry?.onAttempt();
 			}
@@ -130,7 +136,7 @@ async function runWithFakes(options: FakeOptions = {}) {
 		gitCommit: "test-commit",
 		providerSdkVersions: { gemini: "test-gemini", openai: "test-openai" },
 		gatewayFactory: (provider) => gateways[provider],
-		now: new Date("2026-09-12T12:00:00Z"),
+		now: new Date("2026-09-20T12:00:00Z"),
 		onProgress: (message) => progress.push(message),
 	});
 	return { artifact, gateways, progress };
@@ -152,10 +158,36 @@ describe("fixed evaluation fixtures", () => {
 		expect(estimateSuiteUpperBound(suite, prices)).toBeLessThanOrEqual(5);
 	});
 
+	it("defines a fresh Luna medium versus max comparison", async () => {
+		const suite = await loadEvalSuite(
+			resolve(fixtureDirectory, "suite-v2-luna-max.json"),
+		);
+		const { prices } = await fixtures();
+		expect(() => validateSuite(suite)).not.toThrow();
+		expect(() => validatePriceCoverage(suite, prices)).not.toThrow();
+		expect(suite.version).toBe("llm-switch-v2-luna-max");
+		expect(suite.scoringMode).toBe("automatic_only");
+		expect(suite.candidates).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "openai-luna-medium",
+					reasoningSetting: "medium",
+					maxOutputTokens: 25_000,
+				}),
+				expect.objectContaining({
+					id: "openai-luna-max",
+					reasoningSetting: "max",
+					maxOutputTokens: 25_000,
+				}),
+			]),
+		);
+		expect(estimateSuiteUpperBound(suite, prices)).toBeLessThanOrEqual(12);
+	});
+
 	it("rejects a pricing snapshot older than seven days", async () => {
 		const { prices } = await fixtures();
 		expect(() =>
-			assertFreshPricing(prices, new Date("2026-09-20T00:00:01Z")),
+			assertFreshPricing(prices, new Date("2026-09-28T00:00:01Z")),
 		).toThrow(/stale/);
 	});
 });
@@ -238,6 +270,42 @@ describe("cost and statistics", () => {
 });
 
 describe("automatic and manual scoring", () => {
+	it("summarizes deterministic checks without claiming human verification", () => {
+		const passing = scoredResult("candidate", "run-passing");
+		const failing = scoredResult("candidate", "run-failing");
+		failing.category = "unknown";
+		failing.automaticChecks.requiredTermsPresent = false;
+		failing.automaticChecks.behaviorSignalPresent = false;
+		const summary = summarizeAutomaticEvaluation([passing, failing]);
+		expect(summary.scoringMode).toBe("automatic_only");
+		expect(summary.candidates[0]).toMatchObject({
+			requiredTermsRate: 0.5,
+			forbiddenTermsRate: 1,
+			groundingCeiling: 0.5,
+			deferralCeiling: 0,
+			formatCeiling: 1,
+		});
+		expect(summary.candidates[0]).not.toHaveProperty("personMixupRate");
+		expect(summary.candidates[0]).not.toHaveProperty(
+			"unsupportedPersonOrBiographyCount",
+		);
+	});
+
+	it("counts an API failure as failing every applicable automatic ceiling", () => {
+		const failed = scoredResult("candidate", "run-failed");
+		failed.success = false;
+		failed.category = "unknown";
+		const [candidate] = summarizeAutomaticEvaluation([failed]).candidates;
+		expect(candidate).toMatchObject({
+			requiredTermsRate: 0,
+			forbiddenTermsRate: 0,
+			groundingCeiling: 0,
+			deferralCeiling: 0,
+			formatCeiling: 0,
+			failureRate: 1,
+		});
+	});
+
 	it("normalizes Japanese names and checks timeline formatting", async () => {
 		const { suite } = await fixtures();
 		const testCase = suite.cases.find(({ id }) => id === "japanese-biography");
@@ -299,6 +367,41 @@ describe("automatic and manual scoring", () => {
 });
 
 describe("evaluation runner with fake gateways", () => {
+	it("passes Luna max effort and its expanded output budget", async () => {
+		const suite = await loadEvalSuite(
+			resolve(fixtureDirectory, "suite-v2-luna-max.json"),
+		);
+		const maxCandidate = suite.candidates.find(
+			({ id }) => id === "openai-luna-max",
+		);
+		if (!maxCandidate) throw new Error("Luna max fixture missing");
+		suite.candidates = [maxCandidate];
+		const { prices } = await fixtures();
+		const gateways = {
+			gemini: fakeGateway("gemini"),
+			openai: fakeGateway("openai"),
+		};
+		await runEvaluation({
+			suite,
+			prices,
+			apiKeys: { gemini: "secret-gemini", openai: "secret-openai" },
+			gitCommit: "test-commit",
+			providerSdkVersions: {
+				gemini: "test-gemini",
+				openai: "test-openai",
+			},
+			gatewayFactory: (provider) => gateways[provider],
+			now: new Date("2026-09-20T12:00:00Z"),
+		});
+		expect(gateways.openai.streamRequests).toHaveLength(36);
+		expect(
+			gateways.openai.streamRequests.every(
+				({ reasoningEffort, maxOutputTokens }) =>
+					reasoningEffort === "max" && maxOutputTokens === 25_000,
+			),
+		).toBe(true);
+	});
+
 	it("runs sequentially with probes, retries, summaries, and no credential output", async () => {
 		const { artifact, gateways, progress } = await runWithFakes({
 			attempts: 2,

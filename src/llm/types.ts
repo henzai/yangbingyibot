@@ -11,6 +11,14 @@ export type LlmPrompt = {
 	messages: readonly LlmMessage[];
 };
 
+export type LlmReasoningEffort =
+	| "none"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh"
+	| "max";
+
 /**
  * A cumulative snapshot for ONE generation, never a delta to add per chunk.
  * null means unavailable, including when only some fields were reported.
@@ -44,6 +52,8 @@ export type LlmRequest = {
 	model: string;
 	prompt: LlmPrompt;
 	temperature?: number;
+	/** Optional provider-supported reasoning budget. Omit to use its default. */
+	reasoningEffort?: LlmReasoningEffort;
 	maxOutputTokens?: number;
 	/** Optional, best effort; callers must work without summary events. */
 	includeReasoningSummary?: boolean;

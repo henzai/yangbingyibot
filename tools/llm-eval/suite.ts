@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { buildAnswerPrompt } from "../../src/llm/promptBuilder";
 import type { LlmPrompt } from "../../src/llm/types";
 import type {
 	CandidateConfig,
 	EvalCase,
 	EvalSuite,
+	EvalSuiteProfile,
 	PriceCatalog,
 } from "./types";
 
@@ -21,6 +23,22 @@ const REQUIRED_CATEGORIES = new Set<EvalCase["category"]>([
 
 export async function loadJsonFile<T>(path: string): Promise<T> {
 	return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
+export async function loadEvalSuite(path: string): Promise<EvalSuite> {
+	const value = await loadJsonFile<EvalSuite | EvalSuiteProfile>(path);
+	if (!("extends" in value)) return value;
+	const base = await loadJsonFile<EvalSuite>(
+		resolve(dirname(path), value.extends),
+	);
+	return {
+		...base,
+		version: value.version,
+		seed: value.seed,
+		budgetUsd: value.budgetUsd,
+		scoringMode: value.scoringMode,
+		candidates: value.candidates,
+	};
 }
 
 export function sha256(value: string): string {
@@ -60,14 +78,39 @@ function assertUnique(values: string[], label: string): void {
 }
 
 function validateCandidate(candidate: CandidateConfig): void {
+	const allowedReasoningSettings = new Set([
+		"provider_default",
+		"none",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	]);
 	if (
 		!candidate.id ||
 		!candidate.label ||
 		!candidate.model ||
 		(candidate.temperature !== 0 && candidate.temperature !== null) ||
-		candidate.reasoningSetting !== "provider_default"
+		!allowedReasoningSettings.has(candidate.reasoningSetting)
 	) {
 		throw new Error("every candidate requires id, label, and model");
+	}
+	if (
+		candidate.reasoningSetting !== "provider_default" &&
+		candidate.provider !== "openai"
+	) {
+		throw new Error(
+			`candidate ${candidate.id} cannot set OpenAI reasoning effort`,
+		);
+	}
+	if (
+		candidate.maxOutputTokens !== undefined &&
+		(!Number.isInteger(candidate.maxOutputTokens) ||
+			candidate.maxOutputTokens < 1 ||
+			candidate.maxOutputTokens > 128_000)
+	) {
+		throw new Error(`candidate ${candidate.id} has an invalid output limit`);
 	}
 	if (candidate.summary && !candidate.summary.model) {
 		throw new Error(`candidate ${candidate.id} has an invalid summary model`);
@@ -81,11 +124,28 @@ export function validateSuite(suite: EvalSuite): void {
 	if (suite.repetitions !== 3) {
 		throw new Error("evaluation suite must use exactly 3 repetitions");
 	}
-	if (suite.maxOutputTokens !== 1024) {
-		throw new Error("evaluation suite must cap answers at 1024 tokens");
+	if (
+		!Number.isInteger(suite.maxOutputTokens) ||
+		suite.maxOutputTokens < 1 ||
+		suite.maxOutputTokens > 128_000
+	) {
+		throw new Error("evaluation suite has an invalid output limit");
 	}
-	if (suite.budgetUsd !== 5) {
-		throw new Error("evaluation suite must use the approved 5 USD budget");
+	if (!Number.isFinite(suite.budgetUsd) || suite.budgetUsd <= 0) {
+		throw new Error("evaluation suite has an invalid budget");
+	}
+	if (
+		suite.scoringMode !== undefined &&
+		suite.scoringMode !== "manual" &&
+		suite.scoringMode !== "automatic_only"
+	) {
+		throw new Error("evaluation suite has an invalid scoring mode");
+	}
+	if (
+		suite.version === "llm-switch-v1" &&
+		(suite.maxOutputTokens !== 1024 || suite.budgetUsd !== 5)
+	) {
+		throw new Error("llm-switch-v1 limits are immutable");
 	}
 	assertUnique(
 		suite.candidates.map(({ id }) => id),

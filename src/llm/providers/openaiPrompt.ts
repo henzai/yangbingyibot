@@ -9,6 +9,7 @@ const TEMPERATURE_MODEL =
 	/^(?:gpt-(?:3\.5|4(?:o|\.1|\.5)?)(?:-|$)|chatgpt-4o(?:-|$))/i;
 
 export type OpenAIModelCapabilities = {
+	reasoningEffort: boolean;
 	reasoningSummary: boolean;
 	temperature: boolean;
 };
@@ -18,6 +19,7 @@ export function getOpenAIModelCapabilities(
 	model: string,
 ): OpenAIModelCapabilities {
 	return {
+		reasoningEffort: REASONING_MODEL.test(model),
 		reasoningSummary: REASONING_MODEL.test(model),
 		temperature: TEMPERATURE_MODEL.test(model),
 	};
@@ -41,6 +43,16 @@ export function toOpenAIRequest(
 	request: LlmRequest,
 ): Omit<ResponseCreateParamsBase, "stream"> {
 	const capabilities = getOpenAIModelCapabilities(request.model);
+	const reasoning = capabilities.reasoningEffort
+		? {
+				...(request.reasoningEffort === undefined
+					? {}
+					: { effort: request.reasoningEffort }),
+				...(request.includeReasoningSummary && capabilities.reasoningSummary
+					? { summary: "auto" as const }
+					: {}),
+			}
+		: {};
 	return {
 		model: request.model,
 		instructions: request.prompt.systemInstruction,
@@ -54,8 +66,6 @@ export function toOpenAIRequest(
 		...(request.temperature === undefined || !capabilities.temperature
 			? {}
 			: { temperature: request.temperature }),
-		...(request.includeReasoningSummary && capabilities.reasoningSummary
-			? { reasoning: { summary: "auto" as const } }
-			: {}),
+		...(Object.keys(reasoning).length === 0 ? {} : { reasoning }),
 	};
 }
