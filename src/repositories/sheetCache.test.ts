@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { SpreadsheetConfig } from "../config";
+import { SHEET_COLUMN_KEYS } from "../sheets/columnCatalog";
+import type { ReadySheetStructure } from "../sheets/structuredSheet";
 import { SheetCacheRepository } from "./sheetCache";
 
 const SOURCE: SpreadsheetConfig = {
@@ -122,6 +124,38 @@ describe("SheetCacheRepository", () => {
 			}),
 			{ expirationTtl: 300 },
 		);
+	});
+
+	it("keeps a 500-person structured cache entry within the payload budget", async () => {
+		const personRows = Array.from({ length: 500 }, (_, personIndex) =>
+			SHEET_COLUMN_KEYS.map(
+				(_key, columnIndex) =>
+					`member-${personIndex}-column-${columnIndex}-fixture-value`,
+			),
+		);
+		const structuredSheet: ReadySheetStructure = {
+			status: "ready",
+			schemaVersion: 1,
+			catalogVersion: 1,
+			columnKeys: [...SHEET_COLUMN_KEYS],
+			headerRows: Array.from({ length: 3 }, () =>
+				SHEET_COLUMN_KEYS.map((key) => key),
+			),
+			personRows,
+			availableYears: [2025],
+			latestDataYear: 2025,
+		};
+		const sheetInfo = personRows.map((row) => row.join("\t")).join("\n");
+		const legacyEntry = JSON.stringify({ sheetInfo, description: "fixture" });
+
+		await repository.save(SOURCE, sheetInfo, "fixture", structuredSheet);
+
+		const serializedEntry = (mockKV.put as Mock).mock.calls[0][1] as string;
+		const encoder = new TextEncoder();
+		const totalBytes = encoder.encode(serializedEntry).byteLength;
+		const addedBytes = totalBytes - encoder.encode(legacyEntry).byteLength;
+		expect(totalBytes).toBeLessThan(4 * 1024 * 1024);
+		expect(addedBytes).toBeLessThan(2 * 1024 * 1024);
 	});
 
 	it("treats malformed structured data as a legacy entry", async () => {

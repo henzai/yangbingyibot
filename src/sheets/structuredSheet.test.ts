@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SHEET_SOURCE_INDICES } from "./columnCatalog";
 import {
 	buildSheetStructure,
 	isSheetStructure,
@@ -42,6 +43,13 @@ function createCsv(options?: {
 }
 
 describe("structured sheet snapshot", () => {
+	it("derives every schema anchor from a catalog source index", () => {
+		const sourceIndices = new Set(SHEET_SOURCE_INDICES);
+		expect(
+			SHEET_SCHEMA_ANCHORS.every((anchor) => sourceIndices.has(anchor.column)),
+		).toBe(true);
+	});
+
 	it("preserves raw identity cells and filters rows before projection", () => {
 		const result = buildSheetStructure(createCsv());
 
@@ -139,6 +147,28 @@ describe("structured sheet snapshot", () => {
 		if (result.status === "unavailable") {
 			expect(result.reason).toBe("schema_mismatch");
 		}
+	});
+
+	it("tolerates isolated value-shape outliers without hiding column swaps", () => {
+		const result = buildSheetStructure(
+			createCsv({
+				mutate: (rows) => {
+					rows[3][16] = "非公開";
+					rows[3][29] = "12.3万";
+					for (let index = 0; index < 5; index++) {
+						const row = Array.from({ length: 48 }, () => "");
+						row[7] = `追加メンバー${index}`;
+						row[8] =
+							index === 0
+								? "表記揺れ"
+								: `Member ${String.fromCharCode(65 + index)}`;
+						rows.push(row);
+					}
+				},
+			}),
+		);
+
+		expect(result.status).toBe("ready");
 	});
 
 	it("rejects an unsupported short schema", () => {

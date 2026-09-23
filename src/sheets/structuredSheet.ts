@@ -5,12 +5,16 @@ import {
 } from "../utils/compactSheet";
 import {
 	COLUMN_CATALOG_VERSION,
+	ELECTION_COLUMN_CATALOG,
+	ELECTION_YEARS,
+	getSheetSourceIndex,
 	SHEET_COLUMN_KEYS,
 	SHEET_SOURCE_INDICES,
 	type SheetColumnKey,
 } from "./columnCatalog";
 
 export const SHEET_STRUCTURE_VERSION = 1 as const;
+const MINIMUM_SOURCE_COLUMN_COUNT = Math.max(...SHEET_SOURCE_INDICES) + 1;
 
 export type SheetStructureUnavailableReason =
 	| "empty"
@@ -45,95 +49,112 @@ export type SchemaAnchor = {
 };
 
 type SchemaValueRule = {
-	column: number;
+	key: SheetColumnKey;
 	matches: (value: string) => boolean;
 };
+
+function schemaAnchor(
+	key: SheetColumnKey,
+	row: SchemaAnchor["row"],
+	value: string,
+): SchemaAnchor {
+	return { row, column: getSheetSourceIndex(key), value };
+}
 
 // These anchors are the stable metadata/header cells in the current sheet.
 // Some source columns intentionally have blank headers; their source indexes
 // remain part of the catalog and are protected by the value rules below.
 export const SHEET_SCHEMA_ANCHORS: readonly SchemaAnchor[] = [
-	{ row: 1, column: 3, value: "メンバーの所属チームを示しています。" },
-	{ row: 1, column: 4, value: "メンバーの所属チームその2です。" },
-	{ row: 1, column: 5, value: "新人組のメンバーか否かを表しています。" },
-	{ row: 1, column: 7, value: "メンバーの名前です。" },
-	{ row: 1, column: 10, value: "メンバーのイニシャルです。" },
-	{ row: 1, column: 11, value: "我々がメンバーに付けているあだ名を表します。" },
-	{ row: 1, column: 12, value: "メンバーのあだ名の由来を示します。" },
-	{
-		row: 1,
-		column: 15,
-		value:
-			'メンバーが入団した期数を示します。例えば、"SNH 4th"はSNH48グループの4期生を示します。',
-	},
-	{ row: 1, column: 17, value: "メンバーの星座です。" },
-	{
-		row: 1,
-		column: 18,
-		value:
-			'メンバーの出身地です。ピンイン表記で書かれています。例: "Hebei", "Henan"',
-	},
-	{
-		row: 1,
-		column: 19,
-		value:
-			'メンバーの出身地の市区を示します。ピンイン表記で書かれています。例: "Shijiazhuang", "Zhengzhou"',
-	},
-	{ row: 1, column: 20, value: "メンバーのスキルです。" },
-	{ row: 1, column: 21, value: "メンバーの趣味です。" },
-	{ row: 1, column: 22, value: "メンバーのキャッチフレーズです。" },
-	{
-		row: 1,
-		column: 23,
-		value:
-			"メンバーの公式ニックネームを示します。我々がつけた「あだ名」ではありません。",
-	},
-	{ row: 1, column: 24, value: "メンバーの公式英語名を示します。" },
-	{
-		row: 1,
-		column: 25,
-		value: "メンバーが在籍している、もしくは卒業した大学を示します。",
-	},
-	{ row: 1, column: 26, value: "メンバーの血液型です。" },
-	{ row: 1, column: 27, value: "メンバーのMBTI（性格）です。" },
-	{ row: 1, column: 30, value: "メンバーの応援色です。" },
-	{ row: 1, column: 31, value: "メンバーの応援色を詳しく言った場合です。" },
-	{ row: 1, column: 32, value: "メンバーの2つ目の応援色です。" },
-	{
-		row: 1,
-		column: 33,
-		value: "メンバーの2つ目の応援色を詳しく言った場合です。",
-	},
-	{ row: 1, column: 47, value: "メンバーの経歴です。" },
-	{ row: 2, column: 3, value: "本所属" },
-	{ row: 2, column: 7, value: "姓名" },
-	{ row: 2, column: 11, value: "あだ名" },
-	{ row: 2, column: 12, value: "あだ名の由来" },
-	{ row: 2, column: 15, value: "期数" },
-	{ row: 2, column: 17, value: "星座" },
-	{ row: 2, column: 18, value: "出身省" },
-	{ row: 2, column: 19, value: "出身市" },
-	{ row: 2, column: 20, value: "特徴" },
-	{ row: 2, column: 21, value: "趣味" },
-	{ row: 2, column: 22, value: "キャッチフレーズ" },
-	{ row: 2, column: 23, value: "公式ニックネーム" },
-	{ row: 2, column: 24, value: "公式英語名" },
-	{ row: 2, column: 25, value: "大学" },
-	{ row: 2, column: 26, value: "血液型" },
-	{ row: 2, column: 27, value: "MBTI" },
-	{ row: 2, column: 30, value: "応援色1" },
-	{ row: 2, column: 31, value: "応援色1詳細" },
-	{ row: 2, column: 32, value: "応援色2" },
-	{ row: 2, column: 33, value: "応援色2詳細" },
-	...Array.from({ length: 13 }, (_, offset) => ({
+	schemaAnchor(
+		"primary_affiliation",
+		1,
+		"メンバーの所属チームを示しています。",
+	),
+	schemaAnchor("secondary_affiliation", 1, "メンバーの所属チームその2です。"),
+	schemaAnchor("newcomer_flag", 1, "新人組のメンバーか否かを表しています。"),
+	schemaAnchor("full_name", 1, "メンバーの名前です。"),
+	schemaAnchor("initials", 1, "メンバーのイニシャルです。"),
+	schemaAnchor(
+		"community_nicknames",
+		1,
+		"我々がメンバーに付けているあだ名を表します。",
+	),
+	schemaAnchor("nickname_origin", 1, "メンバーのあだ名の由来を示します。"),
+	schemaAnchor(
+		"generation",
+		1,
+		'メンバーが入団した期数を示します。例えば、"SNH 4th"はSNH48グループの4期生を示します。',
+	),
+	schemaAnchor("zodiac", 1, "メンバーの星座です。"),
+	schemaAnchor(
+		"birth_province",
+		1,
+		'メンバーの出身地です。ピンイン表記で書かれています。例: "Hebei", "Henan"',
+	),
+	schemaAnchor(
+		"birth_city",
+		1,
+		'メンバーの出身地の市区を示します。ピンイン表記で書かれています。例: "Shijiazhuang", "Zhengzhou"',
+	),
+	schemaAnchor("skills", 1, "メンバーのスキルです。"),
+	schemaAnchor("hobbies", 1, "メンバーの趣味です。"),
+	schemaAnchor("catchphrase", 1, "メンバーのキャッチフレーズです。"),
+	schemaAnchor(
+		"official_nickname",
+		1,
+		"メンバーの公式ニックネームを示します。我々がつけた「あだ名」ではありません。",
+	),
+	schemaAnchor("official_english_name", 1, "メンバーの公式英語名を示します。"),
+	schemaAnchor(
+		"university",
+		1,
+		"メンバーが在籍している、もしくは卒業した大学を示します。",
+	),
+	schemaAnchor("blood_type", 1, "メンバーの血液型です。"),
+	schemaAnchor("mbti", 1, "メンバーのMBTI（性格）です。"),
+	schemaAnchor("support_color_1", 1, "メンバーの応援色です。"),
+	schemaAnchor(
+		"support_color_1_detail",
+		1,
+		"メンバーの応援色を詳しく言った場合です。",
+	),
+	schemaAnchor("support_color_2", 1, "メンバーの2つ目の応援色です。"),
+	schemaAnchor(
+		"support_color_2_detail",
+		1,
+		"メンバーの2つ目の応援色を詳しく言った場合です。",
+	),
+	schemaAnchor("career", 1, "メンバーの経歴です。"),
+	schemaAnchor("primary_affiliation", 2, "本所属"),
+	schemaAnchor("full_name", 2, "姓名"),
+	schemaAnchor("community_nicknames", 2, "あだ名"),
+	schemaAnchor("nickname_origin", 2, "あだ名の由来"),
+	schemaAnchor("generation", 2, "期数"),
+	schemaAnchor("zodiac", 2, "星座"),
+	schemaAnchor("birth_province", 2, "出身省"),
+	schemaAnchor("birth_city", 2, "出身市"),
+	schemaAnchor("skills", 2, "特徴"),
+	schemaAnchor("hobbies", 2, "趣味"),
+	schemaAnchor("catchphrase", 2, "キャッチフレーズ"),
+	schemaAnchor("official_nickname", 2, "公式ニックネーム"),
+	schemaAnchor("official_english_name", 2, "公式英語名"),
+	schemaAnchor("university", 2, "大学"),
+	schemaAnchor("blood_type", 2, "血液型"),
+	schemaAnchor("mbti", 2, "MBTI"),
+	schemaAnchor("support_color_1", 2, "応援色1"),
+	schemaAnchor("support_color_1_detail", 2, "応援色1詳細"),
+	schemaAnchor("support_color_2", 2, "応援色2"),
+	schemaAnchor("support_color_2_detail", 2, "応援色2詳細"),
+	...ELECTION_COLUMN_CATALOG.map((column) => ({
 		row: 2 as const,
-		column: 34 + offset,
-		value: String(2014 + offset),
+		column: column.sourceIndex,
+		value: String(column.year),
 	})),
-	{ row: 2, column: 47, value: "経歴" },
+	schemaAnchor("career", 2, "経歴"),
 ];
 
-const PLACEHOLDER_VALUE = /^(?:-|—|–|不明|不詳|unknown|#?n\/a)$/i;
+const PLACEHOLDER_VALUE = /^(?:-|—|–|不明|不詳|非公開|未公開|unknown|#?n\/a)$/i;
+const MIN_SCHEMA_VALUE_MATCH_RATIO = 0.8;
 
 function isPlaceholder(value: string): boolean {
 	const trimmed = value.trim();
@@ -163,17 +184,16 @@ function parseYear(value: string): number | null {
 // blank-header columns instead of silently projecting them under the wrong key.
 const SHEET_SCHEMA_VALUE_RULES: readonly SchemaValueRule[] = [
 	{
-		column: 8,
+		key: "pinyin",
 		matches: (value) =>
-			isPlaceholder(value) ||
 			/^[\p{Script=Latin}\p{Mark}\s.'’·-]+$/u.test(value.trim()),
 	},
-	{ column: 9, matches: (value) => isNumberInRange(value, 0, 120) },
-	{ column: 16, matches: (value) => isNumberInRange(value, 120, 220) },
-	{ column: 28, matches: (value) => isNumberInRange(value, 0, 100) },
+	{ key: "age", matches: (value) => isNumberInRange(value, 0, 120) },
+	{ key: "height", matches: (value) => isNumberInRange(value, 120, 220) },
+	{ key: "debut_age", matches: (value) => isNumberInRange(value, 0, 100) },
 	{
-		column: 29,
-		matches: (value) => isPlaceholder(value) || /^\d[\d,]*$/.test(value.trim()),
+		key: "pocket_followers",
+		matches: (value) => /^(?:\d[\d,]*|\d+(?:\.\d+)?万)$/.test(value.trim()),
 	},
 ];
 
@@ -192,12 +212,45 @@ function cell(row: string[] | undefined, column: number): string {
 	return row?.[column] ?? "";
 }
 
+function matchesValueRule(
+	personRows: string[][],
+	rule: SchemaValueRule,
+): boolean {
+	const column = getSheetSourceIndex(rule.key);
+	const values = personRows
+		.map((row) => cell(row, column))
+		.filter((value) => !isPlaceholder(value));
+	if (values.length === 0) return true;
+	const matches = values.filter(rule.matches).length;
+	return matches / values.length >= MIN_SCHEMA_VALUE_MATCH_RATIO;
+}
+
+function matchesBirthdayDebutOrder(personRows: string[][]): boolean {
+	const birthdayColumn = getSheetSourceIndex("birthday");
+	const debutDateColumn = getSheetSourceIndex("debut_date");
+	const comparableYears = personRows.flatMap((row) => {
+		const birthYear = parseYear(cell(row, birthdayColumn));
+		const debutYear = parseYear(cell(row, debutDateColumn));
+		return birthYear === null || debutYear === null
+			? []
+			: [{ birthYear, debutYear }];
+	});
+	if (comparableYears.length === 0) return true;
+	const matches = comparableYears.filter(
+		({ birthYear, debutYear }) => birthYear <= debutYear,
+	).length;
+	return matches / comparableYears.length >= MIN_SCHEMA_VALUE_MATCH_RATIO;
+}
+
 function matchesSchema(
 	rows: string[][],
 	personRows: string[][],
 	columnCount: number,
 ): boolean {
-	if (columnCount < 48 || rows.length < PRESERVED_HEADER_ROWS) {
+	if (
+		columnCount < MINIMUM_SOURCE_COLUMN_COUNT ||
+		rows.length < PRESERVED_HEADER_ROWS
+	) {
 		return false;
 	}
 
@@ -207,17 +260,13 @@ function matchesSchema(
 	if (!anchorsMatch) return false;
 
 	const valueShapesMatch = SHEET_SCHEMA_VALUE_RULES.every((rule) =>
-		personRows.every((row) => rule.matches(cell(row, rule.column))),
+		matchesValueRule(personRows, rule),
 	);
 	if (!valueShapesMatch) return false;
 
 	// Birthday and debut date have the same general shape, so validate their
 	// relationship: when both years are present, birth cannot follow debut.
-	return personRows.every((row) => {
-		const birthYear = parseYear(cell(row, 13));
-		const debutYear = parseYear(cell(row, 14));
-		return birthYear === null || debutYear === null || birthYear <= debutYear;
-	});
+	return matchesBirthdayDebutOrder(personRows);
 }
 
 function isPositiveRank(value: string): boolean {
@@ -234,7 +283,8 @@ export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 	const sourcePersonRows = keptRows.slice(PRESERVED_HEADER_ROWS);
 	if (!matchesSchema(rows, sourcePersonRows, columnCount)) {
 		return createUnavailableSheetStructure(
-			rows.length < PRESERVED_HEADER_ROWS || columnCount < 48
+			rows.length < PRESERVED_HEADER_ROWS ||
+				columnCount < MINIMUM_SOURCE_COLUMN_COUNT
 				? "unsupported_schema"
 				: "schema_mismatch",
 		);
@@ -244,14 +294,13 @@ export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 		SHEET_SOURCE_INDICES.map((sourceIndex) => cell(row, sourceIndex));
 	const headerRows = keptRows.slice(0, PRESERVED_HEADER_ROWS).map(projectRow);
 	const personRows = sourcePersonRows.map(projectRow);
-	const electionYears = Array.from({ length: 13 }, (_, offset) => {
-		const sourceIndex = 34 + offset;
+	const electionYears = ELECTION_COLUMN_CATALOG.flatMap((column) => {
 		return sourcePersonRows.some((row) =>
-			isPositiveRank(cell(row, sourceIndex)),
+			isPositiveRank(cell(row, column.sourceIndex)),
 		)
-			? 2014 + offset
-			: null;
-	}).filter((year): year is number => year !== null);
+			? [column.year]
+			: [];
+	});
 
 	return {
 		status: "ready",
@@ -331,8 +380,7 @@ export function isSheetStructure(value: unknown): value is SheetStructure {
 			(year) =>
 				typeof year === "number" &&
 				Number.isInteger(year) &&
-				year >= 2014 &&
-				year <= 2026,
+				ELECTION_YEARS.includes(year),
 		)
 	) {
 		return false;

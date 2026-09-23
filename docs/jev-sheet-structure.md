@@ -37,15 +37,25 @@ schemas shorter than the catalog. Source column 6 is intentionally outside the
 trailing unrelated source column is safe because it cannot shift a catalog
 index.
 
-All thirteen election headings are anchored to their year. Columns whose live
-metadata/header cells are blank are additionally checked against conservative
-person-value shapes (for example pinyin versus age), and birthday must not be
-later than debut when both years are present. A mismatch makes the structured
-snapshot unavailable while preserving the legacy TSV fallback.
+Election headings, source indexes, and valid election years are derived from
+the typed column catalog rather than maintained as separate numeric ranges.
+Columns whose live metadata/header cells are blank are additionally checked
+against conservative person-value shapes (for example pinyin versus age).
+Schema validation requires at least 80% of the non-placeholder values in each
+such column to match, so an isolated display variant does not invalidate the
+whole snapshot while a physical column swap still fails closed. Birthday must
+not be later than debut for at least 80% of rows where both years are present.
+A mismatch makes the structured snapshot unavailable while preserving the
+legacy TSV fallback.
 
 Legacy-cache refresh telemetry records the Sheets attempt independently from
 the data source. A failed refresh therefore remains a KV cache hit for the
 returned TSV while also emitting a failed Sheets API metric.
+
+The cache-size regression fixture serializes 500 people by 44 columns. It caps
+the complete legacy-TSV-plus-structure entry at 4 MiB and the structured
+snapshot increment at 2 MiB as explicit project budgets, preventing unbounded
+duplication as the catalog evolves.
 
 When the serialized meaning changes, increment `schemaVersion` or
 `catalogVersion` and add a compatibility test. Do not change the cache prefix

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	ELECTION_COLUMN_CATALOG,
+	ELECTION_YEARS,
 	IDENTITY_COLUMN_CATALOG,
 	SELECTABLE_COLUMN_CATALOG,
 	SHEET_COLUMN_CATALOG,
@@ -36,5 +38,11 @@ describe("sheet column catalog", () => {
 				column.key.startsWith("election_"),
 			).map((column) => column.sourceIndex),
 		).toEqual(Array.from({ length: 13 }, (_, i) => i + 34));
+		expect(ELECTION_COLUMN_CATALOG.map((column) => column.sourceIndex)).toEqual(
+			Array.from({ length: 13 }, (_, i) => i + 34),
+		);
+		expect(ELECTION_YEARS).toEqual(
+			Array.from({ length: 13 }, (_, i) => i + 2014),
+		);
 	});
 });

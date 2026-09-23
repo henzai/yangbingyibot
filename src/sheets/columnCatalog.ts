@@ -293,6 +293,10 @@ export const SHEET_COLUMN_CATALOG = [
 export type IdentityColumnKey = (typeof IDENTITY_COLUMNS)[number]["key"];
 export type SelectableColumnKey = (typeof SELECTABLE_COLUMNS)[number]["key"];
 export type SheetColumnKey = (typeof SHEET_COLUMN_CATALOG)[number]["key"];
+export type ElectionColumnDefinition = Extract<
+	(typeof SELECTABLE_COLUMNS)[number],
+	{ key: `election_${string}` }
+>;
 
 export const SHEET_COLUMN_KEYS = SHEET_COLUMN_CATALOG.map(
 	(column) => column.key,
@@ -301,3 +305,23 @@ export const SHEET_COLUMN_KEYS = SHEET_COLUMN_CATALOG.map(
 export const SHEET_SOURCE_INDICES = SHEET_COLUMN_CATALOG.map(
 	(column) => column.sourceIndex,
 ) as number[];
+
+export const SHEET_SOURCE_INDEX_BY_KEY = Object.fromEntries(
+	SHEET_COLUMN_CATALOG.map((column) => [column.key, column.sourceIndex]),
+) as Record<SheetColumnKey, number>;
+
+export const ELECTION_COLUMN_CATALOG = SELECTABLE_COLUMNS.filter(
+	(column): column is ElectionColumnDefinition =>
+		column.key.startsWith("election_"),
+).map((column) => ({
+	...column,
+	year: Number(column.key.slice("election_".length)),
+}));
+
+export const ELECTION_YEARS = ELECTION_COLUMN_CATALOG.map(
+	(column) => column.year,
+);
+
+export function getSheetSourceIndex(key: SheetColumnKey): number {
+	return SHEET_SOURCE_INDEX_BY_KEY[key];
+}
