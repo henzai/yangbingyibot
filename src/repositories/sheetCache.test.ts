@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { SpreadsheetConfig } from "../config";
+import { SHEET_COLUMN_KEYS } from "../sheets/columnCatalog";
+import type { ReadySheetStructure } from "../sheets/structuredSheet";
 import { SheetCacheRepository } from "./sheetCache";
 
 const SOURCE: SpreadsheetConfig = {
 	id: "spreadsheet-id",
 	dataSheetName: "data",
 	descriptionSheetName: "description",
+};
+
+const STRUCTURE = {
+	status: "unavailable" as const,
+	schemaVersion: 1 as const,
+	catalogVersion: 1 as const,
+	reason: "schema_mismatch" as const,
 };
 
 const createMockKVNamespace = () =>
@@ -79,6 +88,20 @@ describe("SheetCacheRepository", () => {
 		await expect(repository.get(SOURCE)).resolves.toBeNull();
 	});
 
+	it("keeps a valid structured status alongside legacy fields", async () => {
+		(mockKV.get as Mock).mockResolvedValue({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: STRUCTURE,
+		});
+
+		await expect(repository.get(SOURCE)).resolves.toEqual({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: STRUCTURE,
+		});
+	});
+
 	it("saves cache with its own TTL", async () => {
 		await repository.save(SOURCE, "sheet", "description");
 
@@ -87,6 +110,65 @@ describe("SheetCacheRepository", () => {
 			JSON.stringify({ sheetInfo: "sheet", description: "description" }),
 			{ expirationTtl: 300 },
 		);
+	});
+
+	it("saves the structured snapshot without changing the key or TTL", async () => {
+		await repository.save(SOURCE, "sheet", "description", STRUCTURE);
+
+		expect(mockKV.put).toHaveBeenCalledWith(
+			expect.stringMatching(/^sheet_info:v2:[0-9a-f]{64}$/),
+			JSON.stringify({
+				sheetInfo: "sheet",
+				description: "description",
+				structuredSheet: STRUCTURE,
+			}),
+			{ expirationTtl: 300 },
+		);
+	});
+
+	it("keeps a 500-person structured cache entry within the payload budget", async () => {
+		const personRows = Array.from({ length: 500 }, (_, personIndex) =>
+			SHEET_COLUMN_KEYS.map(
+				(_key, columnIndex) =>
+					`member-${personIndex}-column-${columnIndex}-fixture-value`,
+			),
+		);
+		const structuredSheet: ReadySheetStructure = {
+			status: "ready",
+			schemaVersion: 1,
+			catalogVersion: 1,
+			columnKeys: [...SHEET_COLUMN_KEYS],
+			headerRows: Array.from({ length: 3 }, () =>
+				SHEET_COLUMN_KEYS.map((key) => key),
+			),
+			personRows,
+			availableYears: [2025],
+			latestDataYear: 2025,
+		};
+		const sheetInfo = personRows.map((row) => row.join("\t")).join("\n");
+		const legacyEntry = JSON.stringify({ sheetInfo, description: "fixture" });
+
+		await repository.save(SOURCE, sheetInfo, "fixture", structuredSheet);
+
+		const serializedEntry = (mockKV.put as Mock).mock.calls[0][1] as string;
+		const encoder = new TextEncoder();
+		const totalBytes = encoder.encode(serializedEntry).byteLength;
+		const addedBytes = totalBytes - encoder.encode(legacyEntry).byteLength;
+		expect(totalBytes).toBeLessThan(4 * 1024 * 1024);
+		expect(addedBytes).toBeLessThan(2 * 1024 * 1024);
+	});
+
+	it("treats malformed structured data as a legacy entry", async () => {
+		(mockKV.get as Mock).mockResolvedValue({
+			sheetInfo: "sheet",
+			description: "description",
+			structuredSheet: { status: "ready", schemaVersion: 999 },
+		});
+
+		await expect(repository.get(SOURCE)).resolves.toEqual({
+			sheetInfo: "sheet",
+			description: "description",
+		});
 	});
 
 	it("throws a stable error when KV save fails", async () => {

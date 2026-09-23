@@ -101,6 +101,7 @@ import {
 	getHistoryStep,
 	getSheetDataStep,
 	normalizeStreamingOutput,
+	recordSheetDataAccessMetrics,
 	reportErrorToGitHub,
 	saveHistoryStep,
 	sendDiscordResponseStep,
@@ -116,6 +117,13 @@ const mockKVNamespace = {
 	get: vi.fn(),
 	put: vi.fn(),
 } as unknown as KVNamespace;
+
+const unavailableSheetStructure = {
+	status: "unavailable" as const,
+	schemaVersion: 1 as const,
+	catalogVersion: 1 as const,
+	reason: "unsupported_schema" as const,
+};
 
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: "test-token",
@@ -155,6 +163,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -172,11 +181,97 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			});
 		});
 
+		it("refreshes a legacy cache entry to obtain structured data", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockResolvedValue({
+				sheetInfo: "fresh sheet",
+				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
+			});
+
+			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
+				sheetInfo: "fresh sheet",
+				description: "fresh desc",
+				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: expect.any(Number),
+				},
+			});
+			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
+				expect.anything(),
+				"fresh sheet",
+				"fresh desc",
+				unavailableSheetStructure,
+			);
+		});
+
+		it("keeps legacy TSV when the structured refresh fails", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockRejectedValue(
+				new Error("Sheets unavailable"),
+			);
+
+			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+				fromCache: true,
+				sheetsApiCall: {
+					success: false,
+					durationMs: expect.any(Number),
+				},
+			});
+			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
+				expect.anything(),
+				"legacy sheet",
+				"legacy desc",
+				{
+					status: "unavailable",
+					schemaVersion: 1,
+					catalogVersion: 1,
+					reason: "invalid_snapshot",
+				},
+			);
+		});
+
+		it("still returns legacy TSV when caching the refresh failure fails", async () => {
+			mockSheetCacheRepository.get.mockResolvedValue({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+			});
+			vi.mocked(getSheetData).mockRejectedValue(
+				new Error("Sheets unavailable"),
+			);
+			mockSheetCacheRepository.save.mockRejectedValueOnce(
+				new Error("KV unavailable"),
+			);
+
+			await expect(
+				getSheetDataStep(mockEnv, mockLogger),
+			).resolves.toMatchObject({
+				sheetInfo: "legacy sheet",
+				description: "legacy desc",
+				fromCache: true,
+				sheetsApiCall: { success: false },
+			});
+			expect(mockLogger.warn).toHaveBeenCalledWith(
+				"Failed to cache legacy sheet fallback (non-fatal)",
+				expect.objectContaining({ error: "KV unavailable" }),
+			);
+		});
+
 		it("fetches from Google Sheets when cache is empty", async () => {
 			mockSheetCacheRepository.get.mockResolvedValue(null);
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -185,6 +280,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
 				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: expect.any(Number),
+				},
 			});
 			expect(getSheetData).toHaveBeenCalledWith(
 				mockEnv.GOOGLE_SERVICE_ACCOUNT,
@@ -202,6 +301,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
@@ -214,6 +314,7 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				},
 				"fresh sheet",
 				"fresh desc",
+				unavailableSheetStructure,
 			);
 		});
 
@@ -221,11 +322,46 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
+				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("recordSheetDataAccessMetrics", () => {
+		it("records a failed Sheets refresh separately from a legacy cache hit", () => {
+			const metrics = {
+				recordKVCacheAccess: vi.fn(),
+				recordSheetsApiCall: vi.fn(),
+			} as unknown as import("../clients/metrics").IMetricsClient;
+
+			recordSheetDataAccessMetrics(
+				metrics,
+				"request-id",
+				{
+					sheetInfo: "legacy sheet",
+					description: "legacy desc",
+					fromCache: true,
+					sheetsApiCall: { success: false, durationMs: 321 },
+				},
+				500,
+			);
+
+			expect(metrics.recordKVCacheAccess).toHaveBeenCalledWith({
+				requestId: "request-id",
+				success: true,
+				durationMs: 500,
+				cacheHit: true,
+				operation: "get",
+			});
+			expect(metrics.recordSheetsApiCall).toHaveBeenCalledWith({
+				requestId: "request-id",
+				success: false,
+				durationMs: 321,
+			});
 		});
 	});
 

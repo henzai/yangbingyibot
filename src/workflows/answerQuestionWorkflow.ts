@@ -35,6 +35,7 @@ import {
 } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
+import { createUnavailableSheetStructure } from "../sheets/structuredSheet";
 import {
 	ExternalServiceError,
 	getErrorMessage,
@@ -131,7 +132,7 @@ export async function getSheetDataStep(
 	const cache = createSheetCacheRepository(env.sushanshan_bot, log);
 
 	const cachedData = await cache.get(config.spreadsheet);
-	if (cachedData) {
+	if (cachedData?.structuredSheet !== undefined) {
 		log.info("Sheet data loaded from cache");
 		return {
 			sheetInfo: cachedData.sheetInfo,
@@ -140,16 +141,85 @@ export async function getSheetDataStep(
 		};
 	}
 
+	if (cachedData) {
+		log.info("Legacy sheet cache found; refreshing structured snapshot");
+		const sheetsApiStartTime = Date.now();
+		try {
+			const refreshedData = await getSheetData(
+				config.googleServiceAccount,
+				log,
+				config.spreadsheet,
+			);
+			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
+			try {
+				await cache.save(
+					config.spreadsheet,
+					refreshedData.sheetInfo,
+					refreshedData.description,
+					refreshedData.structuredSheet,
+				);
+				log.info("Structured sheet cache refreshed");
+			} catch (error) {
+				log.warn("Failed to save refreshed cache (non-fatal)", {
+					error: getErrorMessage(error),
+				});
+			}
+			return {
+				sheetInfo: refreshedData.sheetInfo,
+				description: refreshedData.description,
+				fromCache: false,
+				sheetsApiCall: {
+					success: true,
+					durationMs: sheetsApiDurationMs,
+				},
+			};
+		} catch (error) {
+			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
+			log.warn("Failed to refresh legacy sheet cache; using legacy TSV", {
+				error: getErrorMessage(error),
+			});
+			try {
+				await cache.save(
+					config.spreadsheet,
+					cachedData.sheetInfo,
+					cachedData.description,
+					createUnavailableSheetStructure("invalid_snapshot"),
+				);
+				log.info("Legacy sheet fallback cached after refresh failure");
+			} catch (cacheError) {
+				log.warn("Failed to cache legacy sheet fallback (non-fatal)", {
+					error: getErrorMessage(cacheError),
+				});
+			}
+			return {
+				sheetInfo: cachedData.sheetInfo,
+				description: cachedData.description,
+				fromCache: true,
+				sheetsApiCall: {
+					success: false,
+					durationMs: sheetsApiDurationMs,
+				},
+			};
+		}
+	}
+
 	log.info("Fetching sheet data from Google Sheets");
+	const sheetsApiStartTime = Date.now();
 	const data = await getSheetData(
 		config.googleServiceAccount,
 		log,
 		config.spreadsheet,
 	);
+	const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 
 	// Save to cache (best effort)
 	try {
-		await cache.save(config.spreadsheet, data.sheetInfo, data.description);
+		await cache.save(
+			config.spreadsheet,
+			data.sheetInfo,
+			data.description,
+			data.structuredSheet,
+		);
 		log.info("Sheet data cached");
 	} catch (error) {
 		log.warn("Failed to save cache (non-fatal)", {
@@ -161,7 +231,36 @@ export async function getSheetDataStep(
 		sheetInfo: data.sheetInfo,
 		description: data.description,
 		fromCache: false,
+		sheetsApiCall: {
+			success: true,
+			durationMs: sheetsApiDurationMs,
+		},
 	};
+}
+
+export function recordSheetDataAccessMetrics(
+	metrics: IMetricsClient,
+	requestId: string,
+	sheetData: SheetDataOutput,
+	stepDurationMs: number,
+): void {
+	metrics.recordKVCacheAccess({
+		requestId,
+		success: true,
+		durationMs: stepDurationMs,
+		cacheHit: sheetData.fromCache,
+		operation: "get",
+	});
+
+	// New checkpoints report an attempted refresh separately from the data
+	// source. Fall back to the old fromCache behavior for older checkpoints.
+	if (sheetData.sheetsApiCall || !sheetData.fromCache) {
+		metrics.recordSheetsApiCall({
+			requestId,
+			success: sheetData.sheetsApiCall?.success ?? true,
+			durationMs: sheetData.sheetsApiCall?.durationMs ?? stepDurationMs,
+		});
+	}
 }
 
 // Step 2: Get conversation history from KV
@@ -563,23 +662,12 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 
 			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
 
-			// Record cache access metric
-			metrics.recordKVCacheAccess({
+			recordSheetDataAccessMetrics(
+				metrics,
 				requestId,
-				success: true,
-				durationMs: sheetDataDurationMs,
-				cacheHit: sheetData.fromCache,
-				operation: "get",
-			});
-
-			// Record sheets API metric if cache was missed
-			if (!sheetData.fromCache) {
-				metrics.recordSheetsApiCall({
-					requestId,
-					success: true,
-					durationMs: sheetDataDurationMs,
-				});
-			}
+				sheetData,
+				sheetDataDurationMs,
+			);
 
 			// Step 2: Get conversation history
 			const historyOutput = await step.do("getHistory", async () => {
