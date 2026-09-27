@@ -1,5 +1,8 @@
 import type {
+	AutomaticCandidateSummary,
 	AutomaticChecks,
+	AutomaticEvalMetrics,
+	AutomaticEvalSummary,
 	CandidateSummary,
 	EvalCase,
 	EvalCaseSummary,
@@ -76,6 +79,96 @@ export function median(values: number[]): number {
 function rate(values: boolean[]): number {
 	if (values.length === 0) return 1;
 	return values.filter(Boolean).length / values.length;
+}
+
+function summarizeAutomaticMetrics(
+	results: EvalRunResult[],
+): AutomaticEvalMetrics {
+	const successful = results.filter(({ success }) => success);
+	const firstText = successful.flatMap(({ firstTextMs }) =>
+		firstTextMs === null ? [] : [firstTextMs],
+	);
+	return {
+		runCount: results.length,
+		requiredTermsRate: rate(
+			results.map(
+				({ success, automaticChecks }) =>
+					success && automaticChecks.requiredTermsPresent,
+			),
+		),
+		forbiddenTermsRate: rate(
+			results.map(
+				({ success, automaticChecks }) =>
+					success && automaticChecks.forbiddenTermsAbsent,
+			),
+		),
+		groundingCeiling: rate(
+			results.map(
+				({ success, automaticChecks }) =>
+					success &&
+					automaticChecks.requiredTermsPresent &&
+					automaticChecks.forbiddenTermsAbsent,
+			),
+		),
+		deferralCeiling: rate(
+			results
+				.filter(
+					({ category }) => category === "ambiguous" || category === "unknown",
+				)
+				.map(
+					({ success, automaticChecks }) =>
+						success && automaticChecks.behaviorSignalPresent,
+				),
+		),
+		formatCeiling: rate(
+			results.map(
+				({ success, automaticChecks }) =>
+					success &&
+					automaticChecks.japanesePresent &&
+					automaticChecks.timelineFormatPresent !== false,
+			),
+		),
+		failureRate: 1 - successful.length / results.length,
+		medianFirstTextMs: median(firstText),
+		p95FirstTextMs: nearestRankPercentile(firstText, 0.95),
+		medianAnswerCompletionMs: median(
+			successful.map(({ answerCompletionMs }) => answerCompletionMs),
+		),
+		p95AnswerCompletionMs: nearestRankPercentile(
+			successful.map(({ answerCompletionMs }) => answerCompletionMs),
+			0.95,
+		),
+		medianTotalCompletionMs: median(
+			successful.map(({ totalCompletionMs }) => totalCompletionMs),
+		),
+		p95TotalCompletionMs: nearestRankPercentile(
+			successful.map(({ totalCompletionMs }) => totalCompletionMs),
+			0.95,
+		),
+		medianCostUsd: median(
+			successful.flatMap(({ cost }) =>
+				cost === null ? [] : [cost.totalEstimatedUsd],
+			),
+		),
+	};
+}
+
+export function summarizeAutomaticEvaluation(
+	results: EvalRunResult[],
+): AutomaticEvalSummary {
+	const candidates: AutomaticCandidateSummary[] = [
+		...Map.groupBy(results, ({ candidateId }) => candidateId),
+	].map(([candidateId, candidateResults]) => ({
+		candidateId,
+		...summarizeAutomaticMetrics(candidateResults),
+		cases: [...Map.groupBy(candidateResults, ({ caseId }) => caseId)]
+			.map(([caseId, caseResults]) => ({
+				caseId,
+				...summarizeAutomaticMetrics(caseResults),
+			}))
+			.sort((left, right) => left.caseId.localeCompare(right.caseId)),
+	}));
+	return { scoringMode: "automatic_only", candidates };
 }
 
 type CompletedManualJudgment = Omit<

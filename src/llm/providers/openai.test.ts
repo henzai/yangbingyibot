@@ -181,13 +181,14 @@ describe("OpenAI LLM adapter", () => {
 
 		await gateway.generateText({
 			...request,
-			model: "o3",
+			model: "gpt-5.6-luna",
 			temperature: 0,
+			reasoningEffort: "max",
 			includeReasoningSummary: true,
 		});
 		expect(mocks.create.mock.calls[1][0]).toMatchObject({
-			model: "o3",
-			reasoning: { summary: "auto" },
+			model: "gpt-5.6-luna",
+			reasoning: { effort: "max", summary: "auto" },
 		});
 		expect(mocks.create.mock.calls[1][0]).not.toHaveProperty("temperature");
 
@@ -195,6 +196,7 @@ describe("OpenAI LLM adapter", () => {
 			...request,
 			model: "future-unknown-model",
 			temperature: 0,
+			reasoningEffort: "max",
 			includeReasoningSummary: true,
 		});
 		expect(mocks.create.mock.calls[2][0]).not.toHaveProperty("temperature");
