@@ -156,7 +156,7 @@ export const SHEET_SCHEMA_ANCHORS: readonly SchemaAnchor[] = [
 const PLACEHOLDER_VALUE = /^(?:-|—|–|不明|不詳|非公開|未公開|unknown|#?n\/a)$/i;
 const MIN_SCHEMA_VALUE_MATCH_RATIO = 0.8;
 
-function isPlaceholder(value: string): boolean {
+export function isPlaceholder(value: string): boolean {
 	const trimmed = value.trim();
 	return trimmed === "" || PLACEHOLDER_VALUE.test(trimmed);
 }
