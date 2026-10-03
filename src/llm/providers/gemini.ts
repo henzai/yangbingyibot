@@ -108,11 +108,15 @@ export class GeminiLlmGateway implements ILlmGateway {
 			request.signal,
 		);
 		try {
-			const model = await scope.run("retrieve model metadata", () =>
-				this.client.models.get({
-					model: request.model,
-					config: { abortSignal: scope.signal },
-				}),
+			// A transient upstream fault must not be reported as a failed probe.
+			const model = await this.executeRequest(
+				scope,
+				"retrieve model metadata",
+				() =>
+					this.client.models.get({
+						model: request.model,
+						config: { abortSignal: scope.signal },
+					}),
 			);
 			if (!Array.isArray(model.supportedActions)) {
 				return {

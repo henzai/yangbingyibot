@@ -30,9 +30,16 @@ latency requirements, or produce a useful answer. A successful list operation
 is not used as a substitute for checking the configured model. Real generation
 belongs to the explicit evaluation procedure in #433 and may incur usage.
 
+Probes share the application retry policy, so a retryable upstream fault is
+retried once inside the same five-second deadline rather than reported
+immediately.
+
 Probe outcomes are `healthy`, `unhealthy`, or `unverified`. Authentication
-(`401`/`403`), timeout, transport, and capability failures have distinct
-`errorKind` values. A provider without a safe non-generating probe is
+(`401`/`403`), timeout, transport, upstream, and capability failures have
+distinct `errorKind` values. `upstream` covers a transient fault that survived
+the retry (a `5xx` or another retryable status); `capability` is reserved for a
+model that does not meet the requirement, such as a `4xx` or metadata that omits
+`generateContent`. A provider without a safe non-generating probe is
 `unverified`, which makes `allHealthy` false; it is never silently promoted to
 healthy. A summary-only target retains purpose `summary`, so its failure is
 distinguishable from answer unavailability.
