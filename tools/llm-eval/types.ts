@@ -1,4 +1,8 @@
-import type { LlmMessage, LlmUsage } from "../../src/llm/types";
+import type {
+	LlmMessage,
+	LlmReasoningEffort,
+	LlmUsage,
+} from "../../src/llm/types";
 
 export type EvalProvider = "gemini" | "openai";
 
@@ -8,7 +12,9 @@ export type CandidateConfig = {
 	provider: EvalProvider;
 	model: string;
 	temperature: 0 | null;
-	reasoningSetting: "provider_default";
+	reasoningSetting: "provider_default" | LlmReasoningEffort;
+	/** Overrides the suite default when reasoning needs a larger token budget. */
+	maxOutputTokens?: number;
 	summary: {
 		provider: EvalProvider;
 		model: string;
@@ -48,8 +54,16 @@ export type EvalSuite = {
 	maxPromptBytes: number;
 	maxSummaryCallsPerAnswer: number;
 	budgetUsd: number;
+	scoringMode?: "manual" | "automatic_only";
 	candidates: CandidateConfig[];
 	cases: EvalCase[];
+};
+
+export type EvalSuiteProfile = Pick<
+	EvalSuite,
+	"version" | "seed" | "budgetUsd" | "scoringMode" | "candidates"
+> & {
+	extends: string;
 };
 
 export type PriceCatalogEntry = {
@@ -131,6 +145,7 @@ export type EvaluationArtifact = {
 	repetitions: number;
 	maxOutputTokens: number;
 	budgetUsd: number;
+	scoringMode: "manual" | "automatic_only";
 	results: EvalRunResult[];
 	abortedReason?: string;
 };
@@ -183,4 +198,35 @@ export type EvalSummary = {
 	candidates: CandidateSummary[];
 	recommendedCandidateId: string;
 	recommendationReason: string;
+};
+
+export type AutomaticEvalMetrics = {
+	runCount: number;
+	requiredTermsRate: number;
+	forbiddenTermsRate: number;
+	groundingCeiling: number;
+	deferralCeiling: number;
+	formatCeiling: number;
+	failureRate: number;
+	medianFirstTextMs: number;
+	p95FirstTextMs: number;
+	medianAnswerCompletionMs: number;
+	p95AnswerCompletionMs: number;
+	medianTotalCompletionMs: number;
+	p95TotalCompletionMs: number;
+	medianCostUsd: number;
+};
+
+export type AutomaticEvalCaseSummary = AutomaticEvalMetrics & {
+	caseId: string;
+};
+
+export type AutomaticCandidateSummary = AutomaticEvalMetrics & {
+	candidateId: string;
+	cases: AutomaticEvalCaseSummary[];
+};
+
+export type AutomaticEvalSummary = {
+	scoringMode: "automatic_only";
+	candidates: AutomaticCandidateSummary[];
 };
