@@ -50,13 +50,41 @@ export type HealthCheckResult = {
 
 const ERROR_REPORTED_TTL_SECONDS = 60 * 60; // 1 hour
 const LLM_PROBE_TIMEOUT_MS = 5_000;
+const KV_PROBE_TIMEOUT_MS = 3_000;
 
 type GatewayFactory = (selection: LlmSelection, log?: Logger) => ILlmGateway;
 
+// An isolate that hits its memory limit rejects in-flight I/O with a KV-shaped
+// error, so classify those as "capability" (resource exhaustion) instead of
+// blaming KV itself. Keeping the kinds distinct also keeps the incident
+// fingerprints - and therefore the deduplication buckets - separate.
+function classifyKvError(error: unknown): CheckResult["errorKind"] {
+	return /memory limit|exceeded/i.test(getErrorMessage(error))
+		? "capability"
+		: "transport";
+}
+
 async function checkKV(kv: KVNamespace): Promise<CheckResult> {
 	const start = Date.now();
+	const timedOut = Symbol("kv-probe-timeout");
+	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
-		await kv.get("__health_check__");
+		const result = await Promise.race([
+			kv.get("__health_check__"),
+			new Promise<typeof timedOut>((resolve) => {
+				timer = setTimeout(() => resolve(timedOut), KV_PROBE_TIMEOUT_MS);
+			}),
+		]);
+		if (result === timedOut) {
+			return {
+				name: "kv",
+				ok: false,
+				status: "unhealthy",
+				durationMs: Date.now() - start,
+				error: `KV probe timed out after ${KV_PROBE_TIMEOUT_MS}ms`,
+				errorKind: "timeout",
+			};
+		}
 		return {
 			name: "kv",
 			ok: true,
@@ -70,7 +98,10 @@ async function checkKV(kv: KVNamespace): Promise<CheckResult> {
 			status: "unhealthy",
 			durationMs: Date.now() - start,
 			error: getErrorMessage(error),
+			errorKind: classifyKvError(error),
 		};
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
