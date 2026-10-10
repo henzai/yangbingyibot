@@ -177,7 +177,8 @@ export class OpenAILlmGateway implements ILlmGateway {
 			request.signal,
 		);
 		try {
-			await scope.run("retrieve model metadata", () =>
+			// A transient upstream fault must not be reported as a failed probe.
+			await this.executeRequest(scope, "retrieve model metadata", () =>
 				models.retrieve(request.model, { signal: scope.signal }),
 			);
 			return {
