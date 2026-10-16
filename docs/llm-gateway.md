@@ -1,6 +1,6 @@
 # LLM gateway boundary
 
-This documents stages [#429](https://github.com/henzai/yangbingyibot/issues/429), [#430](https://github.com/henzai/yangbingyibot/issues/430), and [#431](https://github.com/henzai/yangbingyibot/issues/431) of [#428](https://github.com/henzai/yangbingyibot/issues/428). Gemini and OpenAI are registered production adapters. The application keeps its Gemini-compatible defaults when LLM variables are absent, while the production deployment explicitly selects OpenAI `gpt-5.6-luna` with summaries disabled under [#449](https://github.com/henzai/yangbingyibot/issues/449).
+This documents stages [#429](https://github.com/henzai/yangbingyibot/issues/429), [#430](https://github.com/henzai/yangbingyibot/issues/430), and [#431](https://github.com/henzai/yangbingyibot/issues/431) of [#428](https://github.com/henzai/yangbingyibot/issues/428). Gemini and OpenAI are registered production adapters. The application keeps its Gemini-compatible defaults when LLM variables are absent. The deployment configuration selects OpenAI `gpt-6-luna` at medium reasoning effort with summaries disabled; the earlier `gpt-5.6-luna` selection was tracked under [#449](https://github.com/henzai/yangbingyibot/issues/449).
 
 `src/llm/types.ts` defines the text-only `ILlmGateway`. It has no SDK, Cloudflare binding, Discord, or KV dependencies. `src/llm/promptBuilder.ts` keeps application instructions, knowledge context, and `user`/`assistant` messages separate. The Gemini adapter owns wire conversion, SDK configuration, and provider-specific instruction placement.
 
@@ -68,11 +68,12 @@ The production OpenAI answer with summaries disabled is configured as follows:
 ```toml
 [vars]
 LLM_PROVIDER = "openai"
-LLM_MODEL = "gpt-5.6-luna"
+LLM_MODEL = "gpt-6-luna"
 LLM_SUMMARY_ENABLED = "false"
 ```
 
 Set `OPENAI_API_KEY` as a Worker secret. The current production deployment retains `GEMINI_API_KEY` only to support an explicitly approved rollback; it is not required or contacted by the selected OpenAI-only configuration.
+The adapter explicitly sends `reasoning.effort: "medium"` for `gpt-6-luna`, so the selected effort does not depend on the API default.
 
 `src/llm/providerCatalog.ts` holds SDK-free configuration metadata. `src/llm/factory.ts` constructs only the selected adapter. New providers register in both places; tests inject a fake catalog/factory without enabling another real API. Answer and summary models may differ, and a shared provider reuses its gateway. Configuration is resolved at the start of `run` for generation and metrics; SDK clients and API keys stay outside serialized step results and Workflow payloads.
 
@@ -98,7 +99,7 @@ The adapter uses the official JavaScript SDK `openai@7.10.0` and the Responses A
 - Every request sets `store: false`, sends no `conversation` or `previous_response_id`, and treats KV as the only conversation source. OpenAI organization/project retention controls remain an independent operator setting; `store: false` must not be described as Zero Data Retention. The configured policy can be checked with the [data-retention API](https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/data_retention/methods/retrieve).
 - Every request sets `truncation: disabled`. A context overflow therefore fails explicitly instead of silently dropping knowledge or earlier history.
 - Streaming maps `response.output_text.delta`, public `response.reasoning_summary_text.delta`, refusal, completed, incomplete, failed, usage, and in-band errors. Refusal text and provider error bodies are not exposed.
-- Reasoning summaries are requested only for recognized reasoning model families. `temperature` is sent only for the conservative non-reasoning allowlist. Unknown future model IDs receive neither optional field until their support is verified; `max_output_tokens` remains part of the general Responses request schema.
+- Reasoning summaries are requested only for recognized reasoning model families. `gpt-6-luna` explicitly uses medium reasoning effort. `temperature` is sent only for the conservative non-reasoning allowlist. Unknown future model IDs receive neither optional field until their support is verified; `max_output_tokens` remains part of the general Responses request schema.
 - The API client can be replaced at the adapter constructor boundary, and all tests use fixtures rather than API credentials. Shared contract tests run the same text, usage, finish, missing-usage, refusal, and limit semantics against Gemini and OpenAI.
 
 Official API references checked on 2026-09-08 confirm that current models expose API model IDs and Responses support in the [model catalog](https://developers.openai.com/api/docs/models), while account availability must be obtained from `GET /models`. The adapter does not hard-code a model from that public catalog.

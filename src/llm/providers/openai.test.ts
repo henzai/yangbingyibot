@@ -193,12 +193,31 @@ describe("OpenAI LLM adapter", () => {
 
 		await gateway.generateText({
 			...request,
+			model: "gpt-6-luna",
+			includeReasoningSummary: false,
+		});
+		expect(mocks.create.mock.calls[2][0]).toMatchObject({
+			model: "gpt-6-luna",
+			reasoning: { effort: "medium" },
+		});
+
+		await gateway.generateText({
+			...request,
+			model: "gpt-6-luna",
+			includeReasoningSummary: true,
+		});
+		expect(mocks.create.mock.calls[3][0]).toMatchObject({
+			reasoning: { effort: "medium", summary: "auto" },
+		});
+
+		await gateway.generateText({
+			...request,
 			model: "future-unknown-model",
 			temperature: 0,
 			includeReasoningSummary: true,
 		});
-		expect(mocks.create.mock.calls[2][0]).not.toHaveProperty("temperature");
-		expect(mocks.create.mock.calls[2][0]).not.toHaveProperty("reasoning");
+		expect(mocks.create.mock.calls[4][0]).not.toHaveProperty("temperature");
+		expect(mocks.create.mock.calls[4][0]).not.toHaveProperty("reasoning");
 	});
 
 	it("maps text, public reasoning summaries, and one final usage snapshot", async () => {

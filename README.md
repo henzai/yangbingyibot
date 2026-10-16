@@ -72,7 +72,7 @@ GITHUB_TOKEN=<GitHub Personal Access Token（オプション：エラー自動�
 
 本番環境では `wrangler secret` でシークレットを設定してください。
 OpenAIを選ぶ場合は `OPENAI_API_KEY` と明示的な `LLM_MODEL` が必要です。設定例、保持方針、モデル単位のヘルスプローブについては [`docs/llm-gateway.md`](docs/llm-gateway.md) を参照してください。
-このリポジトリの本番デプロイは `LLM_PROVIDER=openai`、`LLM_MODEL=gpt-5.6-luna`、`LLM_SUMMARY_ENABLED=false` を明示し、Geminiを使った進捗要約を行いません。
+このリポジトリの本番デプロイ設定は `LLM_PROVIDER=openai`、`LLM_MODEL=gpt-6-luna`、`LLM_SUMMARY_ENABLED=false` です。GPT-6 Luna の推論設定は Medium を明示し、Geminiを使った進捗要約は行いません。
 
 ### 起動
 

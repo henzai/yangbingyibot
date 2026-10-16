@@ -41,6 +41,12 @@ export function toOpenAIRequest(
 	request: LlmRequest,
 ): Omit<ResponseCreateParamsBase, "stream"> {
 	const capabilities = getOpenAIModelCapabilities(request.model);
+	const reasoning = {
+		...(request.model === "gpt-6-luna" ? { effort: "medium" as const } : {}),
+		...(request.includeReasoningSummary && capabilities.reasoningSummary
+			? { summary: "auto" as const }
+			: {}),
+	};
 	return {
 		model: request.model,
 		instructions: request.prompt.systemInstruction,
@@ -54,8 +60,6 @@ export function toOpenAIRequest(
 		...(request.temperature === undefined || !capabilities.temperature
 			? {}
 			: { temperature: request.temperature }),
-		...(request.includeReasoningSummary && capabilities.reasoningSummary
-			? { reasoning: { summary: "auto" as const } }
-			: {}),
+		...(Object.keys(reasoning).length > 0 ? { reasoning } : {}),
 	};
 }
