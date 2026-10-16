@@ -55,6 +55,17 @@ function gateway(provider: string, probe?: ILlmGateway["probe"]): ILlmGateway {
 	};
 }
 
+const probeFailure = (status: number) =>
+	new ExternalServiceError({
+		service: "llm",
+		provider: "gemini",
+		kind: "http",
+		operation: "retrieve model metadata",
+		status,
+		retryable: status >= 500,
+		userMessage: "probe failed",
+	});
+
 function factory(
 	probes: Record<string, (model: string) => Promise<LlmProbeResult>>,
 ) {
@@ -221,6 +232,58 @@ describe("health check", () => {
 				status: "unverified",
 				errorKind: "probe_unavailable",
 			}),
+		);
+	});
+
+	it("separates a transient upstream fault from a capability gap", async () => {
+		for (const [status, errorKind] of [
+			[400, "capability"],
+			[500, "upstream"],
+		] as const) {
+			const result = await runHealthCheck(
+				createMockEnv({ LLM_SUMMARY_ENABLED: "false" }),
+				log,
+				vi.fn(() =>
+					gateway("gemini", vi.fn().mockRejectedValue(probeFailure(status))),
+				),
+			);
+			expect(result.checks).toContainEqual(
+				expect.objectContaining({ status: "unhealthy", errorKind }),
+			);
+		}
+	});
+
+	it("uses separate v2 incident fingerprints for capability and upstream faults", async () => {
+		vi.mocked(globalThis.fetch).mockImplementation(async (url) =>
+			String(url).includes("/search/issues")
+				? new Response(JSON.stringify({ total_count: 0 }), { status: 200 })
+				: new Response("{}", { status: 201 }),
+		);
+
+		for (const status of [400, 500]) {
+			await runHealthCheck(
+				createMockEnv({
+					LLM_SUMMARY_ENABLED: "false",
+					GITHUB_TOKEN: "github-token",
+				}),
+				log,
+				vi.fn(() =>
+					gateway("gemini", vi.fn().mockRejectedValue(probeFailure(status))),
+				),
+			);
+		}
+
+		const searchUrls = vi
+			.mocked(globalThis.fetch)
+			.mock.calls.map(([url]) => String(url))
+			.filter((url) => url.includes("/search/issues"))
+			.map((url) => decodeURIComponent(url));
+		expect(searchUrls).toHaveLength(2);
+		expect(searchUrls[0]).toContain(
+			"health_check:v2:unhealthy:gemini:gemini-3.5-flash-lite:answer:capability",
+		);
+		expect(searchUrls[1]).toContain(
+			"health_check:v2:unhealthy:gemini:gemini-3.5-flash-lite:answer:upstream",
 		);
 	});
 

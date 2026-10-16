@@ -81,6 +81,26 @@ describe("Gemini LLM adapter", () => {
 		expect(mocks.stream).not.toHaveBeenCalled();
 	});
 
+	it("retries a 5xx probe instead of reporting a transient fault", async () => {
+		vi.useFakeTimers();
+		mocks.get
+			.mockRejectedValueOnce(
+				Object.assign(new Error("private body"), { status: 500 }),
+			)
+			.mockResolvedValueOnce({
+				name: "models/configured-model",
+				supportedActions: ["generateContent"],
+			});
+
+		const pending = new GeminiLlmGateway("test-key").probe({
+			model: "configured-model",
+		});
+		await vi.runAllTimersAsync();
+
+		expect(await pending).toMatchObject({ status: "available" });
+		expect(mocks.get).toHaveBeenCalledTimes(2);
+	});
+
 	it("does not claim health when model metadata omits generation support", async () => {
 		mocks.get.mockResolvedValue({ supportedActions: [] });
 		await expect(

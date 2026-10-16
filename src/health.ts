@@ -33,6 +33,7 @@ export type CheckResult = {
 		| "authentication"
 		| "timeout"
 		| "transport"
+		| "upstream"
 		| "capability"
 		| "probe_unavailable";
 	provider?: string;
@@ -108,7 +109,13 @@ function classifyProbeError(error: unknown): CheckResult["errorKind"] {
 	if (!(error instanceof ExternalServiceError)) return "transport";
 	if (error.kind === "timeout") return "timeout";
 	if (error.status === 401 || error.status === 403) return "authentication";
-	return error.kind === "transport" ? "transport" : "capability";
+	if (error.kind === "transport") return "transport";
+	// A transient upstream fault says nothing about what the model supports.
+	// Keeping it out of "capability" also keeps the two fingerprints apart, so a
+	// real capability failure is never deduped away by a passing 5xx.
+	if ((error.status !== undefined && error.status >= 500) || error.retryable)
+		return "upstream";
+	return "capability";
 }
 
 async function checkLlmTarget(

@@ -116,6 +116,28 @@ describe("OpenAI LLM adapter", () => {
 		expect(mocks.create).not.toHaveBeenCalled();
 	});
 
+	it("retries a 5xx probe instead of reporting a transient fault", async () => {
+		vi.useFakeTimers();
+		mocks.retrieve
+			.mockRejectedValueOnce(
+				Object.assign(new Error("private body"), { status: 500 }),
+			)
+			.mockResolvedValueOnce({
+				id: "configured-model",
+				object: "model",
+				created: 0,
+				owned_by: "openai",
+			});
+
+		const pending = new OpenAILlmGateway("test-key").probe({
+			model: "configured-model",
+		});
+		await vi.runAllTimersAsync();
+
+		expect(await pending).toMatchObject({ status: "available" });
+		expect(mocks.retrieve).toHaveBeenCalledTimes(2);
+	});
+
 	it("accepts a replaceable Responses client", async () => {
 		const create = vi.fn().mockResolvedValue(response());
 		const responses = { create } as unknown as OpenAI["responses"];
