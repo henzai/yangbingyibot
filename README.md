@@ -1,6 +1,6 @@
 # yangbingyibot
 
-Google Sheetsのナレッジベースと設定可能なLLM（未設定時はGoogle Gemini、本番デプロイ設定はOpenAI GPT-5.6 Luna）を使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
+Google Sheetsのナレッジベースと設定可能なLLM（未設定時はGoogle Gemini、本番デプロイ設定はOpenAI GPT-6 Luna）を使用してDiscordで質問に回答するボットです。Cloudflare Workers上で動作します。
 
 ## 機能
 
