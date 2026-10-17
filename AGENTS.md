@@ -59,6 +59,21 @@
 - Verify the application response rather than treating command submission alone
   as success. Do not automatically resend a failed or timed-out check.
 
+## Verification delegation
+
+- Delegate runtime checks, including production root/log/health checks and
+  Discord `/ask` E2E, to a sub-agent using `gpt-6-luna` with reasoning effort
+  `medium`. The parent agent owns implementation, release actions, and review
+  of the verification evidence.
+- Give the verifier the exact revision/environment, applicable skill and local
+  configuration paths, expected evidence, and authorization limits. A verifier
+  already running as a sub-agent performs the checks itself; do not delegate
+  recursively.
+- Assign one verifier per check. Share existing submission records and pending
+  login state so parallel agents or resumed sessions do not duplicate `/ask`.
+- Have the verifier report blockers to the parent instead of independently
+  broadening permissions, retrying submissions, or escalating to a larger model.
+
 ## Pull requests and release verification
 
 - Create a draft pull request when the task has no existing pull request.

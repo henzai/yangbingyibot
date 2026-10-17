@@ -15,6 +15,19 @@ This is the production E2E check. Do not replace it with a fabricated
 Interaction POST, a plain Discord message, a bot-token command invocation, or a
 Discord user-token/internal API call.
 
+## Verification owner
+
+The parent delegates this workflow to a `gpt-6-luna` sub-agent with reasoning
+effort `medium`, then reviews its evidence and reports the outcome. If you are
+already that verifier, execute the check yourself rather than delegating again.
+
+Pass the verifier the approved release/check scope, revision/version, this skill,
+local configuration path, and any existing submission or login-handoff record.
+Only that verifier owns the browser preparation and single submission for the
+check; the parent must not send a parallel check. Report login or other blockers
+to the parent, reusing an existing user prompt instead of asking again. Preserve
+the standing-authorization limits below.
+
 ## Standing authorization
 
 A user-approved release workflow, or an explicit request to run this E2E,
