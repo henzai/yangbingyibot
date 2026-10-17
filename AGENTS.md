@@ -90,14 +90,20 @@ other.
 - Delegate at explicit points, such as a review before publishing a PR. Do not
   run another model automatically on every turn; both subscriptions have
   limited usage.
-- Standard invocations, using each CLI's default model unless a rule below
-  names one:
-  - Claude Code → Codex: `codex exec -s read-only "<brief>"` for research or
-    review, `codex exec review` for a diff review, and
-    `codex exec --worktree "<brief>"` for implementation.
-  - Codex → Claude Code: `claude -p --permission-mode plan "<brief>"` for
-    research or review, and `claude -p -w <name> "<brief>"` for
-    implementation.
+- Standard invocations. Research and review use a lighter tier to save usage;
+  implementation uses each CLI's default model:
+  - Claude Code → Codex:
+    `codex exec -s read-only -c model_reasoning_effort="medium" "<brief>"` for
+    research or review,
+    `codex exec review -c model_reasoning_effort="medium"` for a diff review,
+    and `codex exec --worktree "<brief>"` for implementation.
+  - Codex → Claude Code:
+    `claude -p --permission-mode plan --model sonnet "<brief>"` for research
+    or review, and `claude -p -w <name> "<brief>"` for implementation.
+- Use the heavier review tier (`model_reasoning_effort="high"` for Codex,
+  `--model opus` for Claude Code) only when the user asks for it, or when the
+  change affects production configuration (`wrangler.toml`, secrets, or CI and
+  deploy workflows) or makes a major design decision.
 - A brief starts by stating that it is for a delegated session, then gives the
   goal, constraints, relevant files, completion criteria, and output format.
   The delegate starts without the parent's context.
