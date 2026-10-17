@@ -105,6 +105,14 @@ other.
   `--model opus` for Claude Code) only when the user asks for it, or when the
   change affects production configuration (`wrangler.toml`, secrets, or CI and
   deploy workflows) or makes a major design decision.
+- When the parent's own subscription usage runs high, treat the other CLI as
+  the main worker: delegate implementation, research, and review to it with the
+  standard invocations, and keep only planning, briefs, verification of
+  delegated output, and user decisions in the parent. Neither CLI shows the
+  model its remaining quota, so act only when the user says usage is high or
+  the session shows a usage-limit warning; do not guess. If the delegate also
+  hits its limit, stop and report to the user instead of retrying or switching
+  to a heavier model.
 - A brief starts by stating that it is for a delegated session, then gives the
   goal, constraints, relevant files, completion criteria, and output format.
   The delegate starts without the parent's context.
