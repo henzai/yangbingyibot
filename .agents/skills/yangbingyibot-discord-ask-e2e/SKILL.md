@@ -98,11 +98,18 @@ in the test question.
    as described above.
 3. Connect to the user's Chrome session and name the browser session
    `🧪 Discord /ask E2E`.
-4. Open `discordChannelUrl` in a new Chrome tab. Do not reuse a live Discord tab
-   unless the user explicitly asks to reuse it.
-5. If Discord asks the user to log in again, stop before credential entry and
-   ask the user to complete login. Continue in the test-channel tab after the
-   user confirms login.
+4. Prefer an existing agent-created E2E tab for the configured channel when its
+   handoff record identifies the browser and tab. Reacquire it through the
+   Chrome skill's current tab inventory and verify the account, server,
+   channel, and empty composer. Confirm a fresh read-only server operation
+   succeeds; a cached channel view alone does not establish authentication.
+   Keep one verifier as its owner. Otherwise open `discordChannelUrl` in a new
+   Chrome tab. Reuse other live Discord tabs only at the user's request.
+5. A new tab can request login while an existing E2E tab remains usable; do not
+   conclude that the whole account session has expired. If no verified E2E tab
+   is usable, stop before credential entry and ask the user to complete login
+   in Chrome, reusing any pending login handoff. Never copy cookies or tokens.
+   Continue after the user confirms login.
 6. Verify the visible server and channel match `expectedDiscordServer` and
    `expectedDiscordChannel`, and the signed-in account is the intended account.
 7. In the message composer:
@@ -142,6 +149,8 @@ in the test question.
   and a retry can duplicate production work.
 - Record the visible Discord error and approximate submission time for log
   correlation.
+- Include the browser/tab handoff in the local check record so another verifier
+  can discover and revalidate the same E2E tab without creating a new login flow.
 - Treat `アプリケーションが応答しませんでした` as evidence that Discord did
   not receive the initial Interaction response in time. It does not by itself
   prove that the Worker received nothing or that downstream processing never
