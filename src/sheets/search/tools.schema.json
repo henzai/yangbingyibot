@@ -1,0 +1,1012 @@
+[
+	{
+		"type": "function",
+		"name": "search_records",
+		"description": "Find identity candidates or literal text matches in an allowed dataset. Candidates and lexical matches do not prove concept recall or a complete answer set. Ambiguity and source availability must remain explicit.",
+		"strict": true,
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"dataset": {
+					"$ref": "#/$defs/dataset"
+				},
+				"query": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"mode": {
+					"type": "string",
+					"enum": ["identity", "text"]
+				},
+				"search_fields": {
+					"anyOf": [
+						{
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/field"
+							},
+							"minItems": 1,
+							"maxItems": 20
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"where": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/where"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"page_size": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100
+				},
+				"cursor": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 2048
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"dataset",
+				"query",
+				"mode",
+				"search_fields",
+				"where",
+				"page_size",
+				"cursor"
+			],
+			"additionalProperties": false,
+			"$defs": {
+				"atom": {
+					"type": "object",
+					"properties": {
+						"field": {
+							"$ref": "#/$defs/field"
+						},
+						"op": {
+							"type": "string",
+							"enum": [
+								"eq",
+								"in",
+								"lt",
+								"lte",
+								"gt",
+								"gte",
+								"contains",
+								"starts_with",
+								"not_in",
+								"is_missing",
+								"is_present"
+							]
+						},
+						"values": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/scalar"
+							},
+							"minItems": 0,
+							"maxItems": 50
+						}
+					},
+					"required": ["field", "op", "values"],
+					"additionalProperties": false
+				},
+				"branch": {
+					"type": "object",
+					"properties": {
+						"all": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/atom"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["all"],
+					"additionalProperties": false
+				},
+				"dataset": {
+					"type": "string",
+					"enum": ["members", "reference"]
+				},
+				"field": {
+					"type": "string",
+					"enum": [
+						"status",
+						"primary_affiliation",
+						"secondary_affiliation",
+						"newcomer_flag",
+						"latest_rank",
+						"full_name",
+						"pinyin",
+						"age",
+						"initials",
+						"community_nicknames",
+						"nickname_origin",
+						"birthday",
+						"debut_date",
+						"generation",
+						"height",
+						"zodiac",
+						"birth_province",
+						"birth_city",
+						"skills",
+						"hobbies",
+						"catchphrase",
+						"official_nickname",
+						"official_english_name",
+						"university",
+						"blood_type",
+						"mbti",
+						"debut_age",
+						"pocket_followers",
+						"support_color_1",
+						"support_color_1_detail",
+						"support_color_2",
+						"support_color_2_detail",
+						"election_2014",
+						"election_2015",
+						"election_2016",
+						"election_2017",
+						"election_2018",
+						"election_2019",
+						"election_2020",
+						"election_2021",
+						"election_2022",
+						"election_2023",
+						"election_2024",
+						"election_2025",
+						"election_2026",
+						"career",
+						"member_id",
+						"generation_group",
+						"generation_number",
+						"current_group",
+						"current_team",
+						"state_flags",
+						"election_history",
+						"age_at",
+						"tenure_completed_years",
+						"tenure_ordinal_year",
+						"days_until_birthday",
+						"days_until_target_age",
+						"reference_title",
+						"reference_body"
+					]
+				},
+				"scalar": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "boolean"
+						}
+					]
+				},
+				"where": {
+					"type": "object",
+					"properties": {
+						"any": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/branch"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["any"],
+					"additionalProperties": false
+				}
+			}
+		}
+	},
+	{
+		"type": "function",
+		"name": "get_records",
+		"description": "Read specified records and fields or a preset from the request-bound snapshot. fields and preset are mutually exclusive. Long fields and all_available may require a cursor. Missing and unavailable values must not be invented.",
+		"strict": true,
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"dataset": {
+					"$ref": "#/$defs/dataset"
+				},
+				"ids": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 160
+					},
+					"minItems": 1,
+					"maxItems": 20
+				},
+				"fields": {
+					"anyOf": [
+						{
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/field"
+							},
+							"minItems": 1,
+							"maxItems": 20
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"preset": {
+					"anyOf": [
+						{
+							"type": "string",
+							"enum": [
+								"overview",
+								"all_available",
+								"support_colors",
+								"election_history"
+							]
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"calculation_context": {
+					"type": "object",
+					"properties": {
+						"as_of": {
+							"anyOf": [
+								{
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 10
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"target_age": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 120
+								},
+								{
+									"type": "null"
+								}
+							]
+						}
+					},
+					"required": ["as_of", "target_age"],
+					"additionalProperties": false
+				},
+				"cursor": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 2048
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"dataset",
+				"ids",
+				"fields",
+				"preset",
+				"calculation_context",
+				"cursor"
+			],
+			"additionalProperties": false,
+			"$defs": {
+				"dataset": {
+					"type": "string",
+					"enum": ["members", "reference"]
+				},
+				"field": {
+					"type": "string",
+					"enum": [
+						"status",
+						"primary_affiliation",
+						"secondary_affiliation",
+						"newcomer_flag",
+						"latest_rank",
+						"full_name",
+						"pinyin",
+						"age",
+						"initials",
+						"community_nicknames",
+						"nickname_origin",
+						"birthday",
+						"debut_date",
+						"generation",
+						"height",
+						"zodiac",
+						"birth_province",
+						"birth_city",
+						"skills",
+						"hobbies",
+						"catchphrase",
+						"official_nickname",
+						"official_english_name",
+						"university",
+						"blood_type",
+						"mbti",
+						"debut_age",
+						"pocket_followers",
+						"support_color_1",
+						"support_color_1_detail",
+						"support_color_2",
+						"support_color_2_detail",
+						"election_2014",
+						"election_2015",
+						"election_2016",
+						"election_2017",
+						"election_2018",
+						"election_2019",
+						"election_2020",
+						"election_2021",
+						"election_2022",
+						"election_2023",
+						"election_2024",
+						"election_2025",
+						"election_2026",
+						"career",
+						"member_id",
+						"generation_group",
+						"generation_number",
+						"current_group",
+						"current_team",
+						"state_flags",
+						"election_history",
+						"age_at",
+						"tenure_completed_years",
+						"tenure_ordinal_year",
+						"days_until_birthday",
+						"days_until_target_age",
+						"reference_title",
+						"reference_body"
+					]
+				}
+			}
+		}
+	},
+	{
+		"type": "function",
+		"name": "query_records",
+		"description": "Obtain the exact set for finite typed conditions within the request-bound snapshot. where=null means all records. Exactness applies to the supplied conditions, not to the interpretation of the user question. Complete lists must use the validated result-set renderer.",
+		"strict": true,
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"dataset": {
+					"$ref": "#/$defs/dataset"
+				},
+				"where": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/where"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"fields": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/field"
+					},
+					"minItems": 1,
+					"maxItems": 20
+				},
+				"sort": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/sort"
+					},
+					"minItems": 0,
+					"maxItems": 3
+				},
+				"exclude_previously_delivered": {
+					"type": "boolean"
+				},
+				"top_n": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"calculation_context": {
+					"type": "object",
+					"properties": {
+						"as_of": {
+							"anyOf": [
+								{
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 10
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"target_age": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 120
+								},
+								{
+									"type": "null"
+								}
+							]
+						}
+					},
+					"required": ["as_of", "target_age"],
+					"additionalProperties": false
+				},
+				"page_size": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100
+				},
+				"cursor": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 2048
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"dataset",
+				"where",
+				"fields",
+				"sort",
+				"exclude_previously_delivered",
+				"top_n",
+				"calculation_context",
+				"page_size",
+				"cursor"
+			],
+			"additionalProperties": false,
+			"$defs": {
+				"atom": {
+					"type": "object",
+					"properties": {
+						"field": {
+							"$ref": "#/$defs/field"
+						},
+						"op": {
+							"type": "string",
+							"enum": [
+								"eq",
+								"in",
+								"lt",
+								"lte",
+								"gt",
+								"gte",
+								"contains",
+								"starts_with",
+								"not_in",
+								"is_missing",
+								"is_present"
+							]
+						},
+						"values": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/scalar"
+							},
+							"minItems": 0,
+							"maxItems": 50
+						}
+					},
+					"required": ["field", "op", "values"],
+					"additionalProperties": false
+				},
+				"branch": {
+					"type": "object",
+					"properties": {
+						"all": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/atom"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["all"],
+					"additionalProperties": false
+				},
+				"dataset": {
+					"type": "string",
+					"enum": ["members", "reference"]
+				},
+				"field": {
+					"type": "string",
+					"enum": [
+						"status",
+						"primary_affiliation",
+						"secondary_affiliation",
+						"newcomer_flag",
+						"latest_rank",
+						"full_name",
+						"pinyin",
+						"age",
+						"initials",
+						"community_nicknames",
+						"nickname_origin",
+						"birthday",
+						"debut_date",
+						"generation",
+						"height",
+						"zodiac",
+						"birth_province",
+						"birth_city",
+						"skills",
+						"hobbies",
+						"catchphrase",
+						"official_nickname",
+						"official_english_name",
+						"university",
+						"blood_type",
+						"mbti",
+						"debut_age",
+						"pocket_followers",
+						"support_color_1",
+						"support_color_1_detail",
+						"support_color_2",
+						"support_color_2_detail",
+						"election_2014",
+						"election_2015",
+						"election_2016",
+						"election_2017",
+						"election_2018",
+						"election_2019",
+						"election_2020",
+						"election_2021",
+						"election_2022",
+						"election_2023",
+						"election_2024",
+						"election_2025",
+						"election_2026",
+						"career",
+						"member_id",
+						"generation_group",
+						"generation_number",
+						"current_group",
+						"current_team",
+						"state_flags",
+						"election_history",
+						"age_at",
+						"tenure_completed_years",
+						"tenure_ordinal_year",
+						"days_until_birthday",
+						"days_until_target_age",
+						"reference_title",
+						"reference_body"
+					]
+				},
+				"scalar": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "boolean"
+						}
+					]
+				},
+				"sort": {
+					"type": "object",
+					"properties": {
+						"field": {
+							"$ref": "#/$defs/field"
+						},
+						"direction": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					},
+					"required": ["field", "direction"],
+					"additionalProperties": false
+				},
+				"where": {
+					"type": "object",
+					"properties": {
+						"any": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/branch"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["any"],
+					"additionalProperties": false
+				}
+			}
+		}
+	},
+	{
+		"type": "function",
+		"name": "aggregate_records",
+		"description": "Calculate bounded typed metrics on the same exact condition set. count uses distinct record IDs; grouped counts may overlap. Preserve ties and missing-value denominators. difference is left minus right; best_rank uses positive year-labeled ranks only.",
+		"strict": true,
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"dataset": {
+					"$ref": "#/$defs/dataset"
+				},
+				"where": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/where"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"metrics": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"op": {
+								"type": "string",
+								"enum": [
+									"count",
+									"min",
+									"max",
+									"mean",
+									"best_rank",
+									"difference"
+								]
+							},
+							"field": {
+								"anyOf": [
+									{
+										"$ref": "#/$defs/field"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"operands": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"left_id": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 160
+											},
+											"right_id": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 160
+											}
+										},
+										"required": ["left_id", "right_id"],
+										"additionalProperties": false
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["op", "field", "operands"],
+						"additionalProperties": false
+					},
+					"minItems": 1,
+					"maxItems": 5
+				},
+				"group_by": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/field"
+					},
+					"minItems": 0,
+					"maxItems": 3
+				},
+				"sort_metric_index": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"sort_direction": {
+					"type": "string",
+					"enum": ["asc", "desc"]
+				},
+				"top_n": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"calculation_context": {
+					"type": "object",
+					"properties": {
+						"as_of": {
+							"anyOf": [
+								{
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 10
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"target_age": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 120
+								},
+								{
+									"type": "null"
+								}
+							]
+						}
+					},
+					"required": ["as_of", "target_age"],
+					"additionalProperties": false
+				},
+				"page_size": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100
+				},
+				"cursor": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 2048
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"dataset",
+				"where",
+				"metrics",
+				"group_by",
+				"sort_metric_index",
+				"sort_direction",
+				"top_n",
+				"calculation_context",
+				"page_size",
+				"cursor"
+			],
+			"additionalProperties": false,
+			"$defs": {
+				"atom": {
+					"type": "object",
+					"properties": {
+						"field": {
+							"$ref": "#/$defs/field"
+						},
+						"op": {
+							"type": "string",
+							"enum": [
+								"eq",
+								"in",
+								"lt",
+								"lte",
+								"gt",
+								"gte",
+								"contains",
+								"starts_with",
+								"not_in",
+								"is_missing",
+								"is_present"
+							]
+						},
+						"values": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/scalar"
+							},
+							"minItems": 0,
+							"maxItems": 50
+						}
+					},
+					"required": ["field", "op", "values"],
+					"additionalProperties": false
+				},
+				"branch": {
+					"type": "object",
+					"properties": {
+						"all": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/atom"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["all"],
+					"additionalProperties": false
+				},
+				"dataset": {
+					"type": "string",
+					"enum": ["members", "reference"]
+				},
+				"field": {
+					"type": "string",
+					"enum": [
+						"status",
+						"primary_affiliation",
+						"secondary_affiliation",
+						"newcomer_flag",
+						"latest_rank",
+						"full_name",
+						"pinyin",
+						"age",
+						"initials",
+						"community_nicknames",
+						"nickname_origin",
+						"birthday",
+						"debut_date",
+						"generation",
+						"height",
+						"zodiac",
+						"birth_province",
+						"birth_city",
+						"skills",
+						"hobbies",
+						"catchphrase",
+						"official_nickname",
+						"official_english_name",
+						"university",
+						"blood_type",
+						"mbti",
+						"debut_age",
+						"pocket_followers",
+						"support_color_1",
+						"support_color_1_detail",
+						"support_color_2",
+						"support_color_2_detail",
+						"election_2014",
+						"election_2015",
+						"election_2016",
+						"election_2017",
+						"election_2018",
+						"election_2019",
+						"election_2020",
+						"election_2021",
+						"election_2022",
+						"election_2023",
+						"election_2024",
+						"election_2025",
+						"election_2026",
+						"career",
+						"member_id",
+						"generation_group",
+						"generation_number",
+						"current_group",
+						"current_team",
+						"state_flags",
+						"election_history",
+						"age_at",
+						"tenure_completed_years",
+						"tenure_ordinal_year",
+						"days_until_birthday",
+						"days_until_target_age",
+						"reference_title",
+						"reference_body"
+					]
+				},
+				"scalar": {
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "boolean"
+						}
+					]
+				},
+				"where": {
+					"type": "object",
+					"properties": {
+						"any": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/branch"
+							},
+							"minItems": 1,
+							"maxItems": 8
+						}
+					},
+					"required": ["any"],
+					"additionalProperties": false
+				}
+			}
+		}
+	}
+]
