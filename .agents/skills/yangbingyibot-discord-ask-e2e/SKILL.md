@@ -15,6 +15,28 @@ This is the production E2E check. Do not replace it with a fabricated
 Interaction POST, a plain Discord message, a bot-token command invocation, or a
 Discord user-token/internal API call.
 
+## Standing authorization
+
+A user-approved release workflow, or an explicit request to run this E2E,
+authorizes one `/ask` check in the locally configured `#test` channel. Do not
+ask for an additional confirmation merely to submit that check. Announce the
+channel, command, and question, verify them immediately before sending, then
+submit once.
+
+This authorization covers the authenticated account and expected server/channel
+in the local configuration, using a safe source-derived question as described
+below (or a user-supplied question within the same limits). Do not change the
+configuration to expand the destination. If the destination differs, the
+question would disclose sensitive content, or an additional submission is
+needed, stop and obtain specific authorization for that action. Preserve any
+narrower instruction from the user, such as preparing without sending.
+
+Check the release/check record for an existing submission before sending. A
+pending, failed, or timed-out submission is not permission to retry. Record the
+submission time, release version, and outcome so a later session can avoid a
+duplicate. Merge, deployment, rollback, spreadsheet edits, and other external
+writes require their own authorization.
+
 ## Local configuration
 
 Read `.agents/local/yangbingyibot-discord-ask-e2e.json` from the repository
@@ -75,11 +97,12 @@ in the test question.
    - Select the `/ask` command whose question option is described as
      `Ask 433 a question` and whose application is `sushanshan`.
    - Enter the test question in the `question` option.
-8. Immediately before the final Enter key that submits the command, request
-   action-time confirmation. State the exact channel, command, and question.
-   Preserve the prepared tab as a handoff while waiting.
-9. After explicit confirmation, reclaim the prepared tab, verify the exact
-   command and question are still present, and press Enter once.
+8. Announce the exact channel, command, and question. Apply the standing
+   authorization above; ask only when the action is outside that scope. Preserve
+   the prepared tab as a handoff if waiting for user input.
+9. Immediately before submitting, verify the account, channel, application,
+   command, and question are still correct. With authorization established,
+   press Enter once.
 10. Confirm that the submitted question appears in the channel.
 11. Wait for the `sushanshan` application response. Use targeted DOM checks
     around the submitted question rather than repeatedly dumping the entire
@@ -113,5 +136,5 @@ in the test question.
 - When diagnosis is in scope, correlate the timestamp with Cloudflare Worker
   and Workflow logs using read-only checks. Distinguish network/sandbox errors
   from authentication errors and never expose secrets.
-- Ask before any production write, rollback, redeploy, or destructive recovery
-  action.
+- Ask before any production write outside the authorized E2E, including
+  rollback, redeploy, spreadsheet edits, or destructive recovery.

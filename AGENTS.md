@@ -53,9 +53,11 @@
 - Follow the skill's authenticated Chrome and `#test` workflow. Do not
   substitute a fabricated Interaction request, plain Discord message, bot-token
   command invocation, or Discord user-token/internal API call.
-- Obtain action-time confirmation immediately before submitting `/ask`, then
-  verify the application response rather than treating command submission alone
-  as success.
+- A user-approved release workflow or explicit E2E request authorizes one
+  skill-compliant `/ask` in the configured `#test` channel without a separate
+  submission confirmation. Follow the skill's standing-authorization limits.
+- Verify the application response rather than treating command submission alone
+  as success. Do not automatically resend a failed or timed-out check.
 
 ## Pull requests and release verification
 
