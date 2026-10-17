@@ -30,7 +30,7 @@ describe("provider-independent prompts", () => {
 	it("supports answer and summary prompts through an SDK-free gateway", async () => {
 		const gateway: ILlmGateway = {
 			provider: "fake",
-			capabilities: { reasoningSummary: false },
+			capabilities: { reasoningSummary: false, tools: false },
 			async *generateStream(request) {
 				yield {
 					type: "text",

@@ -164,4 +164,23 @@ describe("StreamCoordinator", () => {
 			finish: { reason: "unknown" },
 		});
 	});
+
+	it("ignores tool_calls events", () => {
+		const coordinator = new StreamCoordinator(config);
+		expect(
+			coordinator.handle(
+				{
+					type: "tool_calls",
+					calls: [],
+					state: { provider: "openai", items: [], pendingCallIds: [] },
+				},
+				10,
+			),
+		).toBeNull();
+		expect(coordinator.getResult()).toMatchObject({
+			phase: "idle",
+			response: "",
+			thinking: "",
+		});
+	});
 });
