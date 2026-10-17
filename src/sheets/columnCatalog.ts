@@ -1,6 +1,6 @@
 /**
  * Stable column contract shared by the sheet snapshot, local identity index,
- * and the future Jev column router.
+ * and read-only search tools.
  *
  * sourceIndex is the column position in the parsed source CSV. It is never an
  * index into compactSheetCsv's projected TSV.
@@ -282,12 +282,35 @@ const SELECTABLE_COLUMNS = [
 	},
 ] as const satisfies readonly SheetColumnDefinition[];
 
-export const COLUMN_CATALOG_VERSION = 1 as const;
+const SOURCE_METADATA_COLUMNS = [
+	{ key: "sid", sourceIndex: 0, label: "sid", description: "情報源内の人物ID" },
+	{
+		key: "status",
+		sourceIndex: 1,
+		label: "status",
+		description: "所属の表示とは別の状態コード",
+	},
+	{
+		key: "sort_tid",
+		sourceIndex: 2,
+		label: "sort_tid",
+		description: "元シートの並び順用コード",
+	},
+	{
+		key: "latest_rank",
+		sourceIndex: 6,
+		label: "直近順位",
+		description: "年が明示されていない直近順位",
+	},
+] as const satisfies readonly SheetColumnDefinition[];
+
+export const COLUMN_CATALOG_VERSION = 2 as const;
 export const IDENTITY_COLUMN_CATALOG = IDENTITY_COLUMNS;
 export const SELECTABLE_COLUMN_CATALOG = SELECTABLE_COLUMNS;
 export const SHEET_COLUMN_CATALOG = [
 	...IDENTITY_COLUMNS,
 	...SELECTABLE_COLUMNS,
+	...SOURCE_METADATA_COLUMNS,
 ] as const;
 
 export type IdentityColumnKey = (typeof IDENTITY_COLUMNS)[number]["key"];

@@ -35,6 +35,7 @@ import {
 } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
+import type { SheetSnapshotRef } from "../sheets/snapshot";
 import { createUnavailableSheetStructure } from "../sheets/structuredSheet";
 import {
 	ExternalServiceError,
@@ -138,6 +139,9 @@ export async function getSheetDataStep(
 			sheetInfo: cachedData.sheetInfo,
 			description: cachedData.description,
 			fromCache: true,
+			...(cachedData.snapshotRef
+				? { snapshotRef: cachedData.snapshotRef }
+				: {}),
 		};
 	}
 
@@ -151,8 +155,9 @@ export async function getSheetDataStep(
 				config.spreadsheet,
 			);
 			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
+			let snapshotRef: SheetSnapshotRef | undefined;
 			try {
-				await cache.save(
+				snapshotRef = await cache.save(
 					config.spreadsheet,
 					refreshedData.sheetInfo,
 					refreshedData.description,
@@ -168,6 +173,7 @@ export async function getSheetDataStep(
 				sheetInfo: refreshedData.sheetInfo,
 				description: refreshedData.description,
 				fromCache: false,
+				...(snapshotRef ? { snapshotRef } : {}),
 				sheetsApiCall: {
 					success: true,
 					durationMs: sheetsApiDurationMs,
@@ -213,8 +219,9 @@ export async function getSheetDataStep(
 	const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 
 	// Save to cache (best effort)
+	let snapshotRef: SheetSnapshotRef | undefined;
 	try {
-		await cache.save(
+		snapshotRef = await cache.save(
 			config.spreadsheet,
 			data.sheetInfo,
 			data.description,
@@ -231,6 +238,7 @@ export async function getSheetDataStep(
 		sheetInfo: data.sheetInfo,
 		description: data.description,
 		fromCache: false,
+		...(snapshotRef ? { snapshotRef } : {}),
 		sheetsApiCall: {
 			success: true,
 			durationMs: sheetsApiDurationMs,

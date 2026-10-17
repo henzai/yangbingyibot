@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { SpreadsheetConfig } from "../config";
 import { SHEET_COLUMN_KEYS } from "../sheets/columnCatalog";
+import { SheetSnapshotRepository } from "../sheets/snapshot";
 import type { ReadySheetStructure } from "../sheets/structuredSheet";
+import { memberFixture } from "../sheets/testFixtures";
 import { SheetCacheRepository } from "./sheetCache";
 
 const SOURCE: SpreadsheetConfig = {
@@ -12,8 +14,8 @@ const SOURCE: SpreadsheetConfig = {
 
 const STRUCTURE = {
 	status: "unavailable" as const,
-	schemaVersion: 1 as const,
-	catalogVersion: 1 as const,
+	schemaVersion: 2 as const,
+	catalogVersion: 2 as const,
 	reason: "schema_mismatch" as const,
 };
 
@@ -135,15 +137,16 @@ describe("SheetCacheRepository", () => {
 		);
 		const structuredSheet: ReadySheetStructure = {
 			status: "ready",
-			schemaVersion: 1,
-			catalogVersion: 1,
+			schemaVersion: 2,
+			catalogVersion: 2,
 			columnKeys: [...SHEET_COLUMN_KEYS],
 			headerRows: Array.from({ length: 3 }, () =>
 				SHEET_COLUMN_KEYS.map((key) => key),
 			),
 			personRows,
-			availableYears: [2025],
-			latestDataYear: 2025,
+			sourceRowNumbers: personRows.map((_, index) => index + 4),
+			availableYears: [],
+			latestDataYear: null,
 		};
 		const sheetInfo = personRows.map((row) => row.join("\t")).join("\n");
 		const legacyEntry = JSON.stringify({ sheetInfo, description: "fixture" });
@@ -170,6 +173,102 @@ describe("SheetCacheRepository", () => {
 			description: "description",
 		});
 	});
+
+	it("refreshes version-one structures while preserving legacy text", async () => {
+		(mockKV.get as Mock).mockResolvedValue({
+			sheetInfo: "legacy",
+			description: "original instructions",
+			structuredSheet: { ...STRUCTURE, schemaVersion: 1, catalogVersion: 1 },
+		});
+		await expect(repository.get(SOURCE)).resolves.toEqual({
+			sheetInfo: "legacy",
+			description: "original instructions",
+		});
+	});
+
+	it("pins sheet and description before updating mutable cache, and replays after overwrite", async () => {
+		const stored = new Map<string, string>();
+		(mockKV.put as Mock).mockImplementation(
+			async (key: string, value: string) => {
+				stored.set(key, value);
+			},
+		);
+		(mockKV.get as Mock).mockImplementation(
+			async (key: string, format: string) => {
+				const value = stored.get(key);
+				return value === undefined
+					? null
+					: format === "json"
+						? JSON.parse(value)
+						: value;
+			},
+		);
+		const ref = await repository.save(
+			SOURCE,
+			"legacy A",
+			"instructions A",
+			memberFixture(),
+		);
+		expect(ref).toBeDefined();
+		if (!ref) return;
+		expect((mockKV.put as Mock).mock.calls[0][0]).toMatch(
+			/^sheet_snapshot:v1:/,
+		);
+		expect((mockKV.put as Mock).mock.calls[1][0]).toMatch(/^sheet_info:v2:/);
+		expect((await repository.get(SOURCE))?.snapshotRef).toEqual(ref);
+		await repository.save(
+			SOURCE,
+			"legacy B",
+			"instructions B",
+			memberFixture(),
+		);
+		expect((await repository.get(SOURCE))?.description).toBe("instructions B");
+		const replay = await new SheetSnapshotRepository(mockKV).get(SOURCE, ref);
+		expect(replay.status).toBe("ready");
+		if (replay.status === "ready")
+			expect(replay.snapshot.description).toBe("instructions A");
+	});
+
+	it("preserves legacy answer data when immutable snapshot writes fail", async () => {
+		(mockKV.put as Mock)
+			.mockRejectedValueOnce(new Error("snapshot unavailable"))
+			.mockResolvedValueOnce(undefined);
+		await expect(
+			repository.save(SOURCE, "legacy", "instructions", memberFixture()),
+		).resolves.toBeUndefined();
+		const mutable = JSON.parse((mockKV.put as Mock).mock.calls[1][1]);
+		expect(mutable).toMatchObject({
+			sheetInfo: "legacy",
+			description: "instructions",
+		});
+		expect(mutable.snapshotRef).toBeUndefined();
+	});
+
+	it.each(["source", "expiry", "shape"])(
+		"drops a %s-invalid snapshot reference but keeps answer data",
+		async (kind) => {
+			const ref = await repository.save(
+				SOURCE,
+				"legacy",
+				"instructions",
+				memberFixture(),
+			);
+			if (!ref) throw new Error("Missing fixture reference");
+			const invalid = { ...ref };
+			if (kind === "source") invalid.sourceFingerprint = "0".repeat(64);
+			if (kind === "expiry") invalid.expiresAt = 1;
+			if (kind === "shape") invalid.snapshotId = "invalid";
+			(mockKV.get as Mock).mockResolvedValue({
+				sheetInfo: "legacy",
+				description: "instructions",
+				structuredSheet: memberFixture(),
+				snapshotRef: invalid,
+			});
+			const entry = await repository.get(SOURCE);
+			expect(entry?.sheetInfo).toBe("legacy");
+			expect(entry?.snapshotRef).toBeUndefined();
+		},
+	);
 
 	it("throws a stable error when KV save fails", async () => {
 		(mockKV.put as Mock).mockRejectedValue(new Error("KV unavailable"));

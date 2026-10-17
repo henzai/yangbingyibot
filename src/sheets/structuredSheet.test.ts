@@ -55,9 +55,10 @@ describe("structured sheet snapshot", () => {
 
 		expect(result.status).toBe("ready");
 		if (result.status !== "ready") return;
-		expect(result.columnKeys).toHaveLength(44);
+		expect(result.columnKeys).toHaveLength(48);
 		expect(result.headerRows).toHaveLength(3);
 		expect(result.personRows).toHaveLength(2);
+		expect(result.sourceRowNumbers).toEqual([4, 6]);
 		expect(result.personRows[0][3]).toBe("めんやんに<br>めんやん");
 		expect(result.availableYears).toEqual([2025]);
 		expect(result.latestDataYear).toBe(2025);
@@ -108,8 +109,8 @@ describe("structured sheet snapshot", () => {
 
 		expect(result).toEqual({
 			status: "unavailable",
-			schemaVersion: 1,
-			catalogVersion: 1,
+			schemaVersion: 2,
+			catalogVersion: 2,
 			reason: "schema_mismatch",
 		});
 	});
@@ -127,8 +128,8 @@ describe("structured sheet snapshot", () => {
 
 		expect(result).toEqual({
 			status: "unavailable",
-			schemaVersion: 1,
-			catalogVersion: 1,
+			schemaVersion: 2,
+			catalogVersion: 2,
 			reason: "schema_mismatch",
 		});
 	});
@@ -174,8 +175,8 @@ describe("structured sheet snapshot", () => {
 	it("rejects an unsupported short schema", () => {
 		expect(buildSheetStructure('"meta"\n"説明"\n"見出し"')).toEqual({
 			status: "unavailable",
-			schemaVersion: 1,
-			catalogVersion: 1,
+			schemaVersion: 2,
+			catalogVersion: 2,
 			reason: "unsupported_schema",
 		});
 	});
@@ -190,5 +191,18 @@ describe("structured sheet snapshot", () => {
 				personRows: [["wrong"]],
 			}),
 		).toBe(false);
+	});
+
+	it("rejects mismatched provenance, annual metadata and previous versions", () => {
+		const result = buildSheetStructure(createCsv());
+		if (result.status !== "ready") throw new Error("Invalid fixture");
+		for (const mutation of [
+			{ sourceRowNumbers: [4, 4] },
+			{ sourceRowNumbers: [4] },
+			{ availableYears: [2026], latestDataYear: 2026 },
+			{ latestDataYear: 2026 },
+			{ schemaVersion: 1, catalogVersion: 1 },
+		])
+			expect(isSheetStructure({ ...result, ...mutation })).toBe(false);
 	});
 });
