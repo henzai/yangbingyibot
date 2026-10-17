@@ -9,14 +9,14 @@ import {
 } from "./columnCatalog";
 
 describe("sheet column catalog", () => {
-	it("defines four identity and forty selectable columns", () => {
+	it("defines four identity and forty selectable columns plus four source metadata columns", () => {
 		expect(IDENTITY_COLUMN_CATALOG).toHaveLength(4);
 		expect(SELECTABLE_COLUMN_CATALOG).toHaveLength(40);
-		expect(SHEET_COLUMN_CATALOG).toHaveLength(44);
+		expect(SHEET_COLUMN_CATALOG).toHaveLength(48);
 	});
 
 	it("keeps source indexes distinct from compacted TSV indexes", () => {
-		expect(new Set(SHEET_SOURCE_INDICES).size).toBe(44);
+		expect(new Set(SHEET_SOURCE_INDICES).size).toBe(48);
 		expect(SHEET_SOURCE_INDICES).toEqual([
 			7,
 			8,
@@ -28,8 +28,14 @@ describe("sheet column catalog", () => {
 			9,
 			...Array.from({ length: 35 }, (_, i) => i + 12),
 			47,
+			0,
+			1,
+			2,
+			6,
 		]);
-		expect(SHEET_SOURCE_INDICES).not.toContain(6);
+		expect([...SHEET_SOURCE_INDICES].sort((a, b) => a - b)).toEqual(
+			Array.from({ length: 48 }, (_, index) => index),
+		);
 	});
 
 	it("keeps election years in source order", () => {

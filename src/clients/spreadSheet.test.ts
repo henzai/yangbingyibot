@@ -115,8 +115,8 @@ describe("spreadSheet", () => {
 				description: "Bot description",
 				structuredSheet: {
 					status: "unavailable",
-					schemaVersion: 1,
-					catalogVersion: 1,
+					schemaVersion: 2,
+					catalogVersion: 2,
 					reason: "unsupported_schema",
 				},
 			});
@@ -248,8 +248,8 @@ describe("spreadSheet", () => {
 				description: "Bot description",
 				structuredSheet: {
 					status: "unavailable",
-					schemaVersion: 1,
-					catalogVersion: 1,
+					schemaVersion: 2,
+					catalogVersion: 2,
 					reason: "unsupported_schema",
 				},
 			});

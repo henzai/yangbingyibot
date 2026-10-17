@@ -13,7 +13,7 @@ import {
 	type SheetColumnKey,
 } from "./columnCatalog";
 
-export const SHEET_STRUCTURE_VERSION = 1 as const;
+export const SHEET_STRUCTURE_VERSION = 2 as const;
 const MINIMUM_SOURCE_COLUMN_COUNT = Math.max(...SHEET_SOURCE_INDICES) + 1;
 
 export type SheetStructureUnavailableReason =
@@ -29,6 +29,8 @@ export type ReadySheetStructure = {
 	columnKeys: SheetColumnKey[];
 	headerRows: string[][];
 	personRows: string[][];
+	/** One-based original sheet rows, before filtering or projection. */
+	sourceRowNumbers: number[];
 	availableYears: number[];
 	latestDataYear: number | null;
 };
@@ -65,6 +67,10 @@ function schemaAnchor(
 // Some source columns intentionally have blank headers; their source indexes
 // remain part of the catalog and are protected by the value rules below.
 export const SHEET_SCHEMA_ANCHORS: readonly SchemaAnchor[] = [
+	schemaAnchor("sid", 2, "sid"),
+	schemaAnchor("status", 2, "status"),
+	schemaAnchor("sort_tid", 2, "sort_tid"),
+	schemaAnchor("latest_rank", 1, "直近の総選挙の順位です。"),
 	schemaAnchor(
 		"primary_affiliation",
 		1,
@@ -281,6 +287,11 @@ export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 	const columnCount = Math.max(...rows.map((row) => row.length));
 	const keptRows = rows.filter(shouldKeepSheetRow);
 	const sourcePersonRows = keptRows.slice(PRESERVED_HEADER_ROWS);
+	const sourceRowNumbers = rows.flatMap((row, index) =>
+		index >= PRESERVED_HEADER_ROWS && shouldKeepSheetRow(row, index)
+			? [index + 1]
+			: [],
+	);
 	if (!matchesSchema(rows, sourcePersonRows, columnCount)) {
 		return createUnavailableSheetStructure(
 			rows.length < PRESERVED_HEADER_ROWS ||
@@ -309,6 +320,7 @@ export function buildSheetStructureFromRows(rows: string[][]): SheetStructure {
 		columnKeys: [...SHEET_COLUMN_KEYS],
 		headerRows,
 		personRows,
+		sourceRowNumbers,
 		availableYears: electionYears,
 		latestDataYear: electionYears.at(-1) ?? null,
 	};
@@ -385,8 +397,26 @@ export function isSheetStructure(value: unknown): value is SheetStructure {
 	) {
 		return false;
 	}
+	if (
+		!Array.isArray(value.sourceRowNumbers) ||
+		value.sourceRowNumbers.length !== value.personRows.length ||
+		!value.sourceRowNumbers.every(
+			(row, index, rows) =>
+				Number.isSafeInteger(row) &&
+				row >= 4 &&
+				(index === 0 || row > rows[index - 1]),
+		)
+	)
+		return false;
+	const personRows = value.personRows as string[][];
+	const expectedYears = ELECTION_COLUMN_CATALOG.flatMap((column) => {
+		const index = SHEET_COLUMN_KEYS.indexOf(column.key);
+		return personRows.some((row) => isPositiveRank(row[index]))
+			? [column.year]
+			: [];
+	});
 	return (
-		value.latestDataYear === null ||
-		value.availableYears.includes(value.latestDataYear)
+		JSON.stringify(value.availableYears) === JSON.stringify(expectedYears) &&
+		value.latestDataYear === (expectedYears.at(-1) ?? null)
 	);
 }

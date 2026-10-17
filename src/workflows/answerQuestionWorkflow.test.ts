@@ -4,6 +4,7 @@ import { loadConfig } from "../config";
 import type { Bindings, HistoryEntry, WorkflowParams } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
 import type { LlmRequest, LlmStreamEvent } from "../llm/types";
+import { memberFixture } from "../sheets/testFixtures";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -120,8 +121,8 @@ const mockKVNamespace = {
 
 const unavailableSheetStructure = {
 	status: "unavailable" as const,
-	schemaVersion: 1 as const,
-	catalogVersion: 1 as const,
+	schemaVersion: 2 as const,
+	catalogVersion: 2 as const,
 	reason: "unsupported_schema" as const,
 };
 
@@ -141,6 +142,7 @@ const mockEnv: Bindings = {
 describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockSheetCacheRepository.save.mockReset();
 		mockLlmGateway.provider = "gemini";
 		mockLlmGateway.capabilities.reasoningSummary = true;
 		vi.mocked(createLlmGateway).mockImplementation(() => mockLlmGateway);
@@ -159,6 +161,42 @@ describe("AnswerQuestionWorkflow Steps", () => {
 	});
 
 	describe("getSheetDataStep", () => {
+		it.each(["cached", "refresh", "fresh"])(
+			"checkpoints only a small immutable reference for %s data",
+			async (mode) => {
+				const snapshotRef = {
+					snapshotId: "a".repeat(64),
+					sourceFingerprint: "b".repeat(64),
+					expiresAt: Date.now() + 86400000,
+				};
+				const data = {
+					sheetInfo: "sheet",
+					description: "instructions",
+					structuredSheet: memberFixture(),
+					snapshotRef,
+				};
+				mockSheetCacheRepository.get.mockResolvedValue(
+					mode === "fresh"
+						? null
+						: mode === "refresh"
+							? { sheetInfo: "old", description: "old" }
+							: data,
+				);
+				vi.mocked(getSheetData).mockResolvedValue(data);
+				mockSheetCacheRepository.save.mockResolvedValue(snapshotRef);
+				const result = await getSheetDataStep(mockEnv, mockLogger);
+				expect(result.snapshotRef).toEqual(snapshotRef);
+				expect(result.description).toBe("instructions");
+				expect(result).not.toHaveProperty("structuredSheet");
+				expect(
+					new TextEncoder().encode(JSON.stringify(snapshotRef)).byteLength,
+				).toBeLessThan(256);
+				expect(JSON.parse(JSON.stringify(result)).snapshotRef).toEqual(
+					snapshotRef,
+				);
+			},
+		);
+
 		it("returns cached data when cache is available", async () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
@@ -233,8 +271,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				"legacy desc",
 				{
 					status: "unavailable",
-					schemaVersion: 1,
-					catalogVersion: 1,
+					schemaVersion: 2,
+					catalogVersion: 2,
 					reason: "invalid_snapshot",
 				},
 			);
