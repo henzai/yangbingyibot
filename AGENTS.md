@@ -3,7 +3,8 @@
 ## Project overview
 
 - This repository contains a Discord bot deployed as a Cloudflare Worker.
-- It uses Google Gemini for responses, Google Sheets as its knowledge base,
+- It uses a configurable LLM provider (OpenAI or Gemini) for responses, Google
+  Sheets as its knowledge base,
   Cloudflare KV for caches and conversation history, Analytics Engine for
   metrics, and a scheduled health check.
 - Use Node.js 24, matching the GitHub Actions configuration.
@@ -22,6 +23,24 @@
 - `npm run deploy`: deploy the Worker to Cloudflare production.
 - `npm run register`: register Discord slash commands. Run it only when command
   definitions change.
+
+## Environment variables
+
+Set these as Cloudflare Workers secrets, or in `.dev.vars` for local
+development.
+
+- Required: `DISCORD_TOKEN`, `DISCORD_PUBLIC_KEY`, `DISCORD_APPLICATION_ID`,
+  and `GOOGLE_SERVICE_ACCOUNT` (service-account JSON string), plus the API key
+  for each selected LLM provider (`GEMINI_API_KEY` or `OPENAI_API_KEY`).
+- Optional: `GITHUB_TOKEN`, a GitHub PAT used to report errors and health check
+  failures as Issues.
+- Optional runtime configuration, validated in `src/config.ts`:
+  `LLM_PROVIDER`, `LLM_MODEL`, `LLM_SUMMARY_ENABLED`, `LLM_SUMMARY_PROVIDER`,
+  `LLM_SUMMARY_MODEL`, `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`,
+  `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DATA_SHEET_NAME`,
+  `GOOGLE_DESCRIPTION_SHEET_NAME`, `GITHUB_REPOSITORY` (`owner/repository`),
+  and `HISTORY_TTL_SECONDS` (60–86400, default 300). Production values for
+  `LLM_*` live in `wrangler.toml`.
 
 ## Change workflow
 
@@ -47,9 +66,12 @@
 
 ## Repository skills
 
-- Use `$yangbingyibot-discord-ask-e2e` for the production Discord `/ask`
-  end-to-end check after deployment or whenever the user asks to verify the
-  deployed Discord interaction flow.
+- Repository skills live in `.agents/skills/`. Claude Code reads them through
+  per-skill symlinks in `.claude/skills/`.
+- Use the `yangbingyibot-discord-ask-e2e` skill (`$yangbingyibot-discord-ask-e2e`
+  in Codex, `/yangbingyibot-discord-ask-e2e` in Claude Code) for the production
+  Discord `/ask` end-to-end check after deployment or whenever the user asks to
+  verify the deployed Discord interaction flow.
 - Follow the skill's authenticated Chrome and `#test` workflow. Do not
   substitute a fabricated Interaction request, plain Discord message, bot-token
   command invocation, or Discord user-token/internal API call.
@@ -59,7 +81,39 @@
 - Verify the application response rather than treating command submission alone
   as success. Do not automatically resend a failed or timed-out check.
 
+## Multi-agent delegation
+
+Codex and Claude Code both follow this file (Claude Code loads it through
+`CLAUDE.md`), so either one can be the parent session and delegate to the
+other.
+
+- Delegate at explicit points, such as a review before publishing a PR. Do not
+  run another model automatically on every turn; both subscriptions have
+  limited usage.
+- Standard invocations, using each CLI's default model unless a rule below
+  names one:
+  - Claude Code → Codex: `codex exec -s read-only "<brief>"` for research or
+    review, `codex exec review` for a diff review, and
+    `codex exec --worktree "<brief>"` for implementation.
+  - Codex → Claude Code: `claude -p --permission-mode plan "<brief>"` for
+    research or review, and `claude -p -w <name> "<brief>"` for
+    implementation.
+- A brief starts by stating that it is for a delegated session, then gives the
+  goal, constraints, relevant files, completion criteria, and output format.
+  The delegate starts without the parent's context.
+- A delegated session does not commit, push, create or update pull requests,
+  merge, deploy, or touch production unless the brief explicitly asks for it.
+  It returns its results to the parent and does not delegate further.
+- The parent verifies delegated output before using it: check the exit code
+  and evidence that the work actually ran, and run `npm run verify` on any
+  delegated code change. User approvals stay with the parent session and do
+  not transfer to a delegate unless the brief states the approved scope.
+
 ## Verification delegation
+
+- When Claude Code is the parent, run the verifier through
+  `codex exec -m gpt-6-luna -c model_reasoning_effort="medium" "<brief>"` so
+  the model rule below still applies.
 
 - Delegate runtime checks, including production root/log/health checks and
   Discord `/ask` E2E, to a sub-agent using `gpt-6-luna` with reasoning effort

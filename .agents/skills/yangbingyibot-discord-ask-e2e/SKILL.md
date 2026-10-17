@@ -5,8 +5,9 @@ description: Run the production Discord `/ask` end-to-end check for yangbingyibo
 
 # Yangbingyibot Discord `/ask` E2E
 
-Use the Chrome control skill and the user's authenticated Discord session to
-exercise the real slash-command path:
+Use the Chrome control skill (Codex's Chrome skill, or Claude in Chrome in
+Claude Code) and the user's authenticated Discord session to exercise the real
+slash-command path:
 
 Discord client → signed Interaction → production Cloudflare Worker → Answer
 Question Workflow → configured LLM and Google Sheets → Discord response.
