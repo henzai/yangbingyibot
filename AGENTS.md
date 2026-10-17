@@ -88,11 +88,33 @@ Codex and Claude Code both follow this file (Claude Code loads it through
 `CLAUDE.md`), so either one can be the parent session and delegate to the
 other.
 
-- Delegate at explicit points, such as a review before publishing a PR. Do not
-  run another model automatically on every turn; both subscriptions have
-  limited usage.
+- Quality comes first, but frontier-model usage is scarce on both
+  subscriptions. Keep the parent's own turns for work that needs frontier
+  judgment: planning, design decisions, briefs, review of delegated output and
+  of the final diff, and user decisions.
+- Delegate bounded routine work to a lighter tier by default:
+  - Read-only search across many files, reading long logs or CI output, and
+    summarizing web or documentation research.
+  - Mechanical edits that the brief fully specifies, such as renames,
+    repetitive test cases, or review findings that name the exact fix.
+  - Running checks, monitoring CI, and runtime verification (see "Verification
+    delegation").
+- Pick the cheapest delegate that fits: a lighter model inside the same CLI
+  first, then the other CLI with the standard invocations below. In Claude
+  Code, use the `Explore` agent or a subagent with `model: "haiku"` for search
+  and summaries, and `model: "sonnet"` for mechanical edits and review. In
+  Codex, use
+  `codex exec -m gpt-6-luna -c model_reasoning_effort="medium" "<brief>"`.
+- Keep the work in the parent when the brief would cost more than the work
+  itself, such as a one-line fix or a file already in context, or when the
+  task depends on judgment or context that a brief cannot carry.
+- Do not trade quality for usage. If delegated output fails verification, fix
+  it in the parent or rerun it once at a heavier tier; do not retry the same
+  light tier in a loop.
+- Do not add automatic model runs on every turn, such as a hook that reviews
+  each response.
 - Standard invocations. Research and review use a lighter tier to save usage;
-  implementation uses each CLI's default model:
+  implementation that needs judgment uses each CLI's default model:
   - Claude Code → Codex:
     `codex exec -s read-only -c model_reasoning_effort="medium" "<brief>"` for
     research or review,
