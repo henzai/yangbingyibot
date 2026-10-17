@@ -489,7 +489,9 @@ export async function streamLlmWithDiscordEditsStep(
 	}
 	if (
 		streamResult.finish.reason === "blocked" ||
-		streamResult.finish.reason === "error"
+		streamResult.finish.reason === "error" ||
+		// This path passes no tools; interim tool-round text is never an answer.
+		streamResult.finish.reason === "tool_calls"
 	) {
 		throw new ExternalServiceError({
 			service: "llm",

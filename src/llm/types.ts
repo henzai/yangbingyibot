@@ -27,16 +27,63 @@ export type LlmUsage = {
 
 export type LlmFinish = {
 	/** unknown includes streams that ended without a provider finish marker. */
-	reason: "stop" | "length" | "blocked" | "error" | "unknown";
+	/**
+	 * tool_calls: the response ended by requesting tools; any text in it is
+	 * interim, NOT a final answer.
+	 */
+	reason: "stop" | "length" | "blocked" | "error" | "unknown" | "tool_calls";
 	/** Diagnostic codes only, never provider response bodies. */
 	providerFinishReason?: string;
 	providerBlockReason?: string;
+};
+
+/** Provider-independent function tool. Schema validation is the executor's job. */
+export type LlmToolDefinition = {
+	name: string;
+	description: string;
+	/** JSON Schema passed through to the provider unchanged. */
+	parameters: Readonly<Record<string, unknown>>;
+	strict: true;
+};
+
+/** Parsed model arguments, or a code only; raw argument strings are never exposed. */
+export type LlmToolArguments =
+	| { ok: true; value: Record<string, unknown> }
+	| { ok: false; error: "invalid_json" | "not_object" | "unknown_tool" };
+
+export type LlmToolCall = {
+	callId: string;
+	name: string;
+	arguments: LlmToolArguments;
+};
+
+/**
+ * Opaque, JSON-serializable provider state for continuing a tool exchange, so
+ * callers can checkpoint it. Callers must not inspect or log `items` (they may
+ * contain encrypted reasoning) and must pass it back unchanged.
+ */
+export type LlmToolState = {
+	readonly provider: string;
+	readonly items: readonly unknown[];
+	readonly pendingCallIds: readonly string[];
+};
+
+/** One result per pending call id, exactly. */
+export type LlmToolContinuation = {
+	state: LlmToolState;
+	results: readonly { callId: string; output: string }[];
 };
 
 export type LlmStreamEvent =
 	| { type: "text"; delta: string }
 	/** Only provider-published summaries, not private chain-of-thought. */
 	| { type: "reasoning_summary"; delta: string }
+	/** At most once, after the response completes and before usage/finish. */
+	| {
+			type: "tool_calls";
+			calls: readonly LlmToolCall[];
+			state: LlmToolState;
+	  }
 	| { type: "usage"; usage: LlmUsage }
 	| { type: "finish"; finish: LlmFinish };
 
@@ -45,6 +92,10 @@ export type LlmRequest = {
 	prompt: LlmPrompt;
 	temperature?: number;
 	maxOutputTokens?: number;
+	/** Requires capabilities.tools; unsupported providers/models throw. */
+	tools?: readonly LlmToolDefinition[];
+	/** Results for the previous round's tool calls; tools must be resent. */
+	continuation?: LlmToolContinuation;
 	/** Optional, best effort; callers must work without summary events. */
 	includeReasoningSummary?: boolean;
 	/** Total budget including retries and streaming; capped by the adapter. */
@@ -80,13 +131,22 @@ export type LlmTextResult = {
 	text: string;
 	usage: LlmUsage | null;
 	finish: LlmFinish;
+	/** Present only when finish.reason is "tool_calls". */
+	toolCalls?: readonly LlmToolCall[];
+	toolState?: LlmToolState;
 };
 
 export interface ILlmGateway {
 	readonly provider: string;
 	/** Adapter support does not guarantee that every selected model emits it. */
-	readonly capabilities: { readonly reasoningSummary: boolean };
+	readonly capabilities: {
+		readonly reasoningSummary: boolean;
+		readonly tools: boolean;
+	};
 	/**
+	 * Callers passing tools must hold text until `finish` and must not deliver
+	 * it when the reason is "tool_calls" (the text is interim).
+	 *
 	 * Exactly one finish event on normal exhaustion, after any usage snapshots.
 	 * Transport failures throw; partial text must not be treated as completed.
 	 * Never automatically replay a stream once consumption has begun.
