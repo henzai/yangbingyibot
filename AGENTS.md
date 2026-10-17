@@ -70,7 +70,8 @@ development.
   per-skill symlinks in `.claude/skills/`.
 - Use the `yangbingyibot-discord-ask-e2e` skill (`$yangbingyibot-discord-ask-e2e`
   in Codex, `/yangbingyibot-discord-ask-e2e` in Claude Code) for the production
-  Discord `/ask` end-to-end check after deployment or whenever the user asks to
+  Discord `/ask` end-to-end check after a deployment that changes runtime files
+  (see "Pull requests and release verification") or whenever the user asks to
   verify the deployed Discord interaction flow.
 - Follow the skill's authenticated Chrome and `#test` workflow. Do not
   substitute a fabricated Interaction request, plain Discord message, bot-token
@@ -151,3 +152,11 @@ other.
 - Confirm the next scheduled health check reports no KV, Gemini, or Google
   service-account failure. Ask before any production rollback or other
   destructive recovery action.
+- Skip the post-deployment runtime checks above (root endpoint, Cloudflare
+  logs, Discord `/ask`, and scheduled health check) when the merged diff
+  touches no runtime files, because the redeployed Worker is identical.
+  Runtime files are `src/`, `wrangler.toml`, `package.json`,
+  `package-lock.json`, and `.github/workflows/`; changes limited to files such
+  as `*.md`, `docs/`, `.agents/`, or `.claude/` qualify. Still monitor the
+  `main` CI run and its `deploy` job, and state in the summary that the checks
+  were skipped and why.
