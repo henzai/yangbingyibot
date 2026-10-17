@@ -1,0 +1,63 @@
+case_id,origin,question,scope,operations,sources,required_fields,tool_sequence,completeness,history,expected_evidence,gap_or_review,review_status
+A001,synthetic,甲さんの本名とピンインは？,single_member,simple_lookup,members,full_name|pinyin,search_records>get_records,identity,false,候補IDに結びつく原文値,同名候補を勝手に確定しない,design_only
+A002,synthetic,短いあだ名「x」の人を教えて,single_member,explanation,members,community_nicknames|overview,search_records>get_records,identity,false,一致元と概要preset,短表記の曖昧性,design_only
+A003,synthetic,Lin En-Tongさんはいる？,unresolved,list_filter,members,pinyin,search_records,candidate_only,false,区切りと声調を含む識別根拠,PR478の未対応指摘を回帰,design_only
+A004,synthetic,田中ちゃんみたいな名前の人は？,unresolved,list_filter,members,full_name|community_nicknames,search_records,candidate_only,false,一致方法と候補集合,敬称とあだ名を壊さない,design_only
+A005,synthetic,Can you explain member A's nickname?,single_member,explanation,members,community_nicknames|nickname_origin,search_records>get_records,identity,false,対象IDと由来,英文一般語の誤一致を検証,design_only
+A006,synthetic,公式ニックネームと私たちのあだ名は同じ？,single_member,comparison,members,official_nickname|community_nicknames,search_records>get_records,identity,false,別fieldとしての原文値,呼称を混同しない,design_only
+A007,synthetic,甲さんの英語名とキャッチフレーズは？,single_member,simple_lookup,members,official_english_name|catchphrase,search_records>get_records,identity,false,指定2列の値と欠損理由,複合取得,design_only
+A008,synthetic,甲さんはどんな人？,single_member,explanation,members,overview,search_records>get_records,identity,false,概要presetと追加取得根拠,項目未指定を拒否しない,design_only
+A009,synthetic,甲さんと乙さんについて教えて,multiple_members,explanation,members,overview,search_records>get_records,identity,false,複数ID別の概要,候補8件のJev制限を継承しない,design_only
+A010,synthetic,甲さんの年齢と誕生日は？,single_member,simple_lookup,members,age|birthday,search_records>get_records,identity,false,基準日と日付精度,月日だけから生年を補わない,design_only
+A011,synthetic,甲さんのデビュー日と当時の年齢は？,single_member,simple_lookup,members,debut_date|debut_age,search_records>get_records,identity,false,2列と出典,加入と初公演の語義差を保持,design_only
+A012,synthetic,甲さんの身長と星座を教えて,single_member,simple_lookup,members,height|zodiac,search_records>get_records,identity,false,単位付き値と日本語星座名,無関係な列を必要としない,design_only
+A013,synthetic,甲さんの出身の省と市は？,single_member,simple_lookup,members,birth_province|birth_city,search_records>get_records,identity,false,省と市を分離した値,表記と欠損,design_only
+A014,synthetic,甲さんの大学・血液型・MBTIは？,single_member,simple_lookup,members,university|blood_type|mbti,search_records>get_records,identity,false,各fieldの値または未記載理由,非公開と未取得を区別,design_only
+A015,synthetic,甲さんの特技と趣味を教えて,single_member,simple_lookup,members,skills|hobbies,search_records>get_records,identity,false,別fieldの原文,翻訳時の意味保持,design_only
+A016,synthetic,甲さんの応援色を詳しく教えて,single_member,simple_lookup,members,support_colors,search_records>get_records,identity,false,4列presetの色と詳細,欠損した組を補わない,design_only
+A017,synthetic,甲さんの口袋フォロワーは今何人？,single_member,simple_lookup,members,pocket_followers,search_records>get_records,identity,false,単位と情報の観測日,取得日を計測日にしない,design_only
+A018,synthetic,甲さんの順位は？,single_member,simple_lookup,members,latest_rank|election_years,search_records>get_records,identity,false,Gと年別順位の区別,年不明を最新年へ割当てない,design_only
+A019,synthetic,甲さんの2024年と2025年の順位を比べて,single_member,comparison,members,election_2024|election_2025,search_records>get_records,identity,false,指定年ごとの値,空を圏外や0位としない,design_only
+A020,synthetic,甲さんの総選挙順位の推移は？,single_member,timeline,members,election_history,search_records>get_records,identity,false,年と値の全履歴preset,データのない2026年を補わない,design_only
+A021,synthetic,甲さんの経歴と移籍を時系列で教えて,single_member,timeline,members,career|affiliations,search_records>get_records,full_field,false,経歴の段落と日付,長文cursorで末尾欠落を防ぐ,design_only
+A022,synthetic,甲さんと同期の人を全員教えて,multiple_members,relation|list_filter,members,generation_group|generation_number,search_records>get_records>query_records,exact_set,false,加入グループと期の完全一致集合,現在所属で同期を決めない,design_only
+A023,synthetic,甲さんの前後の期は？,generation,relation,members,generation_group|generation_number,search_records>get_records>query_records,exact_set,false,同一加入グループの前後関係,別グループの期を混ぜない,design_only
+A024,issue_509_public_regression,23期・24期のメンバーリスト,generation,list_filter,members,generation|affiliations|status,query_records>deterministic_render,exact_set,false,SNH48文脈を明示した場合20行と9行,グループ不明時の補完は禁止,design_only
+A025,synthetic,SNH48二十三期生の現役は何人？,generation,aggregate_ranking,members,generation|status|affiliations,aggregate_records,exact_set,false,状態解釈付き分母と人数,状態矛盾と不明の扱いをレビュー,design_only
+A026,synthetic,Team Xの所属者と兼任者を全員教えて,team_group,list_filter,members,primary_affiliation|secondary_affiliation,query_records>deterministic_render,exact_set,false,OR条件のID集合,重複除去と複数所属を保持,design_only
+A027,synthetic,新人組で身長165cm以上の人は？,all,list_filter,members,newcomer_flag|height,query_records,exact_set,false,AND条件と単位付き比較,不正数値や欠損を明示,design_only
+A028,synthetic,SNH48かGNZ48で今年誕生日がまだの人は？,all,list_filter,members,current_group|birthday,query_records,exact_set,false,ORとANDおよび基準日,日付精度とtimezone,design_only
+A029,synthetic,今月誕生日の人を日付順で教えて,all,list_filter,members,birthday,query_records,exact_set,false,月日型と安定sort,年不明の誕生日を除外しない,design_only
+A030,synthetic,最年長と最年少を同年齢の人も含めて教えて,all,aggregate_ranking,members,age,aggregate_records>get_records,exact_set,false,minとmaxの全同値ID,欠損分母を返す,design_only
+A031,synthetic,チーム別の人数と全体人数は？,all,aggregate_ranking,members,current_team,aggregate_records,exact_set,false,group_countとunique総数,兼任のため単純和と異なる,design_only
+A032,synthetic,甲さんと乙さんはどちらが先輩で何cm違う？,multiple_members,comparison|relation,members,debut_date|generation|height,search_records>get_records,identity,false,2IDの型付き比較,先輩の定義と日付精度,design_only
+A033,synthetic,移籍した人を経歴から探して,all,list_filter|timeline,members,career,search_records>query_records,candidate_only,false,本文一致箇所と検索範囲,概念の全員保証は評価未完,design_only
+A034,synthetic,手作りやハンドメイドが好きな人は？,all,list_filter,members,hobbies|skills,search_records>get_records,candidate_only,false,日中言い換えと引用根拠,concept方式の選定が未決,design_only
+A035,synthetic,ダンスが得意で歌も好きな人は全員いる？,all,list_filter,members,skills|hobbies,search_records>query_records,partial_scan,false,複数概念と全体投影,top-kを全件としない,design_only
+A036,synthetic,BEとCPはどういう意味？,unresolved,explanation,reference,terms,search_records>get_records,full_section,false,descriptionの用語節,人物IDのない質問を扱う,design_only
+A037,synthetic,Team CとTeam CIIは同じ？,team_group,comparison,reference,team_distinctions,search_records>get_records,full_section,false,区別事項とグループ情報,人物の短い別名と分離,design_only
+A038,synthetic,その人の誕生日も教えて,single_member,simple_lookup,members,birthday,history>get_records,identity,true,直前対象IDと今回の根拠,期限切れ履歴は未特定,design_only
+A039,synthetic,19期も出して,generation,list_filter,members,generation,history>query_records>deterministic_render,exact_set,true,前回グループと新しい期,過去の期を無条件unionしない,design_only
+A040,synthetic,他にはいる？,multiple_members,list_filter,members,previous_filters,history>query_records,exact_set,true,前条件と既出ID集合,未取得pageと0件を区別,design_only
+A041,synthetic,それで全部？,multiple_members,list_filter,members,previous_result_coverage,history>query_records,exact_set,true,集合handleとtotalおよび未取得範囲,前回答を正解にしない,design_only
+A042,synthetic,今度は乙さんの2024年だけ教えて,single_member,simple_lookup,members,election_2024,history>search_records>get_records,identity,true,今回の明示対象と年,話題変更で旧条件を捨てる,design_only
+A043,synthetic,シートにいない人物の身長は？,unresolved,simple_lookup,members,identity|height,search_records,candidate_only,false,検索範囲と未特定,探索失敗を未記載としない,design_only
+A044,synthetic,甲さんの記載されていない受賞理由は？,single_member,explanation,members,career,search_records>get_records,full_field,false,取得した根拠の限界,推測で理由を作らない,design_only
+A045,synthetic,Team Xの次の公演はいつ？,team_group,simple_lookup,performances,date|title|team,query_records,exact_set,false,公演sourceとtimezoneおよび観測時点,現在のBot取得対象外・dataset公開レビュー,design_only
+A046,synthetic,2024年総選挙1位の票数は？,all,aggregate_ranking,elections,year|rank|votes,query_records,exact_set,false,年別票数のsource,人物の順位列だけでは不足,design_only
+A047,synthetic,所属が変わったのは検出日と同じ日？,single_member,timeline,members|changes,career|detected_at|old_value|new_value,get_records,full_field,false,経歴日と検出日を別表示,changesの完全履歴性を仮定しない,design_only
+A048,synthetic,姓名が同じ2人の情報をそれぞれ教えて,multiple_members,comparison,members,sid|full_name|overview,search_records>get_records,identity,false,SID違いの原文値,同名を勝手に統合しない,design_only
+A049,synthetic,該当者が100人超なら全員出して,all,list_filter,members,identity|conditions,query_records>deterministic_render,exact_set,false,ページ跨ぎの全IDと件数,配信上限なら未完了表示,design_only
+A050,synthetic,順位が空欄の人と0の人は同じ意味？,all,explanation,members,election_years,query_records,exact_set,false,値と欠損理由の区別,圏外を推定しない,design_only
+A051,synthetic,甲さんの長い経歴の最後の出来事は？,single_member,timeline,members,career,search_records>get_records,full_field,false,field内cursor終端と原文日付,切断を黙認しない,design_only
+A052,synthetic,前の一覧を昨日の状態と比べて,multiple_members,comparison|timeline,members|archives,affiliations|snapshot_time,history>query_records,exact_set,true,比較可能な保存snapshot,現在値しかなければ履歴不足,design_only
+A053,synthetic,甲さんと同じ大学の人を全員教えて,multiple_members,relation|list_filter,members,university,search_records>get_records>query_records,exact_set,false,基準IDの大学と同値のID集合,大学名の別表記を正規化,design_only
+A054,synthetic,甲さんと乙さんが同じチームにいた期間は？,multiple_members,relation|timeline,members|archives,career|affiliation_intervals,search_records>get_records>query_records,full_field,false,開始終了の精度を伴う期間交差,現在所属から過去の重複期間を推測しない,design_only
+A055,synthetic,甲さんは加入してから何年何日？,single_member,simple_lookup,members,debut_date|as_of,search_records>get_records,identity,false,定義した加入日と基準日による計算,加入日と初公演日を区別,design_only
+A056,synthetic,次の誕生日まであと何日？,single_member,simple_lookup,members,birthday|as_of,history>get_records,identity,true,基準日と次回誕生日の計算,閏日とtimezoneの規則を固定,design_only
+A057,synthetic,その質問を中国語で言い換えて,unresolved,explanation,conversation,previous_user_question,history,full_field,true,会話内の実際の質問,新たな人物事実を作らない,design_only
+A058,synthetic,私が一つ前に何を聞いたか教えて,unresolved,simple_lookup,conversation,previous_user_question,history,full_field,true,現在の会話scopeにあるuser履歴,他ユーザーの履歴を検索しない,design_only
+A059,synthetic,さっきの回答はシートの根拠と合ってる？,unresolved,comparison,members|conversation,previous_answer|source_facts,history>get_records>query_records,exact_set,true,元の条件と最新根拠の再照合,自己回答をgoldにしない,design_only
+A060,synthetic,请告诉我甲的生日,single_member,simple_lookup,members,birthday,search_records>get_records,identity,false,多言語の属性要求と人物ID,日中英以外も未知意図として残す,design_only
+A061,synthetic,一般語と同じあだ名の人物の情報は？,unresolved,explanation,members,community_nicknames|overview,search_records>get_records,candidate_only,false,別名辞書の一致元と候補,単語だけで対象外へ分類しない,design_only
+A062,synthetic,甲さんより後に加入した同じグループの人は？,all,relation|list_filter,members,debut_date|generation_group,search_records>get_records>query_records,exact_set,false,基準IDの加入日とグループからの条件集合,加入グループと現在所属の定義を質問に合わせる,design_only
