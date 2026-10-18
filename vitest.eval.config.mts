@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		environment: "node",
-		include: ["tools/llm-eval/**/*.test.ts"],
+		include: [
+			"tools/llm-eval/**/*.test.ts",
+			"tools/sheet-tools-eval/**/*.test.ts",
+		],
 	},
 });
