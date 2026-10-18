@@ -350,7 +350,7 @@ describe("snapshot-bound sheet search", () => {
 		],
 		[
 			"unavailable field",
-			{ ...queryArgs, fields: ["current_group"] },
+			{ ...queryArgs, fields: ["reference_title"] },
 			"field_unavailable",
 		],
 		[

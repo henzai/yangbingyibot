@@ -3,6 +3,8 @@ import type { Field, TypedCell, Where } from "../search/types";
 
 const labels: Partial<Record<Field, string>> = {
 	generation_group: "加入グループ",
+	current_group: "現在の所属グループ",
+	current_team: "現在の所属チーム",
 	generation_number: "期",
 	state_flags: "状態",
 	age_at: "基準日の満年齢",
@@ -51,6 +53,7 @@ export function cellText(cell: TypedCell): string {
 				: cell.field_state,
 		);
 	const value = cell.value;
+	if (Array.isArray(value) && value.length === 0) return "なし";
 	const text = Array.isArray(value)
 		? value
 				.map((item) =>

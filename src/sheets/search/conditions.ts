@@ -21,8 +21,13 @@ export function validateAtom(atom: Atom): boolean {
 }
 export function testAtom(cell: TypedCell, atom: Atom): Truth {
 	const { op, values } = atom;
+	// An empty set (e.g. no current affiliation) counts as missing.
 	const missing =
-		cell.field_state === "empty" || cell.field_state === "placeholder";
+		cell.field_state === "empty" ||
+		cell.field_state === "placeholder" ||
+		(cell.field_state === "value" &&
+			Array.isArray(cell.value) &&
+			cell.value.length === 0);
 	if (op === "is_missing")
 		return missing ? true : cell.field_state === "value" ? false : "unknown";
 	if (op === "is_present")
