@@ -144,6 +144,49 @@ describe("index", () => {
 			).not.toContain("user-123");
 		});
 
+		it("keeps legacy params free of an answerMode key", async () => {
+			mockWorkflowCreate.mockResolvedValue(undefined);
+
+			await app.fetch(
+				postRequest(guildAskInteraction()),
+				mockEnv,
+				mockExecutionCtx,
+			);
+
+			expect(
+				Object.keys(mockWorkflowCreate.mock.calls[0]?.[0]?.params),
+			).toEqual(["token", "message", "requestId", "conversationKey"]);
+		});
+
+		it("pins answerMode tools in the Workflow params in tools mode", async () => {
+			mockWorkflowCreate.mockResolvedValue(undefined);
+
+			const res = await app.fetch(
+				postRequest(guildAskInteraction()),
+				{
+					...mockEnv,
+					GEMINI_API_KEY: undefined,
+					OPENAI_API_KEY: "test-openai-key",
+					LLM_PROVIDER: "openai",
+					LLM_MODEL: "gpt-6-luna",
+					LLM_SUMMARY_ENABLED: "false",
+					LLM_ANSWER_MODE: "tools",
+				},
+				mockExecutionCtx,
+			);
+
+			expect(res.status).toBe(200);
+			expect(mockWorkflowCreate).toHaveBeenCalledWith({
+				params: {
+					token: "interaction-token",
+					message: "What is this?",
+					requestId: "req_test_123",
+					conversationKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+					answerMode: "tools",
+				},
+			});
+		});
+
 		it("returns error response for an invalid command payload", async () => {
 			const res = await app.fetch(
 				postRequest({

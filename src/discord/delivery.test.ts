@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
-import { DiscordDeliveryService } from "./delivery";
+import {
+	createDiscordDeliveryService,
+	DiscordDeliveryService,
+} from "./delivery";
 
 const log = {
 	info: vi.fn(),
@@ -181,5 +184,74 @@ describe("DiscordDeliveryService", () => {
 		});
 		expect(permanent.transport.postMessage).toHaveBeenCalledTimes(1);
 		expect(permanent.sleep).not.toHaveBeenCalled();
+	});
+});
+
+describe("DiscordDeliveryService abort signal", () => {
+	function createTransport() {
+		return {
+			editOriginalMessage: vi.fn().mockResolvedValue(undefined),
+			postMessage: vi.fn().mockResolvedValue(undefined),
+		};
+	}
+
+	it("never calls the transport when the signal is already aborted", async () => {
+		const transport = createTransport();
+		const controller = new AbortController();
+		controller.abort();
+		const service = createDiscordDeliveryService(
+			transport,
+			log,
+			{ random: () => 0 },
+			controller.signal,
+		);
+
+		const result = await service.deliverFinal("answer");
+
+		expect(transport.editOriginalMessage).not.toHaveBeenCalled();
+		expect(transport.postMessage).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ status: "failed", success: false });
+	});
+
+	it("stops further attempts when aborted during a retry wait", async () => {
+		const transport = createTransport();
+		transport.editOriginalMessage.mockRejectedValue(
+			discordError(429, { retryable: true, retryAfterMs: 60_000 }),
+		);
+		const controller = new AbortController();
+		const service = createDiscordDeliveryService(
+			transport,
+			log,
+			{ random: () => 0 },
+			controller.signal,
+		);
+
+		const pending = service.deliverFinal("answer");
+		await vi.waitFor(() =>
+			expect(transport.editOriginalMessage).toHaveBeenCalledTimes(1),
+		);
+		controller.abort(new Error("deadline"));
+		const result = await pending;
+
+		expect(transport.editOriginalMessage).toHaveBeenCalledTimes(1);
+		expect(result).toMatchObject({ status: "failed", success: false });
+	});
+
+	it("leaves retry behavior unchanged for a signal that is not aborted", async () => {
+		const transport = createTransport();
+		transport.editOriginalMessage
+			.mockRejectedValueOnce(discordError(500))
+			.mockResolvedValueOnce(undefined);
+		const service = createDiscordDeliveryService(
+			transport,
+			log,
+			{ random: () => 0, initialDelayMs: 1 },
+			new AbortController().signal,
+		);
+
+		const result = await service.deliverFinal("answer");
+
+		expect(transport.editOriginalMessage).toHaveBeenCalledTimes(2);
+		expect(result).toMatchObject({ success: true, retryCount: 1 });
 	});
 });

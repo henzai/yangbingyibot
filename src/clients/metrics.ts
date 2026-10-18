@@ -31,7 +31,8 @@ export type MetricEventType =
 	| "kv_cache_access"
 	| "discord_webhook"
 	| "sheets_api_call"
-	| "health_check";
+	| "health_check"
+	| "sheet_tools_v1";
 
 /**
  * Base interface for all metric data
@@ -59,7 +60,11 @@ export interface LlmMetricData
 		"usage" | "purpose" | "retryCount" | "callCount"
 	> {
 	provider: string;
-	purpose: "answer" | "summary";
+	/**
+	 * answer: one event per question (all rounds summed on the tool path).
+	 * answer_round: one event per tool-path model round; never sum with answer.
+	 */
+	purpose: "answer" | "answer_round" | "summary";
 	usage?: LlmUsage | null;
 	/** null means unavailable; it is encoded as -1, never as zero. */
 	retryCount?: number | null;
@@ -96,6 +101,28 @@ export interface WorkflowMetricData extends MetricData {
 	fromCache: boolean;
 }
 
+/** One event per tool-path question. Counts only; never text or arguments. */
+export interface SheetToolMetricData extends MetricData {
+	outcome: "answered" | "budget_exceeded" | "technical_failure";
+	/** Budget reason code, or empty. */
+	budgetReason: string;
+	rounds: number;
+	toolCalls: number;
+	attempts: number;
+	toolResultBytes: number;
+	totalTokens: number;
+	modelDurationMs: number;
+	searchDurationMs: number;
+	/** From question start to the final round's first text; null if none. */
+	finalFirstTextMs: number | null;
+	zeroResults: number;
+	ambiguousResults: number;
+	missingResults: number;
+	toolErrors: number;
+	attachmentChunks: number;
+	deliveredIds: number;
+}
+
 /**
  * Health check specific metrics
  */
@@ -123,6 +150,7 @@ export interface IMetricsClient {
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void;
 	recordSheetsApiCall(data: MetricData): void;
 	recordHealthCheck(data: HealthCheckMetricData): void;
+	recordSheetTools(data: SheetToolMetricData): void;
 }
 
 /**
@@ -231,6 +259,37 @@ export class MetricsClient implements IMetricsClient {
 	}
 
 	/**
+	 * blobs: [requestId, outcome, budgetReason]
+	 * doubles: [durationMs, success, rounds, toolCalls, attempts, toolResultBytes,
+	 *   totalTokens, modelDurationMs, searchDurationMs, finalFirstTextMs (-1 = none),
+	 *   zero, ambiguous, missing, toolErrors, attachmentChunks, deliveredIds]
+	 */
+	recordSheetTools(data: SheetToolMetricData): void {
+		this.writeDataPoint("sheet_tools_v1", {
+			indexes: [toAnalyticsIndex(data.requestId)],
+			blobs: [data.requestId, data.outcome, data.budgetReason],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.rounds,
+				data.toolCalls,
+				data.attempts,
+				data.toolResultBytes,
+				data.totalTokens,
+				data.modelDurationMs,
+				data.searchDurationMs,
+				data.finalFirstTextMs ?? -1,
+				data.zeroResults,
+				data.ambiguousResults,
+				data.missingResults,
+				data.toolErrors,
+				data.attachmentChunks,
+				data.deliveredIds,
+			],
+		});
+	}
+
+	/**
 	 * Record KV cache access metrics
 	 * doubles: [durationMs, success, cacheHit]
 	 */
@@ -332,6 +391,7 @@ export class NoOpMetricsClient implements IMetricsClient {
 	recordDiscordWebhook(_data: DiscordWebhookMetricData): void {}
 	recordSheetsApiCall(_data: MetricData): void {}
 	recordHealthCheck(_data: HealthCheckMetricData): void {}
+	recordSheetTools(_data: SheetToolMetricData): void {}
 }
 
 /**

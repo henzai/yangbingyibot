@@ -104,7 +104,7 @@ describe("loadConfig", () => {
 
 const catalog = {
 	...PROVIDERS,
-	fake: { apiKeySetting: "OPENAI_API_KEY" as const },
+	fake: { apiKeySetting: "OPENAI_API_KEY" as const, tools: false },
 };
 describe("LLM routing configuration", () => {
 	it("prefers common models over legacy models and ignores unused credentials", () => {
@@ -257,4 +257,53 @@ describe("LLM routing configuration", () => {
 			);
 		},
 	);
+});
+
+describe("LLM_ANSWER_MODE", () => {
+	const openaiEnv = {
+		LLM_PROVIDER: "openai",
+		LLM_MODEL: "gpt-6-luna",
+		OPENAI_API_KEY: "openai-key",
+		GEMINI_API_KEY: undefined,
+		LLM_SUMMARY_ENABLED: "false",
+	} satisfies Partial<Bindings>;
+
+	it("defaults to legacy", () => {
+		expect(loadConfig(createBindings()).answerMode).toBe("legacy");
+	});
+
+	it("selects tools for a tool-capable provider", () => {
+		const config = loadConfig(
+			createBindings({ ...openaiEnv, LLM_ANSWER_MODE: "tools" }),
+		);
+		expect(config.answerMode).toBe("tools");
+	});
+
+	it("rejects tools for a provider without tool support", () => {
+		expect(() =>
+			loadConfig(createBindings({ LLM_ANSWER_MODE: "tools" })),
+		).toThrow("Invalid configuration for LLM_ANSWER_MODE:");
+	});
+
+	it("rejects a catalog provider declared with tools: false", () => {
+		expect(() =>
+			loadConfig(
+				createBindings({
+					LLM_PROVIDER: "fake",
+					LLM_MODEL: "fake-model",
+					OPENAI_API_KEY: "fake-key",
+					GEMINI_API_KEY: undefined,
+					LLM_SUMMARY_ENABLED: "false",
+					LLM_ANSWER_MODE: "tools",
+				}),
+				catalog,
+			),
+		).toThrow("Invalid configuration for LLM_ANSWER_MODE:");
+	});
+
+	it("rejects an unknown value", () => {
+		expect(() =>
+			loadConfig(createBindings({ ...openaiEnv, LLM_ANSWER_MODE: "on" })),
+		).toThrow("Invalid configuration for LLM_ANSWER_MODE:");
+	});
 });

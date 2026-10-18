@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import toolSchemas from "../../sheets/search/tools.schema.json";
+import {
+	PRESENT_AGGREGATE_TOOL,
+	PRESENT_QUERY_TOOL,
+	SHEET_TOOL_DEFINITIONS,
+} from "../../workflows/sheetTools/tools";
 
 // Documented Structured Outputs subset for strict function tools (2026-10-18):
 // https://developers.openai.com/api/docs/guides/structured-outputs
@@ -97,6 +102,37 @@ describe("sheet search tool schemas for OpenAI strict mode", () => {
 			expect(result.chars).toBeLessThanOrEqual(MAX_NAME_AND_ENUM_CHARS);
 		},
 	);
+
+	it.each(SHEET_TOOL_DEFINITIONS.map((tool) => [tool.name, tool] as const))(
+		"keeps the Workflow tool %s within the documented strict subset",
+		(_name, tool) => {
+			expect(tool.strict).toBe(true);
+			expect(typeof tool.description).toBe("string");
+			const parameters = tool.parameters as Schema;
+			expect(parameters.type).toBe("object");
+			expect(parameters).not.toHaveProperty("anyOf");
+			const result = inspect(parameters);
+			expect(result.problems).toEqual([]);
+			expect(result.depth).toBeLessThanOrEqual(MAX_DEPTH);
+			expect(result.properties).toBeLessThanOrEqual(MAX_PROPERTIES);
+			expect(result.enumValues).toBeLessThanOrEqual(MAX_ENUM_VALUES);
+			expect(result.chars).toBeLessThanOrEqual(MAX_NAME_AND_ENUM_CHARS);
+		},
+	);
+
+	it("exposes six Workflow tools with present tools mirroring the search schemas", () => {
+		expect(SHEET_TOOL_DEFINITIONS).toHaveLength(6);
+		const parametersOf = (name: string) =>
+			toolSchemas.find((tool) => tool.name === name)?.parameters;
+		const definition = (name: string) =>
+			SHEET_TOOL_DEFINITIONS.find((tool) => tool.name === name);
+		expect(definition(PRESENT_QUERY_TOOL)?.parameters).toEqual(
+			parametersOf("query_records"),
+		);
+		expect(definition(PRESENT_AGGREGATE_TOOL)?.parameters).toEqual(
+			parametersOf("aggregate_records"),
+		);
+	});
 
 	it("rejects schemas outside the subset", () => {
 		expect(

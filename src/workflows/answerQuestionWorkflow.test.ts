@@ -457,6 +457,58 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(result).toEqual({ history: [] });
 			expect(mockHistoryRepository.get).not.toHaveBeenCalled();
 		});
+
+		it("also returns delivered IDs when requested", async () => {
+			const existingHistory = [{ role: "user", text: "old question" }];
+			mockHistoryRepository.get.mockResolvedValue(existingHistory);
+			vi.mocked(mockKVNamespace.get).mockResolvedValueOnce({
+				version: 1,
+				ids: ["id-1", "id-2"],
+			} as never);
+
+			const result = await getHistoryStep(
+				mockEnv,
+				"conversation-key",
+				mockLogger,
+				true,
+			);
+
+			expect(result).toEqual({
+				history: existingHistory,
+				deliveredIds: ["id-1", "id-2"],
+			});
+			expect(mockKVNamespace.get).toHaveBeenCalledWith(
+				"chat_delivered:v1:conversation-key",
+				"json",
+			);
+		});
+
+		it("returns no delivered IDs key unless requested", async () => {
+			mockHistoryRepository.get.mockResolvedValue([]);
+
+			for (const flag of [undefined, false]) {
+				const result = await getHistoryStep(
+					mockEnv,
+					"conversation-key",
+					mockLogger,
+					flag,
+				);
+				expect(Object.keys(result)).toEqual(["history"]);
+			}
+			expect(mockKVNamespace.get).not.toHaveBeenCalled();
+		});
+
+		it("returns empty delivered IDs when the key is missing from KV", async () => {
+			mockHistoryRepository.get.mockResolvedValue([]);
+			vi.mocked(mockKVNamespace.get).mockResolvedValueOnce(null as never);
+
+			await expect(
+				getHistoryStep(mockEnv, "conversation-key", mockLogger, true),
+			).resolves.toEqual({ history: [], deliveredIds: [] });
+			await expect(
+				getHistoryStep(mockEnv, undefined, mockLogger, true),
+			).resolves.toEqual({ history: [], deliveredIds: [] });
+		});
 	});
 
 	describe("saveHistoryStep", () => {
@@ -498,6 +550,55 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			expect(result).toEqual({ success: false });
 			expect(mockHistoryRepository.save).not.toHaveBeenCalled();
+		});
+
+		it("does not write delivered IDs without the fifth argument", async () => {
+			mockHistoryRepository.save.mockResolvedValue(undefined);
+			await saveHistoryStep(mockEnv, "conversation-key", [], mockLogger);
+
+			expect(mockKVNamespace.put).not.toHaveBeenCalled();
+		});
+
+		it("saves history and delivered IDs together", async () => {
+			mockHistoryRepository.save.mockResolvedValue(undefined);
+			const history: HistoryEntry[] = [{ role: "user", text: "question" }];
+
+			const result = await saveHistoryStep(
+				mockEnv,
+				"conversation-key",
+				history,
+				mockLogger,
+				["id-1", "id-2"],
+			);
+
+			expect(result).toEqual({ success: true });
+			expect(mockHistoryRepository.save).toHaveBeenCalledWith(
+				"conversation-key",
+				history,
+			);
+			expect(mockKVNamespace.put).toHaveBeenCalledWith(
+				"chat_delivered:v1:conversation-key",
+				'{"version":1,"ids":["id-1","id-2"]}',
+				{ expirationTtl: 300 },
+			);
+		});
+
+		it("treats a failing delivered ID save as non-fatal", async () => {
+			mockHistoryRepository.save.mockResolvedValue(undefined);
+			vi.mocked(mockKVNamespace.put).mockRejectedValueOnce(
+				new Error("KV error"),
+			);
+
+			const result = await saveHistoryStep(
+				mockEnv,
+				"conversation-key",
+				[],
+				mockLogger,
+				["id-1"],
+			);
+
+			expect(result).toEqual({ success: true });
+			expect(mockHistoryRepository.save).toHaveBeenCalled();
 		});
 	});
 
@@ -1646,5 +1747,117 @@ describe("completed Workflow checkpoint compatibility", () => {
 		expect(result.usage?.outputTokens).toBe(5);
 		expect(result.deliveryStatus).toBe("success");
 		expect(result.editCount).toBe(1);
+	});
+});
+
+describe("Workflow answer mode routing", () => {
+	function eventWith(answerMode?: "tools") {
+		return {
+			instanceId: "workflow-id",
+			payload: {
+				token: "token",
+				message: "question",
+				requestId: "request-id",
+				conversationKey: "conversation",
+				...(answerMode ? { answerMode } : {}),
+			},
+		} as WorkflowEvent<WorkflowParams>;
+	}
+
+	function fakeStep(results: Record<string, unknown>) {
+		const names: string[] = [];
+		const execute = vi.fn(async (name: string, ...args: unknown[]) => {
+			names.push(name);
+			if (name in results) return results[name];
+			return (args.at(-1) as () => Promise<unknown>)();
+		});
+		return { names, execute, step: { do: execute } as unknown as WorkflowStep };
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockHistoryRepository.save.mockResolvedValue(undefined);
+		mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+		mockDiscordInstance.postMessage.mockResolvedValue(undefined);
+	});
+
+	it("uses the legacy step names and never prepares sheet tools without answerMode", async () => {
+		const { names, step } = fakeStep({
+			getSheetData: {
+				sheetInfo: "knowledge",
+				description: "description",
+				fromCache: true,
+			},
+			getHistory: { history: [] },
+			streamGeminiAndEditDiscord: {
+				response: "answer",
+				updatedHistory: [
+					{ role: "user", text: "question" },
+					{ role: "assistant", text: "answer" },
+				],
+				usage: null,
+				thinkingSummaryUsage: null,
+				thinkingSummaryCallCount: 0,
+				thinkingSummarySuccessCount: 0,
+				thinkingSummaryDurationMs: 0,
+				editCount: 1,
+				chunkCount: 1,
+				deliveryStatus: "success",
+				failedChunks: [],
+				retryCount: 0,
+				deliveryDurationMs: 1,
+			},
+		});
+
+		await AnswerQuestionWorkflow.prototype.run.call(
+			{ env: mockEnv } as unknown as AnswerQuestionWorkflow,
+			eventWith(),
+			step,
+		);
+
+		expect(names).toEqual([
+			"getSheetData",
+			"getHistory",
+			"streamGeminiAndEditDiscord",
+			"saveHistory",
+		]);
+		expect(names).not.toContain("prepareSheetTools");
+	});
+
+	it("reports an error without any tool round when the gateway lacks tool support", async () => {
+		mockLlmGateway.capabilities.tools = false;
+		const toolEnv: Bindings = {
+			...mockEnv,
+			GEMINI_API_KEY: undefined,
+			OPENAI_API_KEY: "test-openai-key",
+			LLM_PROVIDER: "openai",
+			LLM_MODEL: "gpt-6-luna",
+			LLM_SUMMARY_ENABLED: "false",
+			LLM_ANSWER_MODE: "tools",
+		};
+		const { names, step } = fakeStep({
+			getSheetData: {
+				sheetInfo: "knowledge",
+				description: "description",
+				fromCache: true,
+			},
+			getHistory: { history: [], deliveredIds: [] },
+		});
+
+		await AnswerQuestionWorkflow.prototype.run.call(
+			{ env: toolEnv } as unknown as AnswerQuestionWorkflow,
+			eventWith("tools"),
+			step,
+		);
+
+		expect(names).toEqual(["getSheetData", "getHistory", "sendErrorResponse"]);
+		expect(names.some((name) => name.startsWith("sheetToolRound"))).toBe(false);
+		expect(names).not.toContain("prepareSheetTools");
+		// The specific capability error, not an unrelated failure on the same path.
+		expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"回答モデルがシート検索ツールに対応していません。",
+			),
+		);
 	});
 });

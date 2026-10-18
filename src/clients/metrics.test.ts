@@ -392,6 +392,77 @@ describe("MetricsClient", () => {
 		});
 	});
 
+	describe("recordSheetTools", () => {
+		const base = {
+			requestId: "req",
+			success: true,
+			durationMs: 100,
+			outcome: "answered" as const,
+			budgetReason: "",
+			rounds: 2,
+			toolCalls: 3,
+			attempts: 4,
+			toolResultBytes: 500,
+			totalTokens: 600,
+			modelDurationMs: 70,
+			searchDurationMs: 20,
+			finalFirstTextMs: 30,
+			zeroResults: 1,
+			ambiguousResults: 2,
+			missingResults: 3,
+			toolErrors: 4,
+			attachmentChunks: 5,
+			deliveredIds: 6,
+		};
+
+		it("writes sheet_tools_v1 with doubles in the documented order", () => {
+			metrics.recordSheetTools({
+				...base,
+				outcome: "budget_exceeded",
+				budgetReason: "model_rounds",
+				success: false,
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req"],
+				blobs: ["sheet_tools_v1", "req", "budget_exceeded", "model_rounds"],
+				doubles: [100, 0, 2, 3, 4, 500, 600, 70, 20, 30, 1, 2, 3, 4, 5, 6],
+			});
+		});
+
+		it("encodes a missing first-text time as -1", () => {
+			metrics.recordSheetTools({ ...base, finalFirstTextMs: null });
+			const doubles = mockDataset.writeDataPoint.mock.calls[0]?.[0].doubles;
+			expect(doubles).toHaveLength(16);
+			expect(doubles[9]).toBe(-1);
+		});
+
+		it("accepts the answer_round purpose for per-round LLM events", () => {
+			metrics.recordLlmCall({
+				provider: "openai",
+				model: "gpt-6-luna",
+				requestId: "req",
+				success: true,
+				durationMs: 10,
+				purpose: "answer_round",
+				callCount: 1,
+				retryCount: 0,
+				firstTextDurationMs: null,
+				usage: null,
+			});
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req"],
+				blobs: [
+					"llm_api_call_v2",
+					"req",
+					"openai",
+					"gpt-6-luna",
+					"answer_round",
+				],
+				doubles: [10, 1, 1, 0, -1, -1, -1, -1, -1, -1],
+			});
+		});
+	});
+
 	describe("error handling", () => {
 		it("does not throw when writeDataPoint fails", () => {
 			mockDataset.writeDataPoint.mockImplementation(() => {
@@ -457,6 +528,32 @@ describe("NoOpMetricsClient", () => {
 			retryCount: 0,
 		});
 		noOp.recordSheetsApiCall({ requestId: "x", success: true, durationMs: 0 });
+	});
+
+	it("ignores recordSheetTools", () => {
+		expect(() =>
+			new NoOpMetricsClient().recordSheetTools({
+				requestId: "x",
+				success: true,
+				durationMs: 0,
+				outcome: "answered",
+				budgetReason: "",
+				rounds: 0,
+				toolCalls: 0,
+				attempts: 0,
+				toolResultBytes: 0,
+				totalTokens: 0,
+				modelDurationMs: 0,
+				searchDurationMs: 0,
+				finalFirstTextMs: null,
+				zeroResults: 0,
+				ambiguousResults: 0,
+				missingResults: 0,
+				toolErrors: 0,
+				attachmentChunks: 0,
+				deliveredIds: 0,
+			}),
+		).not.toThrow();
 	});
 });
 
