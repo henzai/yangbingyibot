@@ -1,0 +1,17 @@
+{
+	"version": "sheet-tools-eval-2026-10-18",
+	"effectiveDate": "2026-10-18",
+	"currency": "USD",
+	"maxAgeDays": 7,
+	"sources": ["https://developers.openai.com/api/docs/models/gpt-6-luna"],
+	"entries": [
+		{
+			"provider": "openai",
+			"model": "gpt-6-luna",
+			"inputPerMillionUsd": 0.1,
+			"cachedInputPerMillionUsd": 0.01,
+			"outputPerMillionUsd": 0.5,
+			"reasoningPerMillionUsd": 0.5
+		}
+	]
+}

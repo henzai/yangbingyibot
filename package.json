@@ -7,6 +7,7 @@
 		"dev": "wrangler dev src/index.ts",
 		"eval:llm": "node --import tsx tools/llm-eval/cli.ts",
 		"eval:llm:report": "node --import tsx tools/llm-eval/report-cli.ts",
+		"eval:sheet-tools": "node --import tsx tools/sheet-tools-eval/cli.ts",
 		"start": "wrangler dev",
 		"test": "vitest run && vitest run --config vitest.eval.config.mts",
 		"test:watch": "vitest",
