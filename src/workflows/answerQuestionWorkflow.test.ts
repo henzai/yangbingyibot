@@ -37,7 +37,7 @@ const mockDeduplicationStore = {
 
 const mockLlmGateway = {
 	provider: "gemini",
-	capabilities: { reasoningSummary: true },
+	capabilities: { reasoningSummary: true, tools: false },
 	generateStream: vi.fn(),
 	generateText: vi.fn(),
 };

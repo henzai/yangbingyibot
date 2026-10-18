@@ -155,6 +155,12 @@ beforeEach(() => {
 describe.each(["gemini", "openai"] as const)(
 	"shared ILlmGateway contract: %s",
 	(provider) => {
+		it("declares tool capability per provider", () => {
+			expect(createGateway(provider).capabilities.tools).toBe(
+				provider === "openai",
+			);
+		});
+
 		it("emits delta text, one cumulative usage snapshot, then one finish", async () => {
 			prepare(provider, "success");
 			expect(await collect(createGateway(provider))).toEqual([

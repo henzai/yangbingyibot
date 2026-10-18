@@ -76,7 +76,7 @@ function fakeGateway(
 ): ILlmGateway & { streamCalls: number; probeCalls: string[] } {
 	const gateway = {
 		provider,
-		capabilities: { reasoningSummary: provider === "gemini" },
+		capabilities: { reasoningSummary: provider === "gemini", tools: false },
 		streamCalls: 0,
 		probeCalls: [] as string[],
 		async *generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
