@@ -21,7 +21,15 @@ export interface SheetDataOutput {
 
 export interface HistoryOutput {
 	history: HistoryEntry[];
+	/** Tool path only; absent on legacy runs and older checkpoints. */
+	deliveredIds?: string[];
 }
+
+export type {
+	SheetToolDeliveryOutput,
+	SheetToolPrepareOutput,
+	SheetToolRoundOutput,
+} from "./sheetTools/loop";
 
 export interface StreamingLlmOutput {
 	response: string;

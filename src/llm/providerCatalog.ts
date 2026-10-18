@@ -5,6 +5,8 @@ export type ProviderDefinition = {
 	defaultSummaryModel?: string;
 	legacyModelSetting?: "GEMINI_MODEL";
 	legacySummaryModelSetting?: "GEMINI_SUMMARY_MODEL";
+	/** Whether the adapter implements the tool-call contract (LLM_ANSWER_MODE=tools). */
+	tools: boolean;
 };
 
 export type ProviderCatalog = Readonly<Record<string, ProviderDefinition>>;
@@ -16,9 +18,11 @@ export const PROVIDERS = {
 		defaultSummaryModel: "gemini-2.5-flash-lite",
 		legacyModelSetting: "GEMINI_MODEL",
 		legacySummaryModelSetting: "GEMINI_SUMMARY_MODEL",
+		tools: false,
 	},
 	openai: {
 		apiKeySetting: "OPENAI_API_KEY",
+		tools: true,
 	},
 } as const satisfies ProviderCatalog;
 

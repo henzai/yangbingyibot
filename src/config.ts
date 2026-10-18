@@ -1,4 +1,4 @@
-import type { Bindings } from "./contracts";
+import type { AnswerMode, Bindings } from "./contracts";
 import {
 	type LlmRoutingConfig,
 	type LlmSelection,
@@ -47,6 +47,8 @@ export type AppConfig = {
 	spreadsheet: SpreadsheetConfig;
 	githubRepository: GitHubRepositoryConfig;
 	historyTtlSeconds: number;
+	/** legacy (default) sends the full TSV; tools uses the sheet search tools. */
+	answerMode: AnswerMode;
 };
 
 export class ConfigError extends Error {
@@ -87,6 +89,7 @@ function optionalString(
 		| "LLM_SUMMARY_ENABLED"
 		| "LLM_SUMMARY_PROVIDER"
 		| "LLM_SUMMARY_MODEL"
+		| "LLM_ANSWER_MODE"
 		| "GOOGLE_SPREADSHEET_ID"
 		| "GOOGLE_DATA_SHEET_NAME"
 		| "GOOGLE_DESCRIPTION_SHEET_NAME",
@@ -213,15 +216,33 @@ function loadLlmConfig(
 	return { answer, summary: select(summaryProvider, "summary") };
 }
 
+function parseAnswerMode(
+	env: Bindings,
+	llm: LlmRoutingConfig,
+	catalog: ProviderCatalog,
+): AnswerMode {
+	const mode = optionalString(env, "LLM_ANSWER_MODE", "legacy");
+	if (mode !== "legacy" && mode !== "tools")
+		throw new ConfigError("LLM_ANSWER_MODE", "must be legacy or tools");
+	// Never switch models silently: an unsupported provider is a config error.
+	if (mode === "tools" && !catalog[llm.answer.provider]?.tools)
+		throw new ConfigError(
+			"LLM_ANSWER_MODE",
+			"tools requires an answer provider with tool support",
+		);
+	return mode;
+}
+
 export function loadConfig(
 	env: Bindings,
 	catalog: ProviderCatalog = PROVIDERS,
 ): AppConfig {
+	const llm = loadLlmConfig(env, catalog);
 	return {
 		discordToken: requiredString(env, "DISCORD_TOKEN"),
 		discordPublicKey: requiredString(env, "DISCORD_PUBLIC_KEY"),
 		discordApplicationId: requiredString(env, "DISCORD_APPLICATION_ID"),
-		llm: loadLlmConfig(env, catalog),
+		llm,
 		googleServiceAccount: requiredString(env, "GOOGLE_SERVICE_ACCOUNT"),
 		githubToken: optionalString(env, "GITHUB_TOKEN"),
 		spreadsheet: {
@@ -246,5 +267,6 @@ export function loadConfig(
 		},
 		githubRepository: parseGitHubRepository(env.GITHUB_REPOSITORY),
 		historyTtlSeconds: parseHistoryTtl(env.HISTORY_TTL_SECONDS),
+		answerMode: parseAnswerMode(env, llm, catalog),
 	};
 }

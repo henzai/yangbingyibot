@@ -154,6 +154,62 @@ describe("DiscordWebhookClient", () => {
 		});
 	});
 
+	describe("options", () => {
+		const inertBody = JSON.stringify({
+			content: "hi",
+			allowed_mentions: { parse: [] },
+			flags: 4,
+		});
+
+		it("sends an inert PATCH body", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
+			globalThis.fetch = mockFetch;
+
+			await new DiscordWebhookClient("app-id", "token", undefined, {
+				inert: true,
+			}).editOriginalMessage("hi");
+
+			expect(mockFetch.mock.calls[0]?.[1].body).toBe(inertBody);
+		});
+
+		it("sends an inert POST body", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
+			globalThis.fetch = mockFetch;
+
+			await new DiscordWebhookClient("app-id", "token", undefined, {
+				inert: true,
+			}).postMessage("hi");
+
+			expect(mockFetch.mock.calls[0]?.[1].body).toBe(inertBody);
+		});
+
+		it("keeps a plain content body without options", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
+			globalThis.fetch = mockFetch;
+
+			await new DiscordWebhookClient("app-id", "token").postMessage("hi");
+
+			expect(mockFetch.mock.calls[0]?.[1].body).toBe(
+				JSON.stringify({ content: "hi" }),
+			);
+		});
+
+		it("passes the signal to fetch", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
+			globalThis.fetch = mockFetch;
+			const signal = new AbortController().signal;
+			const client = createDiscordWebhookClient("app-id", "token", undefined, {
+				signal,
+			});
+
+			await client.editOriginalMessage("hi");
+			await client.postMessage("hi");
+
+			expect(mockFetch.mock.calls[0]?.[1].signal).toBe(signal);
+			expect(mockFetch.mock.calls[1]?.[1].signal).toBe(signal);
+		});
+	});
+
 	describe("createDiscordWebhookClient", () => {
 		it("creates a new DiscordWebhookClient instance", () => {
 			const client = createDiscordWebhookClient("app-id", "token");
