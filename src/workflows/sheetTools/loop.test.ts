@@ -19,8 +19,10 @@ import { ExternalServiceError } from "../../utils/errors";
 import type { Logger } from "../../utils/logger";
 import { SHEET_TOOL_LIMITS } from "./limits";
 import {
+	captureStepFailure,
 	deliverSheetToolAnswerStep,
 	prepareSheetToolsStep,
+	rethrowStepFailure,
 	runSheetToolRound,
 	SheetToolBudgetError,
 	type SheetToolDeps,
@@ -743,6 +745,49 @@ describe("Workflow replay", () => {
 		expect(parsedResults(tools)[0].result.calculation_context).toEqual({
 			as_of: "2026-10-17",
 			target_age: null,
+		});
+	});
+});
+
+describe("step failure records", () => {
+	it("rebuild budget and technical errors after a JSON checkpoint", async () => {
+		const budget = JSON.parse(
+			JSON.stringify(
+				await captureStepFailure(async () => {
+					throw new SheetToolBudgetError("tool_calls");
+				}),
+			),
+		);
+		expect(() => rethrowStepFailure(budget)).toThrow(SheetToolBudgetError);
+		expect(() => rethrowStepFailure(budget)).toThrow(
+			expect.objectContaining({ reason: "tool_calls" }),
+		);
+		const technical = JSON.parse(
+			JSON.stringify(
+				await captureStepFailure(async () => {
+					throw new ExternalServiceError({
+						service: "sheets",
+						operation: "open pinned sheet snapshot expired",
+						retryable: false,
+						userMessage: "読み込めませんでした。",
+					});
+				}),
+			),
+		);
+		expect(() => rethrowStepFailure(technical)).toThrow(
+			expect.objectContaining({
+				name: "ExternalServiceError",
+				userMessage: "読み込めませんでした。",
+			}),
+		);
+		await expect(
+			captureStepFailure(async () => {
+				throw new TypeError("bug");
+			}),
+		).rejects.toBeInstanceOf(TypeError);
+		expect(rethrowStepFailure({ kind: "final", text: "x" })).toEqual({
+			kind: "final",
+			text: "x",
 		});
 	});
 });

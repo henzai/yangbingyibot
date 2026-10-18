@@ -36,7 +36,9 @@ export const SHEET_TOOL_LIMITS = Object.freeze({
 export const SHEET_TOOL_STEP_TIMEOUTS = Object.freeze({
 	prepare: "30 seconds",
 	round: "95 seconds",
-	deliver: "30 seconds",
+	// Covers the whole question budget: delivery may start early and must be
+	// stopped by the shared deadline signal, not cut off mid-chunk by the step.
+	deliver: "105 seconds",
 });
 
 export type SheetToolBudgetReason =

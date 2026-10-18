@@ -22,7 +22,7 @@ import type { PreparedSheetAnswer } from "../../sheets/answers/contracts";
 import { tokyoDay } from "../../sheets/search/cells";
 import type { SheetSearchEngine } from "../../sheets/search/engine";
 import type { SheetSnapshotRef } from "../../sheets/snapshot";
-import { ExternalServiceError } from "../../utils/errors";
+import { type ExternalService, ExternalServiceError } from "../../utils/errors";
 import type { Logger } from "../../utils/logger";
 import type { RetryConfig } from "../../utils/retry";
 import { SHEET_TOOL_LIMITS, type SheetToolBudgetReason } from "./limits";
@@ -58,6 +58,55 @@ export class SheetToolBudgetError extends ExternalServiceError {
 		this.name = "SheetToolBudgetError";
 		this.reason = reason;
 	}
+}
+
+/**
+ * Errors lose their class and fields across the Workflow step boundary, so
+ * tool steps return this plain record and the caller rebuilds the error.
+ */
+export type SheetToolStepFailure = {
+	kind: "step_failure";
+	budgetReason: SheetToolBudgetReason | null;
+	service: ExternalService;
+	operation: string;
+	userMessage: string;
+};
+
+export async function captureStepFailure<T>(
+	action: () => Promise<T>,
+): Promise<T | SheetToolStepFailure> {
+	try {
+		return await action();
+	} catch (error) {
+		if (!(error instanceof ExternalServiceError)) throw error;
+		return {
+			kind: "step_failure",
+			budgetReason: error instanceof SheetToolBudgetError ? error.reason : null,
+			service: error.service,
+			operation: error.operation,
+			userMessage: error.userMessage,
+		};
+	}
+}
+
+export function rethrowStepFailure<T>(value: T | SheetToolStepFailure): T {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"kind" in value &&
+		value.kind === "step_failure"
+	) {
+		const failure = value as SheetToolStepFailure;
+		throw failure.budgetReason
+			? new SheetToolBudgetError(failure.budgetReason)
+			: new ExternalServiceError({
+					service: failure.service,
+					operation: failure.operation,
+					retryable: false,
+					userMessage: failure.userMessage,
+				});
+	}
+	return value as T;
 }
 
 function technical(

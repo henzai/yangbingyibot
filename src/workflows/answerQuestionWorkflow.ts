@@ -57,14 +57,18 @@ import {
 	SHEET_TOOL_STEP_TIMEOUTS,
 } from "./sheetTools/limits";
 import {
+	captureStepFailure,
 	deliverSheetToolAnswerStep,
 	prepareSheetToolsStep,
+	rethrowStepFailure,
 	runSheetToolRound,
 	SheetToolBudgetError,
 	type SheetToolDeliveryOutput,
 	type SheetToolDeps,
+	type SheetToolPrepareOutput,
 	type SheetToolRoundMetrics,
 	type SheetToolRoundOutput,
+	type SheetToolStepFailure,
 } from "./sheetTools/loop";
 import type {
 	DiscordResponseOutput,
@@ -799,10 +803,15 @@ export async function answerWithSheetTools(
 			firstTextDurationMs: round.firstTextDurationMs,
 		});
 	try {
-		const prepared = await step.do(
-			"prepareSheetTools",
-			{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.prepare },
-			async () => prepareSheetToolsStep(deps, sheetData.snapshotRef),
+		const prepared = rethrowStepFailure<SheetToolPrepareOutput>(
+			await step.do(
+				"prepareSheetTools",
+				{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.prepare },
+				async () =>
+					captureStepFailure(() =>
+						prepareSheetToolsStep(deps, sheetData.snapshotRef),
+					),
+			),
 		);
 		onStep();
 		for (let round = 1; round <= SHEET_TOOL_LIMITS.maxModelRounds; round++) {
@@ -812,25 +821,29 @@ export async function answerWithSheetTools(
 			try {
 				// LlmToolState.items is opaque JSON (unknown[]), which
 				// Rpc.Serializable cannot express; the contract keeps it serializable.
-				output = (await step.do(
-					`sheetToolRound${round}`,
-					{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.round },
-					async () =>
-						(await runSheetToolRound(
-							deps,
-							{
-								round,
-								question: message,
-								prepared,
-								history,
-								deliveredIds: previousIds,
-								previous,
-							},
-							(metrics) => {
-								attempted = metrics;
-							},
-						)) as never,
-				)) as SheetToolRoundOutput;
+				output = rethrowStepFailure(
+					(await step.do(
+						`sheetToolRound${round}`,
+						{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.round },
+						async (): Promise<never> =>
+							(await captureStepFailure(() =>
+								runSheetToolRound(
+									deps,
+									{
+										round,
+										question: message,
+										prepared,
+										history,
+										deliveredIds: previousIds,
+										previous,
+									},
+									(metrics) => {
+										attempted = metrics;
+									},
+								),
+							)) as never,
+					)) as SheetToolRoundOutput | SheetToolStepFailure,
+				);
 				last = output;
 			} catch (error) {
 				failedRound = attempted;
@@ -843,16 +856,20 @@ export async function answerWithSheetTools(
 		}
 		const final = last;
 		if (final?.kind !== "final") throw new SheetToolBudgetError("model_rounds");
-		delivery = await step.do(
-			"deliverSheetToolAnswer",
-			{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.deliver },
-			async () =>
-				deliverSheetToolAnswerStep(deps, {
-					question: message,
-					prepared,
-					final,
-					deliveredIds: previousIds,
-				}),
+		delivery = rethrowStepFailure<SheetToolDeliveryOutput>(
+			await step.do(
+				"deliverSheetToolAnswer",
+				{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.deliver },
+				async () =>
+					captureStepFailure(() =>
+						deliverSheetToolAnswerStep(deps, {
+							question: message,
+							prepared,
+							final,
+							deliveredIds: previousIds,
+						}),
+					),
+			),
 		);
 		onStep();
 		outcome = "answered";
@@ -904,8 +921,11 @@ export async function answerWithSheetTools(
 			toolCalls: totals?.toolCalls ?? 0,
 			attempts,
 			toolResultBytes: totals?.toolResultBytes ?? 0,
-			totalTokens: totals?.totalTokens ?? 0,
-			modelDurationMs: totals?.modelDurationMs ?? 0,
+			// Include a failed round: it may have spent tokens before stopping.
+			totalTokens:
+				(totals?.totalTokens ?? 0) + (failedRound?.usage?.totalTokens ?? 0),
+			modelDurationMs:
+				(totals?.modelDurationMs ?? 0) + (failedRound?.durationMs ?? 0),
 			searchDurationMs: totals?.searchDurationMs ?? 0,
 			finalFirstTextMs,
 			zeroResults: totals?.outcomes.zero ?? 0,

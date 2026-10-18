@@ -10,7 +10,7 @@
 | --- | --- |
 | 切替flag | `LLM_ANSWER_MODE=legacy\|tools`、既定legacy。wrangler.tomlは変更しない。tools＋ツール非対応providerは設定エラー。経路はWorkflow作成時のpayloadに固定し、再開中にflagが変わっても経路を切り替えない |
 | Workflowのstep | 既存の `getSheetData`・`getHistory` の後、`prepareSheetTools` → `sheetToolRound1..9` → `deliverSheetToolAnswer` → 既存 `saveHistory`。legacyのstep名・出力は不変 |
-| 再開 | 各roundが不透明state・ツール結果・累計をcheckpointする。再開時は完了済みroundのモデルを再度呼ばず、同じsnapshotRef・保存した `questionDate` で実行器を開き直す。構造化シートはstep出力に入れない |
+| 再開 | 各roundが不透明state・ツール結果・累計をcheckpointする。再開時は完了済みroundのモデルを再度呼ばず、同じsnapshotRef・保存した `questionDate` で実行器を開き直す。構造化シートはstep出力に入れない。step境界でエラーの型が失われるため、予算超過・技術失敗は直列化できる記録として返し、外側で復元する。配信stepのtimeoutは質問全体の予算を覆う |
 | Discord配信 | ツール実行中は固定の進捗文だけ（1回試行）。モデルのtextは最終roundまで保持し、配信は独立した最終stepで1回。再試行で回答を再生成しない。mention無効・embed抑制 |
 | 予算 | 共通deadline 100秒（モデルround・検索は85秒まで）、9往復、ツール8回、結果1件33KiB・累計128KiB、state 640KiB、round毎の出力16k token、合計600k token、描画20ページ/256KiB/8chunk。全往復・検索・Discord編集が同じAbortSignalで止まる |
 | 結果の区別 | 技術失敗・予算超過（理由コード付き）・回答済みをmetricsで区別。ツール結果は0件・曖昧・未記載・エラーを件数で記録し、モデルにも区別して伝える指示を毎往復入れる |

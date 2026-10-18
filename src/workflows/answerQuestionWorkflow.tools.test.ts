@@ -75,7 +75,15 @@ function checkpointedSteps(evictAt?: string) {
 			const callback = (maybeCallback ??
 				configOrCallback) as () => Promise<unknown>;
 			executed.push(name);
-			const result = await callback();
+			let result: unknown;
+			try {
+				result = await callback();
+			} catch (error) {
+				// Like the Workflow RPC boundary: class and custom fields are lost.
+				const plain = new Error(error instanceof Error ? error.message : "");
+				plain.name = error instanceof Error ? error.name : "Error";
+				throw plain;
+			}
 			cache.set(name, JSON.stringify(result));
 			return JSON.parse(cache.get(name) as string);
 		},
@@ -259,6 +267,12 @@ describe("AnswerQuestionWorkflow tool path", () => {
 			"budget_exceeded",
 			"output_tokens",
 		]);
+		const summary = writeDataPoint.mock.calls.find(
+			([point]) => point.blobs[0] === "sheet_tools_v1",
+		)?.[0];
+		// rounds=1 and the failed round's 115 tokens are counted.
+		expect(summary.doubles[2]).toBe(1);
+		expect(summary.doubles[6]).toBe(USAGE.totalTokens);
 		expect(data.has("chat_history:v2:conv")).toBe(false);
 	});
 });
