@@ -67,6 +67,8 @@ export type RoundRecord = {
 	/** Cumulative serialized tool results after this round. */
 	toolResultBytes: number;
 	calls: ToolCallRecord[];
+	/** Arguments as the model sent them, for diagnosing invalid_arguments. */
+	requestedCalls: RequestRecord["toolCalls"];
 };
 
 export type PathResult = {
@@ -242,6 +244,7 @@ export async function runToolsPath(
 		roundOutputBytes: outputBytes,
 		toolResultBytes: output?.totals.toolResultBytes ?? 0,
 		calls: callLog.find((entry) => entry.round === metrics.round)?.calls ?? [],
+		requestedCalls: records.flatMap((r) => r.toolCalls),
 	});
 	try {
 		const [prep] = checkpoint(

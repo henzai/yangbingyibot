@@ -218,6 +218,13 @@ describe("sheet tools evaluation harness", () => {
 		expect(result.rounds[0].calls).toEqual([
 			expect.objectContaining({ name: "search_records" }),
 		]);
+		expect(result.rounds[0].requestedCalls).toEqual([
+			{
+				name: "search_records",
+				arguments: { ok: true, value: searchArgs },
+			},
+		]);
+		expect(result.rounds[1].requestedCalls).toEqual([]);
 		expect(result.rounds[0].stateBytes).toBeGreaterThan(0);
 		expect(result.rounds[0].roundOutputBytes).toBeGreaterThan(0);
 		expect(result.costUsd).toBeGreaterThan(0);

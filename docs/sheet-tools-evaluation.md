@@ -50,7 +50,7 @@ tools経路は `prepareSheetToolsStep` → `runSheetToolRound`（1〜`maxModelRo
 
 | ファイル | 内容 |
 | --- | --- |
-| `raw.jsonl` | ローカル専用。質問×経路ごとに、結果（`answered` / `budget_exceeded(理由)` / `technical_failure(service, operation, HTTP status)` / `harness_budget_stop`）、最終本文、配信chunk、round別の指標（finishReason、ツール呼び出し数、usage（cached・reasoning含む）、試行数、所要時間、最初のtextまで、state・出力のバイト数）、ツール名と呼び出しごとの結果（ok/zero/ambiguous/missing/error）、合計、コスト、遅延 |
+| `raw.jsonl` | ローカル専用。質問×経路ごとに、結果（`answered` / `budget_exceeded(理由)` / `technical_failure(service, operation, HTTP status)` / `harness_budget_stop`）、最終本文、配信chunk、round別の指標（finishReason、ツール呼び出し数、usage（cached・reasoning含む）、試行数、所要時間、最初のtextまで、state・出力のバイト数）、ツール名と呼び出しごとの結果（ok/zero/ambiguous/missing/error）、モデルが送ったツール引数（`requestedCalls`。`invalid_arguments` の原因調査用）、合計、コスト、遅延 |
 | `summary.json` | 集計のみ。質問・回答・履歴・行・ツール引数の本文は含まない。経路別・category別の件数、結果別件数、予算理由、ツール結果別件数、round数・ツール呼び出し数の分布、遅延のp50/p95、token合計（cached・reasoning含む）、コストの合計・平均・最大、state・結果・round出力の最大バイト数、snapshot sha256、git commit、モデル、価格版 |
 
 `summary.json` のG1受入フラグ（tools経路）：`schemaAccepted`（round 1が非エラー応答）、`continuationObserved`（`tool_calls` で終わったroundの後に成功したroundがある）、`usageAlwaysPresent`（応答したroundすべてでusageが揃っている）。

@@ -2,6 +2,7 @@ import type {
 	ILlmGateway,
 	LlmRequest,
 	LlmStreamEvent,
+	LlmToolArguments,
 	LlmUsage,
 } from "../../src/llm/types";
 import { ExternalServiceError } from "../../src/utils/errors";
@@ -67,6 +68,8 @@ export type RequestRecord = {
 	costUsd: number;
 	/** null when the provider returned a response stream without throwing. */
 	error: { service: string; operation: string; status: number | null } | null;
+	/** Model-requested calls with raw arguments; local raw.jsonl only. */
+	toolCalls: { name: string; arguments: LlmToolArguments }[];
 };
 
 /**
@@ -105,6 +108,7 @@ export class MeteredGateway implements ILlmGateway {
 		let attempts = 0;
 		let usage: LlmUsage | null = null;
 		let error: RequestRecord["error"] = null;
+		const toolCalls: RequestRecord["toolCalls"] = [];
 		const telemetry = {
 			onAttempt: () => {
 				attempts++;
@@ -118,6 +122,9 @@ export class MeteredGateway implements ILlmGateway {
 				telemetry,
 			})) {
 				if (event.type === "usage") usage = event.usage;
+				else if (event.type === "tool_calls")
+					for (const call of event.calls)
+						toolCalls.push({ name: call.name, arguments: call.arguments });
 				yield event;
 			}
 		} catch (caught) {
@@ -147,6 +154,7 @@ export class MeteredGateway implements ILlmGateway {
 				costKind: observed === null ? "estimated" : "observed",
 				costUsd,
 				error,
+				toolCalls,
 			});
 		}
 	}
