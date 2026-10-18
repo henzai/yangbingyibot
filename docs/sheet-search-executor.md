@@ -23,7 +23,7 @@ Epic #512、設計PR #513の契約v0.2を基に、最新mainの作業B（#514）
 - `query_records`：OR最大8枝×AND最大8、sort最大3列。null条件は全状態の全件です。上位Nを指定した場合のみ、sort値が有効な行を対象として境界同値を含めます。不明なsort値の人数は `ranking_unknown_count` に分けます。
 - `aggregate_records`：最大5metric、group_by最大3。countはdistinct ID、平均は有効値だけが分母。min/maxは全同値集合参照、best_rankは年がある正整数順位だけ、differenceは左−右です。両IDが同じwhere集合にあることを検証します。集合型のgroup_byは各要素へ展開するので複数groupに属することがあります。同じgroup内では正規化後もIDを重複排除します。上位groupは指定metricの有効値だけを対象にし、不明group数をranking_unknown_group_countへ分けます。
 
-`catalog(dataset)` はfieldごとの型・許可演算・出典・未提供理由を返します。current_group/current_teamは検証済み現在所属辞書がないため未提供です。generation_groupは加入グループで、現在所属へ流用しません。初期referenceはsnapshotに実在するdescription!A1の1レコードだけです。他タブは統合済みとしません。
+`catalog(dataset)` はfieldごとの型・許可演算・出典・未提供理由を返します。current_group/current_teamは下記「現在所属」の検証済み辞書で導出します。generation_groupは加入グループで、現在所属へ流用しません。初期referenceはsnapshotに実在するdescription!A1の1レコードだけです。他タブは統合済みとしません。
 
 ## 値・状態・日付
 
@@ -58,3 +58,29 @@ Dは集合と配信済みIDの照合・決定的描画、Eはprovider関数呼�
 検証結果はPR本文へ記載します。テストは人工人物と人工説明のみを使い、生シート・質問コーパス・未追跡HANDOFF/調査レポートを公開差分へ含めません。
 
 最終確認：Node.js 24 `npm run verify`（Biome・TypeScript・人工回帰を含む全アプリテスト・評価テスト16件・deploy dry-run）とPRのtest/build/typecheck/lintを確認します。保存済みCSVのオフライン検証では732人物の全ページ取得、SNH48 23期20人/24期9人を確認。生年不明の`????-MM-DD` 23セルを月日精度で保持し、年齢計算へ流用しません。CSVは作業B時点の保存物で、新しい本番疎通・品質評価ではありません。
+
+## 現在所属（current_group / current_team）
+
+検索時にprimary_affiliationとsecondary_affiliation（兼任を含む）から導出するset型項目です。snapshot・構造・catalogの保存バージョンは変えません。辞書はユーザー検証済みのバージョン1（`AFFILIATION_DICTIONARY_VERSION`、`src/sheets/search/affiliations.ts`）で、キーはセルのtrim後の完全一致です。
+
+| ラベル | group | team |
+|---|---|---|
+| SII, NII, HII, X | SNH48 | ラベル自身 |
+| SNH预备生 | SNH48 | 预备生 |
+| G, NIII, Z | GNZ48 | ラベル自身 |
+| GNZ预备生 | GNZ48 | 预备生 |
+| B, E | BEJ48 | ラベル自身 |
+| BEJ预备生 | BEJ48 | 预备生 |
+| C, K | CKG48 | ラベル自身 |
+| CKG预备生 | CKG48 | 预备生 |
+| CII | CGT48 | CII |
+| CGT预备生 | CGT48 | 预备生 |
+| IDFT | IDFT（SNH48に含まない独立グループ） | IDFT |
+
+`暫休/退団`、`SNH荣誉毕业生`、`GNZ荣誉毕业生`（暫休・退団・卒業・毕业を含むラベル）は現在所属ではありません。
+
+- current_group＝主所属と兼任のgroupの重複排除・ソート済み集合、current_team＝teamの重複排除集合（主所属が先）。主所属か兼任かは `primary_affiliation` / `secondary_affiliation` を同時に取得して区別します。`source_fields` は status と両所属列です。
+- 状態active：非空ラベルを写像。辞書にも非現在ラベルにもないラベルは `invalid`（reason `unmapped_affiliation`）で不明扱い。写像できるラベルがなければ `invalid`（`no_current_affiliation`）。
+- 状態inactive（status 44）：field_state `value` の空集合。eq/inは一致せず不明にも数えず、not_inとis_missingは一致します（空の集合型はis_missing扱い）。
+- 状態conflicting/unknown：`invalid`（state_flagsと同じく不明に数えます）。
+- 辞書を変更するにはユーザーの検証が必要で、`AFFILIATION_DICTIONARY_VERSION` を上げます。

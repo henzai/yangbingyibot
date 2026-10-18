@@ -1,6 +1,7 @@
 import { ELECTION_COLUMN_CATALOG, type SheetColumnKey } from "../columnCatalog";
 import { cellState, type MemberRecord } from "../memberRecords";
 import type { SheetSnapshot } from "../snapshot";
+import { affiliationCell } from "./affiliations";
 import { available, fieldType } from "./catalog";
 import { normalizeIdentityText } from "./identityIndex";
 import type {
@@ -248,6 +249,8 @@ export function readCell(
 					source_fields: ["generation"],
 				};
 	}
+	if (field === "current_group" || field === "current_team")
+		return affiliationCell(record, field);
 	if (field === "state_flags") {
 		const state = record.state.state;
 		return state === "conflicting" || state === "unknown"

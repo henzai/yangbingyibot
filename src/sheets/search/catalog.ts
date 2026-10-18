@@ -27,10 +27,17 @@ const sets = new Set<Field>([
 	"community_nicknames",
 	"official_nickname",
 	"state_flags",
+	"current_group",
+	"current_team",
 ]);
 const dates = new Set<Field>(["birthday", "debut_date"]);
 const references = new Set<Field>(["reference_title", "reference_body"]);
-const unavailable = new Set<Field>(["current_group", "current_team"]);
+const unavailable = new Set<Field>();
+const DERIVED_SOURCES: Partial<Record<Field, string>> = {
+	current_group:
+		"現在の所属グループ（主所属と兼任から検証済み対応表v1で導出。SNH48/GNZ48/BEJ48/CKG48/CGT48/IDFT。休業・退団・卒業は所属なし）",
+	current_team: "現在の所属チーム（主所属と兼任。预备生は研究生）",
+};
 export function fieldType(field: Field): FieldType {
 	if (field === "election_history") return "history";
 	if (numbers.has(field) || field.startsWith("election_")) return "number";
@@ -71,7 +78,8 @@ export function searchCatalog(dataset: Dataset) {
 				: "not_in_dataset",
 		source: references.has(field)
 			? "description!A1"
-			: (SHEET_COLUMN_CATALOG.find((c) => c.key === field)?.description ??
+			: (DERIVED_SOURCES[field] ??
+				SHEET_COLUMN_CATALOG.find((c) => c.key === field)?.description ??
 				"derived_from_snapshot"),
 	}));
 }
