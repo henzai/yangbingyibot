@@ -34,15 +34,15 @@ The default total budget is 90 seconds for streams and 15 seconds for text/summa
 
 ## Provider configuration
 
-| Setting | Default / precedence |
-| --- | --- |
-| `LLM_PROVIDER` | `gemini` |
-| `LLM_MODEL` | Explicit value → selected provider's legacy model setting → its default |
-| `LLM_SUMMARY_ENABLED` | `true`; accepts only `true` or `false` |
-| `LLM_SUMMARY_PROVIDER` | Answer provider when enabled |
-| `LLM_SUMMARY_MODEL` | Explicit value → selected provider's legacy summary setting → its summary default |
-| `GEMINI_MODEL` | Legacy answer override; default `gemini-3.5-flash-lite` |
-| `GEMINI_SUMMARY_MODEL` | Legacy summary override; default `gemini-2.5-flash-lite` |
+| Setting                | Default / precedence                                                              |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`         | `gemini`                                                                          |
+| `LLM_MODEL`            | Explicit value → selected provider's legacy model setting → its default           |
+| `LLM_SUMMARY_ENABLED`  | `true`; accepts only `true` or `false`                                            |
+| `LLM_SUMMARY_PROVIDER` | Answer provider when enabled                                                      |
+| `LLM_SUMMARY_MODEL`    | Explicit value → selected provider's legacy summary setting → its summary default |
+| `GEMINI_MODEL`         | Legacy answer override; default `gemini-3.5-flash-lite`                           |
+| `GEMINI_SUMMARY_MODEL` | Legacy summary override; default `gemini-2.5-flash-lite`                          |
 
 Values are trimmed. An explicitly blank value, unknown provider, missing selected key, or missing model without a provider default fails with a setting name, without printing credentials. Common model settings take precedence over legacy settings. Non-Gemini providers never inherit Gemini model settings.
 
