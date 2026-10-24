@@ -5,41 +5,14 @@ import {
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
-const SUPPRESS_EMBEDS = 1 << 2;
-
-export type DiscordWebhookClientOptions = {
-	/** Disable all mention parsing and link embeds (sheet tool answers). */
-	inert?: boolean;
-	/** Aborts in-flight requests at the caller's deadline. */
-	signal?: AbortSignal;
-};
 
 export class DiscordWebhookClient {
 	private endpoint: string;
 	private log: Logger;
-	private options: DiscordWebhookClientOptions;
 
-	constructor(
-		applicationId: string,
-		token: string,
-		log?: Logger,
-		options: DiscordWebhookClientOptions = {},
-	) {
+	constructor(applicationId: string, token: string, log?: Logger) {
 		this.endpoint = `${DISCORD_API_BASE}/webhooks/${applicationId}/${token}`;
 		this.log = log ?? defaultLogger;
-		this.options = options;
-	}
-
-	private body(content: string): string {
-		return JSON.stringify(
-			this.options.inert
-				? {
-						content,
-						allowed_mentions: { parse: [] },
-						flags: SUPPRESS_EMBEDS,
-					}
-				: { content },
-		);
 	}
 
 	/**
@@ -50,9 +23,8 @@ export class DiscordWebhookClient {
 		try {
 			const res = await fetch(`${this.endpoint}/messages/@original`, {
 				method: "PATCH",
-				body: this.body(content),
+				body: JSON.stringify({ content }),
 				headers: { "Content-Type": "application/json" },
-				signal: this.options.signal,
 			});
 
 			if (res.ok) {
@@ -83,9 +55,8 @@ export class DiscordWebhookClient {
 		try {
 			const res = await fetch(this.endpoint, {
 				method: "POST",
-				body: this.body(content),
+				body: JSON.stringify({ content }),
 				headers: { "Content-Type": "application/json" },
-				signal: this.options.signal,
 			});
 
 			if (!res.ok) {
@@ -112,7 +83,6 @@ export const createDiscordWebhookClient = (
 	applicationId: string,
 	token: string,
 	log?: Logger,
-	options?: DiscordWebhookClientOptions,
 ): DiscordWebhookClient => {
-	return new DiscordWebhookClient(applicationId, token, log, options);
+	return new DiscordWebhookClient(applicationId, token, log);
 };

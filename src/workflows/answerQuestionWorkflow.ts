@@ -34,17 +34,7 @@ import {
 	normalizeHistory,
 } from "../repositories/conversationHistory";
 import { createDeduplicationStore } from "../repositories/deduplicationStore";
-import {
-	createDeliveredIdRepository,
-	mergeDeliveredIds,
-} from "../repositories/deliveredIds";
 import { createSheetCacheRepository } from "../repositories/sheetCache";
-import { SheetSearchEngine } from "../sheets/search/engine";
-import {
-	type SheetSnapshotRef,
-	SheetSnapshotRepository,
-} from "../sheets/snapshot";
-import { createUnavailableSheetStructure } from "../sheets/structuredSheet";
 import {
 	ExternalServiceError,
 	getErrorMessage,
@@ -52,24 +42,6 @@ import {
 	getUserMessage,
 } from "../utils/errors";
 import { type Logger, logger } from "../utils/logger";
-import {
-	SHEET_TOOL_LIMITS,
-	SHEET_TOOL_STEP_TIMEOUTS,
-} from "./sheetTools/limits";
-import {
-	captureStepFailure,
-	deliverSheetToolAnswerStep,
-	prepareSheetToolsStep,
-	rethrowStepFailure,
-	runSheetToolRound,
-	SheetToolBudgetError,
-	type SheetToolDeliveryOutput,
-	type SheetToolDeps,
-	type SheetToolPrepareOutput,
-	type SheetToolRoundMetrics,
-	type SheetToolRoundOutput,
-	type SheetToolStepFailure,
-} from "./sheetTools/loop";
 import type {
 	DiscordResponseOutput,
 	HistoryOutput,
@@ -159,100 +131,25 @@ export async function getSheetDataStep(
 	const cache = createSheetCacheRepository(env.sushanshan_bot, log);
 
 	const cachedData = await cache.get(config.spreadsheet);
-	if (cachedData?.structuredSheet !== undefined) {
+	if (cachedData) {
 		log.info("Sheet data loaded from cache");
 		return {
 			sheetInfo: cachedData.sheetInfo,
 			description: cachedData.description,
 			fromCache: true,
-			...(cachedData.snapshotRef
-				? { snapshotRef: cachedData.snapshotRef }
-				: {}),
 		};
 	}
 
-	if (cachedData) {
-		log.info("Legacy sheet cache found; refreshing structured snapshot");
-		const sheetsApiStartTime = Date.now();
-		try {
-			const refreshedData = await getSheetData(
-				config.googleServiceAccount,
-				log,
-				config.spreadsheet,
-			);
-			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
-			let snapshotRef: SheetSnapshotRef | undefined;
-			try {
-				snapshotRef = await cache.save(
-					config.spreadsheet,
-					refreshedData.sheetInfo,
-					refreshedData.description,
-					refreshedData.structuredSheet,
-				);
-				log.info("Structured sheet cache refreshed");
-			} catch (error) {
-				log.warn("Failed to save refreshed cache (non-fatal)", {
-					error: getErrorMessage(error),
-				});
-			}
-			return {
-				sheetInfo: refreshedData.sheetInfo,
-				description: refreshedData.description,
-				fromCache: false,
-				...(snapshotRef ? { snapshotRef } : {}),
-				sheetsApiCall: {
-					success: true,
-					durationMs: sheetsApiDurationMs,
-				},
-			};
-		} catch (error) {
-			const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
-			log.warn("Failed to refresh legacy sheet cache; using legacy TSV", {
-				error: getErrorMessage(error),
-			});
-			try {
-				await cache.save(
-					config.spreadsheet,
-					cachedData.sheetInfo,
-					cachedData.description,
-					createUnavailableSheetStructure("invalid_snapshot"),
-				);
-				log.info("Legacy sheet fallback cached after refresh failure");
-			} catch (cacheError) {
-				log.warn("Failed to cache legacy sheet fallback (non-fatal)", {
-					error: getErrorMessage(cacheError),
-				});
-			}
-			return {
-				sheetInfo: cachedData.sheetInfo,
-				description: cachedData.description,
-				fromCache: true,
-				sheetsApiCall: {
-					success: false,
-					durationMs: sheetsApiDurationMs,
-				},
-			};
-		}
-	}
-
 	log.info("Fetching sheet data from Google Sheets");
-	const sheetsApiStartTime = Date.now();
 	const data = await getSheetData(
 		config.googleServiceAccount,
 		log,
 		config.spreadsheet,
 	);
-	const sheetsApiDurationMs = Date.now() - sheetsApiStartTime;
 
 	// Save to cache (best effort)
-	let snapshotRef: SheetSnapshotRef | undefined;
 	try {
-		snapshotRef = await cache.save(
-			config.spreadsheet,
-			data.sheetInfo,
-			data.description,
-			data.structuredSheet,
-		);
+		await cache.save(config.spreadsheet, data.sheetInfo, data.description);
 		log.info("Sheet data cached");
 	} catch (error) {
 		log.warn("Failed to save cache (non-fatal)", {
@@ -264,37 +161,7 @@ export async function getSheetDataStep(
 		sheetInfo: data.sheetInfo,
 		description: data.description,
 		fromCache: false,
-		...(snapshotRef ? { snapshotRef } : {}),
-		sheetsApiCall: {
-			success: true,
-			durationMs: sheetsApiDurationMs,
-		},
 	};
-}
-
-export function recordSheetDataAccessMetrics(
-	metrics: IMetricsClient,
-	requestId: string,
-	sheetData: SheetDataOutput,
-	stepDurationMs: number,
-): void {
-	metrics.recordKVCacheAccess({
-		requestId,
-		success: true,
-		durationMs: stepDurationMs,
-		cacheHit: sheetData.fromCache,
-		operation: "get",
-	});
-
-	// New checkpoints report an attempted refresh separately from the data
-	// source. Fall back to the old fromCache behavior for older checkpoints.
-	if (sheetData.sheetsApiCall || !sheetData.fromCache) {
-		metrics.recordSheetsApiCall({
-			requestId,
-			success: sheetData.sheetsApiCall?.success ?? true,
-			durationMs: sheetData.sheetsApiCall?.durationMs ?? stepDurationMs,
-		});
-	}
 }
 
 // Step 2: Get conversation history from KV
@@ -302,13 +169,10 @@ export async function getHistoryStep(
 	env: Bindings,
 	conversationKey: string | undefined,
 	log: Logger,
-	includeDeliveredIds = false,
 ): Promise<HistoryOutput> {
 	if (!conversationKey) {
 		log.warn("Conversation key missing, skipping history read");
-		return includeDeliveredIds
-			? { history: [], deliveredIds: [] }
-			: { history: [] };
+		return { history: [] };
 	}
 
 	const config = loadConfig(env);
@@ -319,13 +183,7 @@ export async function getHistoryStep(
 	);
 	const history = await historyRepository.get(conversationKey);
 	log.info("History loaded", { historyLength: history.length });
-	if (!includeDeliveredIds) return { history };
-	const deliveredIds = await createDeliveredIdRepository(
-		env.sushanshan_bot,
-		config.historyTtlSeconds,
-		log,
-	).get(conversationKey);
-	return { history, deliveredIds };
+	return { history };
 }
 
 // Step 4: Save conversation history to KV
@@ -334,15 +192,12 @@ export async function saveHistoryStep(
 	conversationKey: string | undefined,
 	history: HistoryEntry[],
 	log: Logger,
-	/** Tool path only: the merged set of confirmed delivered member IDs. */
-	deliveredIds?: readonly string[],
 ): Promise<SaveHistoryOutput> {
 	if (!conversationKey) {
 		log.warn("Conversation key missing, skipping history save");
 		return { success: false };
 	}
 
-	let success: boolean;
 	try {
 		const config = loadConfig(env);
 		const historyRepository = createConversationHistoryRepository(
@@ -352,79 +207,13 @@ export async function saveHistoryStep(
 		);
 		await historyRepository.save(conversationKey, history);
 		log.info("History saved", { historyLength: history.length });
-		success = true;
+		return { success: true };
 	} catch (error) {
 		log.warn("Failed to save history (non-fatal)", {
 			error: getErrorMessage(error),
 		});
-		success = false;
+		return { success: false };
 	}
-	if (deliveredIds === undefined) return { success };
-	try {
-		const config = loadConfig(env);
-		await createDeliveredIdRepository(
-			env.sushanshan_bot,
-			config.historyTtlSeconds,
-			log,
-		).save(conversationKey, deliveredIds);
-		log.info("Delivered IDs saved", { deliveredIdCount: deliveredIds.length });
-	} catch (error) {
-		log.warn("Failed to save delivered IDs (non-fatal)", {
-			error: getErrorMessage(error),
-		});
-	}
-	return { success };
-}
-
-/** Request-local dependencies for the sheet tool path (LLM_ANSWER_MODE=tools). */
-export function createSheetToolDeps(
-	env: Bindings,
-	config: AppConfig,
-	token: string,
-	log: Logger,
-): SheetToolDeps {
-	const repository = new SheetSnapshotRepository(env.sushanshan_bot);
-	const gateway = createLlmGateway(config.llm.answer, log);
-	if (!gateway.capabilities.tools)
-		throw new ExternalServiceError({
-			service: "llm",
-			provider: config.llm.answer.provider,
-			operation: "select sheet tool provider",
-			retryable: false,
-			userMessage: "回答モデルがシート検索ツールに対応していません。",
-		});
-	return {
-		gateway,
-		model: config.llm.answer.model,
-		openEngine: async (prepared, { deliveredIds, signal }) => {
-			const opened = await SheetSearchEngine.open(
-				repository,
-				config.spreadsheet,
-				prepared.snapshotRef,
-				{ questionDate: prepared.questionDate, deliveredIds, signal },
-			);
-			if (opened.status === "ready") return opened.engine;
-			// Never substitute the current mutable cache for the pinned snapshot.
-			throw new ExternalServiceError({
-				service: "sheets",
-				operation: `open pinned sheet snapshot ${opened.reason}`,
-				retryable: false,
-				userMessage:
-					"シートの検索用データを読み込めなかったため、回答を作成できませんでした。",
-			});
-		},
-		delivery: (signal, retryConfig) =>
-			createDiscordDeliveryService(
-				createDiscordWebhookClient(config.discordApplicationId, token, log, {
-					inert: true,
-					signal,
-				}),
-				log,
-				retryConfig,
-				signal,
-			),
-		log,
-	};
 }
 
 // Step 3+5 combined: Stream LLM response + progressively edit Discord message
@@ -593,9 +382,7 @@ export async function streamLlmWithDiscordEditsStep(
 	}
 	if (
 		streamResult.finish.reason === "blocked" ||
-		streamResult.finish.reason === "error" ||
-		// This path passes no tools; interim tool-round text is never an answer.
-		streamResult.finish.reason === "tool_calls"
+		streamResult.finish.reason === "error"
 	) {
 		throw new ExternalServiceError({
 			service: "llm",
@@ -746,212 +533,6 @@ export async function reportErrorToGitHub(
 	}
 }
 
-type SheetToolRunContext = {
-	token: string;
-	message: string;
-	requestId: string;
-	sheetData: SheetDataOutput;
-	historyOutput: HistoryOutput;
-	config: AppConfig;
-	log: Logger;
-	metrics: IMetricsClient;
-};
-
-/**
- * Tool path: prepareSheetTools → sheetToolRound1..N → deliverSheetToolAnswer.
- * Each round checkpoints its opaque state and tool results; only the final
- * text is delivered, from its own step, so a retry never regenerates it.
- */
-export async function answerWithSheetTools(
-	env: Bindings,
-	step: WorkflowStep,
-	context: SheetToolRunContext,
-	onStep: () => void,
-): Promise<{ updatedHistory: HistoryEntry[]; deliveredIds: string[] }> {
-	const { token, message, requestId, sheetData, config, metrics } = context;
-	const log = context.log.withContext({ answerMode: "tools" });
-	const history = normalizeHistory(context.historyOutput.history);
-	const previousIds = mergeDeliveredIds(
-		[],
-		context.historyOutput.deliveredIds ?? [],
-	);
-	const deps = createSheetToolDeps(env, config, token, log);
-	const noRetry = {
-		limit: 0,
-		delay: "1 second",
-		backoff: "exponential",
-	} as const;
-	const questionStart = Date.now();
-	let last: SheetToolRoundOutput | null = null;
-	// Assigned from callbacks, so keep the declared union for narrowing.
-	let failedRound = null as SheetToolRoundMetrics | null;
-	let delivery: SheetToolDeliveryOutput | null = null;
-	let outcome: "answered" | "budget_exceeded" | "technical_failure" =
-		"technical_failure";
-	let budgetReason = "";
-	const recordRound = (round: SheetToolRoundMetrics, success: boolean) =>
-		metrics.recordLlmCall({
-			requestId,
-			success,
-			durationMs: round.durationMs,
-			usage: round.usage,
-			provider: config.llm.answer.provider,
-			model: config.llm.answer.model,
-			purpose: "answer_round",
-			callCount: 1,
-			retryCount: Math.max(0, round.attempts - 1),
-			firstTextDurationMs: round.firstTextDurationMs,
-		});
-	try {
-		const prepared = rethrowStepFailure<SheetToolPrepareOutput>(
-			await step.do(
-				"prepareSheetTools",
-				{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.prepare },
-				async () =>
-					captureStepFailure(() =>
-						prepareSheetToolsStep(deps, sheetData.snapshotRef),
-					),
-			),
-		);
-		onStep();
-		for (let round = 1; round <= SHEET_TOOL_LIMITS.maxModelRounds; round++) {
-			let attempted = null as SheetToolRoundMetrics | null;
-			const previous: SheetToolRoundOutput | null = last;
-			let output: SheetToolRoundOutput;
-			try {
-				// LlmToolState.items is opaque JSON (unknown[]), which
-				// Rpc.Serializable cannot express; the contract keeps it serializable.
-				output = rethrowStepFailure(
-					(await step.do(
-						`sheetToolRound${round}`,
-						{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.round },
-						async (): Promise<never> =>
-							(await captureStepFailure(() =>
-								runSheetToolRound(
-									deps,
-									{
-										round,
-										question: message,
-										prepared,
-										history,
-										deliveredIds: previousIds,
-										previous,
-									},
-									(metrics) => {
-										attempted = metrics;
-									},
-								),
-							)) as never,
-					)) as SheetToolRoundOutput | SheetToolStepFailure,
-				);
-				last = output;
-			} catch (error) {
-				failedRound = attempted;
-				if (attempted) recordRound(attempted, false);
-				throw error;
-			}
-			recordRound(output.metrics, true);
-			onStep();
-			if (output.kind === "final") break;
-		}
-		const final = last;
-		if (final?.kind !== "final") throw new SheetToolBudgetError("model_rounds");
-		delivery = rethrowStepFailure<SheetToolDeliveryOutput>(
-			await step.do(
-				"deliverSheetToolAnswer",
-				{ retries: noRetry, timeout: SHEET_TOOL_STEP_TIMEOUTS.deliver },
-				async () =>
-					captureStepFailure(() =>
-						deliverSheetToolAnswerStep(deps, {
-							question: message,
-							prepared,
-							final,
-							deliveredIds: previousIds,
-						}),
-					),
-			),
-		);
-		onStep();
-		outcome = "answered";
-		return {
-			updatedHistory: [
-				...history,
-				{ role: "user", text: `質問: ${message}` },
-				{ role: "assistant", text: delivery.historyText },
-			],
-			deliveredIds: mergeDeliveredIds(previousIds, delivery.deliveredIds),
-		};
-	} catch (error) {
-		if (error instanceof SheetToolBudgetError) {
-			outcome = "budget_exceeded";
-			budgetReason = error.reason;
-		}
-		throw error;
-	} finally {
-		const totals = last?.totals;
-		const rounds = (totals?.rounds ?? 0) + (failedRound ? 1 : 0);
-		const attempts = (totals?.attempts ?? 0) + (failedRound?.attempts ?? 0);
-		const usage =
-			failedRound && totals
-				? addLlmUsage(totals.usage, failedRound.usage)
-				: (totals?.usage ?? failedRound?.usage ?? null);
-		const finalFirstTextMs =
-			last?.kind === "final" ? last.finalFirstTextMs : null;
-		if (rounds > 0)
-			metrics.recordLlmCall({
-				requestId,
-				success: outcome === "answered",
-				durationMs:
-					(totals?.modelDurationMs ?? 0) + (failedRound?.durationMs ?? 0),
-				usage,
-				provider: config.llm.answer.provider,
-				model: config.llm.answer.model,
-				purpose: "answer",
-				callCount: rounds,
-				retryCount: Math.max(0, attempts - rounds),
-				firstTextDurationMs: finalFirstTextMs,
-			});
-		const summary = {
-			requestId,
-			success: outcome === "answered",
-			durationMs: Date.now() - questionStart,
-			outcome,
-			budgetReason,
-			rounds,
-			toolCalls: totals?.toolCalls ?? 0,
-			attempts,
-			toolResultBytes: totals?.toolResultBytes ?? 0,
-			// Include a failed round: it may have spent tokens before stopping.
-			totalTokens:
-				(totals?.totalTokens ?? 0) + (failedRound?.usage?.totalTokens ?? 0),
-			modelDurationMs:
-				(totals?.modelDurationMs ?? 0) + (failedRound?.durationMs ?? 0),
-			searchDurationMs: totals?.searchDurationMs ?? 0,
-			finalFirstTextMs,
-			zeroResults: totals?.outcomes.zero ?? 0,
-			ambiguousResults: totals?.outcomes.ambiguous ?? 0,
-			missingResults: totals?.outcomes.missing ?? 0,
-			toolErrors: totals?.outcomes.error ?? 0,
-			attachmentChunks: last?.attachment?.chunkCount ?? 0,
-			deliveredIds: delivery?.deliveredIds.length ?? 0,
-		};
-		metrics.recordSheetTools(summary);
-		// Totals only: no question text, rows, arguments or provider state.
-		log.info("Sheet tool answer summary", { ...summary, usage });
-		if (delivery)
-			metrics.recordDiscordWebhook({
-				requestId,
-				success: delivery.deliveryStatus === "success",
-				durationMs: delivery.deliveryDurationMs,
-				retryCount: delivery.retryCount,
-				statusCode: delivery.statusCode,
-				editCount: delivery.editCount,
-				chunkCount: delivery.chunkCount,
-				deliveryStatus: delivery.deliveryStatus,
-			});
-	}
-}
-
 // Workflow class
 export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 	Bindings,
@@ -963,28 +544,10 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 		const metrics = getMetricsClient(this.env, log);
 		const config = loadConfig(this.env);
 
-		const toolMode = event.payload.answerMode === "tools";
-		log.info("Workflow started", {
-			messageLength: message.length,
-			...(toolMode ? { answerMode: "tools" } : {}),
-		});
+		log.info("Workflow started", { messageLength: message.length });
 		const workflowStartTime = Date.now();
 		let stepCount = 0;
 		let fromCache = false;
-		const completeSuccessfully = () => {
-			metrics.recordWorkflowComplete({
-				requestId,
-				workflowId: event.instanceId,
-				success: true,
-				durationMs: Date.now() - workflowStartTime,
-				stepCount,
-				fromCache,
-			});
-
-			log.info("Workflow completed successfully", {
-				durationMs: Date.now() - workflowStartTime,
-			});
-		};
 
 		try {
 			// Step 1: Get sheet data
@@ -1000,12 +563,23 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 
 			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
 
-			recordSheetDataAccessMetrics(
-				metrics,
+			// Record cache access metric
+			metrics.recordKVCacheAccess({
 				requestId,
-				sheetData,
-				sheetDataDurationMs,
-			);
+				success: true,
+				durationMs: sheetDataDurationMs,
+				cacheHit: sheetData.fromCache,
+				operation: "get",
+			});
+
+			// Record sheets API metric if cache was missed
+			if (!sheetData.fromCache) {
+				metrics.recordSheetsApiCall({
+					requestId,
+					success: true,
+					durationMs: sheetDataDurationMs,
+				});
+			}
 
 			// Step 2: Get conversation history
 			const historyOutput = await step.do("getHistory", async () => {
@@ -1013,42 +587,9 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 					this.env,
 					conversationKey,
 					log.withContext({ step: "getHistory" }),
-					toolMode,
 				);
 			});
 			stepCount++;
-
-			if (toolMode) {
-				const answer = await answerWithSheetTools(
-					this.env,
-					step,
-					{
-						token,
-						message,
-						requestId,
-						sheetData,
-						historyOutput,
-						config,
-						log,
-						metrics,
-					},
-					() => {
-						stepCount++;
-					},
-				);
-				await step.do("saveHistory", async () => {
-					return saveHistoryStep(
-						this.env,
-						conversationKey,
-						answer.updatedHistory,
-						log.withContext({ step: "saveHistory" }),
-						answer.deliveredIds,
-					);
-				});
-				stepCount++;
-				completeSuccessfully();
-				return;
-			}
 
 			// Step 3: Stream the selected LLM and progressively edit Discord.
 			// Keep the persisted Gemini-era step ID to avoid replaying completed calls.
@@ -1148,7 +689,19 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			});
 			stepCount++;
 
-			completeSuccessfully();
+			// Record workflow completion (success)
+			metrics.recordWorkflowComplete({
+				requestId,
+				workflowId: event.instanceId,
+				success: true,
+				durationMs: Date.now() - workflowStartTime,
+				stepCount,
+				fromCache,
+			});
+
+			log.info("Workflow completed successfully", {
+				durationMs: Date.now() - workflowStartTime,
+			});
 		} catch (error) {
 			// Send error response to Discord
 			const errorMessage = getErrorMessage(error);

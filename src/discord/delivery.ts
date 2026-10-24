@@ -50,20 +50,16 @@ export class DiscordDeliveryService {
 	private transport: DiscordWebhookTransport;
 	private log: Logger;
 	private retryConfig: Partial<RetryConfig>;
-	private signal?: AbortSignal;
 
 	constructor(
 		transport: DiscordWebhookTransport,
 		log?: Logger,
 		retryConfig: Partial<RetryConfig> = {},
-		signal?: AbortSignal,
 	) {
 		this.transport = transport;
 		this.log = log ?? defaultLogger;
-		this.signal = signal;
 		this.retryConfig = {
 			...DEFAULT_DISCORD_RETRY_CONFIG,
-			...(signal ? { sleep: abortableSleep(signal) } : {}),
 			...retryConfig,
 		};
 	}
@@ -202,18 +198,13 @@ export class DiscordDeliveryService {
 	): Promise<DeliveryAttempt> {
 		let attemptCount = 0;
 		try {
-			// A passed deadline stops new attempts and retry waits alike.
-			this.signal?.throwIfAborted();
 			await withRetry(
 				async () => {
 					attemptCount++;
 					await operation();
 				},
 				this.retryConfig,
-				(error) =>
-					!this.signal?.aborted &&
-					error instanceof ExternalServiceError &&
-					error.retryable,
+				undefined,
 				this.log,
 			);
 			return {
@@ -237,27 +228,10 @@ export class DiscordDeliveryService {
 	}
 }
 
-function abortableSleep(signal: AbortSignal): RetryConfig["sleep"] {
-	return (delayMs) =>
-		new Promise<void>((resolve, reject) => {
-			if (signal.aborted) return reject(signal.reason);
-			const onAbort = () => {
-				clearTimeout(timer);
-				reject(signal.reason);
-			};
-			const timer = setTimeout(() => {
-				signal.removeEventListener("abort", onAbort);
-				resolve();
-			}, delayMs);
-			signal.addEventListener("abort", onAbort, { once: true });
-		});
-}
-
 export function createDiscordDeliveryService(
 	transport: DiscordWebhookTransport,
 	log?: Logger,
 	retryConfig?: Partial<RetryConfig>,
-	signal?: AbortSignal,
 ): DiscordDeliveryService {
-	return new DiscordDeliveryService(transport, log, retryConfig, signal);
+	return new DiscordDeliveryService(transport, log, retryConfig);
 }

@@ -5,7 +5,7 @@ import type { ILlmGateway } from "./types";
 
 const gateway = {
 	provider: "gemini",
-	capabilities: { reasoningSummary: true, tools: false },
+	capabilities: { reasoningSummary: true },
 	generateStream: vi.fn(),
 	generateText: vi.fn(),
 };

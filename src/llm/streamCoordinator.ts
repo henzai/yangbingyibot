@@ -45,8 +45,6 @@ export class StreamCoordinator {
 			return null;
 		}
 
-		if (event.type === "tool_calls") return null;
-
 		if (event.type === "finish") {
 			this.finish = event.finish;
 			return null;

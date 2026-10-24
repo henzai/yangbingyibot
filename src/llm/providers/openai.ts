@@ -1,8 +1,6 @@
 import OpenAI from "openai";
 import type {
 	Response,
-	ResponseFunctionToolCall,
-	ResponseInputItem,
 	ResponseStreamEvent,
 	ResponseUsage,
 } from "openai/resources/responses/responses";
@@ -18,17 +16,9 @@ import type {
 	LlmRequest,
 	LlmStreamEvent,
 	LlmTextResult,
-	LlmToolArguments,
-	LlmToolCall,
-	LlmToolState,
 	LlmUsage,
 } from "../types";
-import {
-	continuationItems,
-	OPENAI_STATE_PROVIDER,
-	openAIToolError,
-	toOpenAIRequest,
-} from "./openaiPrompt";
+import { toOpenAIRequest } from "./openaiPrompt";
 
 const RETRY_CONFIG = { maxAttempts: 2, initialDelayMs: 500, maxDelayMs: 2000 };
 
@@ -67,11 +57,7 @@ function hasRefusal(response: Response): boolean {
 	);
 }
 
-function toFinish(
-	response: Response,
-	refusalSeen = false,
-	toolCalls = false,
-): LlmFinish {
+function toFinish(response: Response, refusalSeen = false): LlmFinish {
 	const status = response.status;
 	const incompleteReason = response.incomplete_details?.reason;
 	const errorCode = response.error?.code;
@@ -82,12 +68,8 @@ function toFinish(
 			providerBlockReason: "refusal",
 		};
 	}
-	if (status === "completed") {
-		return {
-			reason: toolCalls ? "tool_calls" : "stop",
-			providerFinishReason: status,
-		};
-	}
+	if (status === "completed")
+		return { reason: "stop", providerFinishReason: status };
 	if (status === "incomplete") {
 		if (
 			incompleteReason === "max_output_tokens" ||
@@ -122,66 +104,6 @@ function toFinish(
 	return { reason: "unknown", providerFinishReason: status };
 }
 
-function parseArguments(
-	raw: unknown,
-	name: string,
-	known: ReadonlySet<string>,
-): LlmToolArguments {
-	if (!known.has(name)) return { ok: false, error: "unknown_tool" };
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(typeof raw === "string" ? raw : "");
-	} catch {
-		return { ok: false, error: "invalid_json" };
-	}
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-		return { ok: false, error: "not_object" };
-	return { ok: true, value: parsed as Record<string, unknown> };
-}
-
-/**
- * Tool calls come only from a completed final response; streamed argument
- * deltas are partial and never acted on. Protocol violations throw.
- */
-function extractToolCalls(
-	request: LlmRequest,
-	response: Response,
-	refusalSeen: boolean,
-): { calls: LlmToolCall[]; state: LlmToolState } | null {
-	if (response.status !== "completed") return null;
-	const items = response.output.filter(
-		(item): item is ResponseFunctionToolCall => item.type === "function_call",
-	);
-	if (items.length === 0) return null;
-	if (refusalSeen || hasRefusal(response)) return null;
-	if (!request.tools?.length) throw openAIToolError("validate tool calls");
-	const known = new Set(request.tools.map((tool) => tool.name));
-	const ids = new Set<string>();
-	const calls = items.map((item): LlmToolCall => {
-		if (typeof item.call_id !== "string" || item.call_id === "")
-			throw openAIToolError("validate tool call id");
-		if (ids.has(item.call_id)) throw openAIToolError("validate tool call id");
-		ids.add(item.call_id);
-		return {
-			callId: item.call_id,
-			name: item.name,
-			arguments: parseArguments(item.arguments, item.name, known),
-		};
-	});
-	return {
-		calls,
-		state: {
-			provider: OPENAI_STATE_PROVIDER,
-			// Cumulative: later rounds resend every earlier item, unmodified.
-			items: [
-				...continuationItems(request),
-				...(response.output as ResponseInputItem[]),
-			],
-			pendingCallIds: [...ids],
-		},
-	};
-}
-
 function extractText(response: Response): string {
 	if (typeof response.output_text === "string") return response.output_text;
 	return response.output
@@ -193,7 +115,7 @@ function extractText(response: Response): string {
 
 export class OpenAILlmGateway implements ILlmGateway {
 	readonly provider = "openai";
-	readonly capabilities = { reasoningSummary: true, tools: true } as const;
+	readonly capabilities = { reasoningSummary: true } as const;
 	private readonly responses: OpenAI["responses"];
 	private readonly models?: OpenAI["models"];
 
@@ -283,13 +205,12 @@ export class OpenAILlmGateway implements ILlmGateway {
 			model: request.model,
 		});
 		try {
-			const params = toOpenAIRequest(request);
 			const stream = await this.executeRequest(
 				scope,
 				"start response stream",
 				() =>
 					this.responses.create(
-						{ ...params, stream: true },
+						{ ...toOpenAIRequest(request), stream: true },
 						{ signal: scope.signal },
 					),
 				request.telemetry?.onAttempt,
@@ -346,15 +267,11 @@ export class OpenAILlmGateway implements ILlmGateway {
 				scope.dispose();
 				void iterator.return?.(undefined).catch(() => {});
 			}
-			const tools = finalResponse
-				? extractToolCalls(request, finalResponse, refusalSeen)
-				: null;
-			if (tools) yield { type: "tool_calls", ...tools };
 			const usage = toUsage(finalResponse?.usage);
 			if (usage) yield { type: "usage", usage };
 			else this.log.warn("OpenAI usage metadata missing", { mode: "stream" });
 			const finish: LlmFinish = finalResponse
-				? toFinish(finalResponse, refusalSeen, tools !== null)
+				? toFinish(finalResponse, refusalSeen)
 				: { reason: "unknown" };
 			yield { type: "finish", finish };
 			this.log.info("OpenAI streaming API completed", {
@@ -362,7 +279,6 @@ export class OpenAILlmGateway implements ILlmGateway {
 				durationMs: Date.now() - startTime,
 				finishReason: finish.providerFinishReason,
 				blockReason: finish.providerBlockReason,
-				...(tools ? { toolCallCount: tools.calls.length } : {}),
 			});
 		} finally {
 			scope.dispose();
@@ -378,30 +294,26 @@ export class OpenAILlmGateway implements ILlmGateway {
 		const startTime = Date.now();
 		this.log.info("OpenAI text API request starting", { model: request.model });
 		try {
-			const params = toOpenAIRequest(request);
 			const response = await this.executeRequest(
 				scope,
 				"create response",
 				() =>
-					this.responses.create(params, {
+					this.responses.create(toOpenAIRequest(request), {
 						signal: scope.signal,
 					}),
 				request.telemetry?.onAttempt,
 			);
-			const tools = extractToolCalls(request, response, false);
 			const usage = toUsage(response.usage);
 			if (!usage)
 				this.log.warn("OpenAI usage metadata missing", { mode: "generate" });
 			this.log.info("OpenAI text API completed", {
 				model: request.model,
 				durationMs: Date.now() - startTime,
-				...(tools ? { toolCallCount: tools.calls.length } : {}),
 			});
 			return {
 				text: extractText(response),
 				usage,
-				finish: toFinish(response, false, tools !== null),
-				...(tools ? { toolCalls: tools.calls, toolState: tools.state } : {}),
+				finish: toFinish(response),
 			};
 		} finally {
 			scope.dispose();

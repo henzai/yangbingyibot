@@ -35,7 +35,7 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 				return c.json({ type: InteractionResponseType.PONG });
 			case InteractionType.APPLICATION_COMMAND: {
 				// Fail fast at the request boundary before creating a Workflow.
-				const config = loadConfig(c.env);
+				loadConfig(c.env);
 				const { token, question, conversationKey } =
 					await parseDiscordAskCommand(body);
 
@@ -51,10 +51,6 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 							message: question,
 							requestId,
 							conversationKey,
-							// Pin the path per instance; legacy payloads stay unchanged.
-							...(config.answerMode === "tools"
-								? { answerMode: "tools" as const }
-								: {}),
 						},
 					});
 				} catch (workflowError) {

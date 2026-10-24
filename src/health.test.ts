@@ -48,7 +48,7 @@ const available: LlmProbeResult = {
 function gateway(provider: string, probe?: ILlmGateway["probe"]): ILlmGateway {
 	return {
 		provider,
-		capabilities: { reasoningSummary: true, tools: false },
+		capabilities: { reasoningSummary: true },
 		generateStream: vi.fn(),
 		generateText: vi.fn(),
 		...(probe ? { probe } : {}),
