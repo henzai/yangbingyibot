@@ -14,6 +14,11 @@ export interface WorkflowParams {
 	message: string;
 	requestId: string;
 	conversationKey: string;
+	/**
+	 * Epoch ms when the Worker accepted the interaction, for latency metrics.
+	 * Absent on instances created before this field existed.
+	 */
+	receivedAt?: number;
 }
 
 /**

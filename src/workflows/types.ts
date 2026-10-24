@@ -28,6 +28,12 @@ export interface StreamingLlmOutput {
 	answerDurationMs?: number | null;
 	answerFirstTextDurationMs?: number | null;
 	answerRetryCount?: number | null;
+	/** Missing on checkpoints created before latency metrics. */
+	preAnswerDurationMs?: number | null;
+	/** Epoch ms of the first Discord edit showing answer text. */
+	firstAnswerVisibleAt?: number | null;
+	/** Epoch ms when the final answer delivery finished. */
+	finalDeliveredAt?: number | null;
 	editCount: number;
 	chunkCount: number;
 	deliveryStatus: DeliveryStatus;

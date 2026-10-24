@@ -31,7 +31,8 @@ export type MetricEventType =
 	| "kv_cache_access"
 	| "discord_webhook"
 	| "sheets_api_call"
-	| "health_check";
+	| "health_check"
+	| "request_latency";
 
 /**
  * Base interface for all metric data
@@ -97,6 +98,36 @@ export interface WorkflowMetricData extends MetricData {
 }
 
 /**
+ * Per-request latency breakdown, one data point per Workflow run.
+ * Durations are ms; null means unavailable and is encoded as -1, never zero.
+ * Values measured from interaction receipt are null on payloads without
+ * receivedAt.
+ */
+export interface RequestLatencyMetricData {
+	requestId: string;
+	success: boolean;
+	fromCache: boolean;
+	/** Interaction receipt → Workflow end. */
+	totalMs: number | null;
+	/** Interaction receipt → Workflow run start. */
+	startDelayMs: number | null;
+	sheetDataMs: number | null;
+	historyMs: number | null;
+	/** Answer step start → LLM request start (setup and placeholder edit). */
+	preAnswerMs: number | null;
+	/** LLM request start → first answer text delta. */
+	llmFirstTextMs: number | null;
+	llmTotalMs: number | null;
+	/** Interaction receipt → first answer text shown in Discord. */
+	firstAnswerVisibleMs: number | null;
+	/** Interaction receipt → final answer delivered to Discord. */
+	answerDeliveredMs: number | null;
+	saveHistoryMs: number | null;
+	reasoningTokens: number | null;
+	inputTokens: number | null;
+}
+
+/**
  * Health check specific metrics
  */
 export interface HealthCheckMetricData {
@@ -123,6 +154,7 @@ export interface IMetricsClient {
 	recordDiscordWebhook(data: DiscordWebhookMetricData): void;
 	recordSheetsApiCall(data: MetricData): void;
 	recordHealthCheck(data: HealthCheckMetricData): void;
+	recordRequestLatency(data: RequestLatencyMetricData): void;
 }
 
 /**
@@ -295,6 +327,36 @@ export class MetricsClient implements IMetricsClient {
 	}
 
 	/**
+	 * Record the per-request latency breakdown
+	 * doubles: [totalMs, success, fromCache, startDelayMs, sheetDataMs,
+	 *   historyMs, preAnswerMs, llmFirstTextMs, llmTotalMs,
+	 *   firstAnswerVisibleMs, answerDeliveredMs, saveHistoryMs,
+	 *   reasoningTokens, inputTokens] (-1 = unavailable)
+	 */
+	recordRequestLatency(data: RequestLatencyMetricData): void {
+		this.writeDataPoint("request_latency", {
+			indexes: [toAnalyticsIndex(data.requestId)],
+			blobs: [data.requestId],
+			doubles: [
+				data.totalMs ?? -1,
+				data.success ? 1 : 0,
+				data.fromCache ? 1 : 0,
+				data.startDelayMs ?? -1,
+				data.sheetDataMs ?? -1,
+				data.historyMs ?? -1,
+				data.preAnswerMs ?? -1,
+				data.llmFirstTextMs ?? -1,
+				data.llmTotalMs ?? -1,
+				data.firstAnswerVisibleMs ?? -1,
+				data.answerDeliveredMs ?? -1,
+				data.saveHistoryMs ?? -1,
+				data.reasoningTokens ?? -1,
+				data.inputTokens ?? -1,
+			],
+		});
+	}
+
+	/**
 	 * Internal method to write data points to Analytics Engine
 	 * Prepends eventType to blobs for filtering in SQL queries
 	 * Non-blocking - errors are logged but don't affect main flow
@@ -332,6 +394,7 @@ export class NoOpMetricsClient implements IMetricsClient {
 	recordDiscordWebhook(_data: DiscordWebhookMetricData): void {}
 	recordSheetsApiCall(_data: MetricData): void {}
 	recordHealthCheck(_data: HealthCheckMetricData): void {}
+	recordRequestLatency(_data: RequestLatencyMetricData): void {}
 }
 
 /**

@@ -373,6 +373,9 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				answerRetryCount: 1,
 				answerFirstTextDurationMs: 200,
 				answerDurationMs: 500,
+				preAnswerDurationMs: 0,
+				firstAnswerVisibleAt: 1_200,
+				finalDeliveredAt: 1_500,
 			});
 		});
 
@@ -1472,5 +1475,113 @@ describe("completed Workflow checkpoint compatibility", () => {
 		expect(result.usage?.outputTokens).toBe(5);
 		expect(result.deliveryStatus).toBe("success");
 		expect(result.editCount).toBe(1);
+	});
+});
+
+describe("request latency breakdown", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const checkpoint = {
+		response: "answer",
+		updatedHistory: [
+			{ role: "user", text: "質問: question" },
+			{ role: "assistant", text: "answer" },
+		],
+		usage: {
+			inputTokens: 1_000,
+			cachedInputTokens: 900,
+			outputTokens: 30,
+			reasoningTokens: 70,
+			totalTokens: 1_100,
+		},
+		thinkingSummaryUsage: null,
+		thinkingSummaryCallCount: 0,
+		thinkingSummarySuccessCount: 0,
+		thinkingSummaryDurationMs: 0,
+		answerDurationMs: 1_400,
+		answerFirstTextDurationMs: 900,
+		answerRetryCount: 0,
+		preAnswerDurationMs: 40,
+		firstAnswerVisibleAt: 2_500,
+		finalDeliveredAt: 3_000,
+		editCount: 2,
+		chunkCount: 1,
+		deliveryStatus: "success",
+		failedChunks: [],
+		retryCount: 0,
+		deliveryDurationMs: 60,
+	};
+
+	async function runWithClock(receivedAt?: number) {
+		vi.clearAllMocks();
+		vi.useFakeTimers();
+		vi.setSystemTime(1_300);
+		mockHistoryRepository.save.mockResolvedValue(undefined);
+		const execute = vi.fn(async (name: string, ...args: unknown[]) => {
+			if (name === "getSheetData") {
+				vi.setSystemTime(1_500);
+				return {
+					sheetInfo: "knowledge",
+					description: "description",
+					fromCache: true,
+				};
+			}
+			if (name === "getHistory") {
+				vi.setSystemTime(1_520);
+				return { history: [] };
+			}
+			if (name === "streamGeminiAndEditDiscord") {
+				vi.setSystemTime(3_000);
+				return JSON.parse(JSON.stringify(checkpoint));
+			}
+			const callback = args.at(-1) as () => Promise<unknown>;
+			const result = await callback();
+			vi.setSystemTime(3_050);
+			return result;
+		});
+		const event = {
+			instanceId: "workflow-id",
+			payload: {
+				token: "token",
+				message: "question",
+				requestId: "request-id",
+				conversationKey: "conversation",
+				...(receivedAt === undefined ? {} : { receivedAt }),
+			},
+		} as WorkflowEvent<WorkflowParams>;
+		await AnswerQuestionWorkflow.prototype.run.call(
+			{ env: mockEnv } as unknown as AnswerQuestionWorkflow,
+			event,
+			{ do: execute } as unknown as WorkflowStep,
+		);
+		const call = mockAnalyticsDataset.writeDataPoint.mock.calls.find(
+			([point]) => point.blobs?.[0] === "request_latency",
+		);
+		return call?.[0];
+	}
+
+	it("records one data point measured from interaction receipt", async () => {
+		const point = await runWithClock(1_000);
+
+		expect(point).toEqual({
+			indexes: ["request-id"],
+			blobs: ["request_latency", "request-id"],
+			// total, success, fromCache, startDelay, sheet, history, preAnswer,
+			// llmFirstText, llmTotal, firstAnswerVisible, answerDelivered,
+			// saveHistory, reasoningTokens, inputTokens
+			doubles: [
+				2_050, 1, 1, 300, 200, 20, 40, 900, 1_400, 1_500, 2_000, 50, 70, 1_000,
+			],
+		});
+	});
+
+	it("marks receipt-relative values unavailable on older payloads", async () => {
+		const point = await runWithClock();
+
+		expect(point?.doubles).toEqual([
+			-1, 1, 1, -1, 200, 20, 40, 900, 1_400, -1, -1, 50, 70, 1_000,
+		]);
 	});
 });
