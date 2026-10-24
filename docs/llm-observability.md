@@ -63,24 +63,24 @@ and [limits](https://developers.cloudflare.com/analytics/analytics-engine/limits
 
 Every answer or summary aggregate writes one v2 data point.
 
-| Position | Meaning |
-| --- | --- |
-| `index1` | request ID |
-| `blob1` | `llm_api_call_v2` |
-| `blob2` | full request ID |
-| `blob3` | provider |
-| `blob4` | model |
-| `blob5` | purpose: `answer` or `summary` |
-| `double1` | completion duration in milliseconds |
-| `double2` | success: `1` or `0` |
-| `double3` | logical call count |
-| `double4` | provider retry count |
-| `double5` | time to first answer text in milliseconds |
-| `double6` | input tokens, including cached input |
-| `double7` | cached input tokens, already included in input |
-| `double8` | output tokens, excluding reasoning |
-| `double9` | reasoning tokens |
-| `double10` | provider-reported total tokens |
+| Position   | Meaning                                        |
+| ---------- | ---------------------------------------------- |
+| `index1`   | request ID                                     |
+| `blob1`    | `llm_api_call_v2`                              |
+| `blob2`    | full request ID                                |
+| `blob3`    | provider                                       |
+| `blob4`    | model                                          |
+| `blob5`    | purpose: `answer` or `summary`                 |
+| `double1`  | completion duration in milliseconds            |
+| `double2`  | success: `1` or `0`                            |
+| `double3`  | logical call count                             |
+| `double4`  | provider retry count                           |
+| `double5`  | time to first answer text in milliseconds      |
+| `double6`  | input tokens, including cached input           |
+| `double7`  | cached input tokens, already included in input |
+| `double8`  | output tokens, excluding reasoning             |
+| `double9`  | reasoning tokens                               |
+| `double10` | provider-reported total tokens                 |
 
 Unavailable numeric observations use `-1`, not `0`. A genuine zero remains
 zero. Summary calls have no streaming first-text observation, so `double5` is
@@ -119,17 +119,17 @@ Gemini during that interval, so it has no expected OpenAI production data.
 The existing `health_check` event retains `double1 = duration` and
 `double2 = success`. Its blobs are now:
 
-| Position | Meaning |
-| --- | --- |
-| `blob1` | `health_check` |
-| `blob2` | check identifier |
-| `blob3` | status |
-| `blob4` | provider, or empty |
-| `blob5` | model, or empty |
-| `blob6` | `+`-joined purposes, or empty |
-| `blob7` | error kind, or empty |
-| `blob8` | probe scope, or empty |
-| `blob9` | advertised generation support, or empty |
+| Position | Meaning                                 |
+| -------- | --------------------------------------- |
+| `blob1`  | `health_check`                          |
+| `blob2`  | check identifier                        |
+| `blob3`  | status                                  |
+| `blob4`  | provider, or empty                      |
+| `blob5`  | model, or empty                         |
+| `blob6`  | `+`-joined purposes, or empty           |
+| `blob7`  | error kind, or empty                    |
+| `blob8`  | probe scope, or empty                   |
+| `blob9`  | advertised generation support, or empty |
 
 Queries that only filter `blob1 = 'health_check'` and use the first two doubles
 remain compatible. A query matching the old Gemini check name must migrate to

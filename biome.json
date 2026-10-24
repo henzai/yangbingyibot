@@ -6,11 +6,11 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!worker-configuration.d.ts", "!.claude"]
+		"includes": ["**", "!worker-configuration.d.ts", "!.claude", "!.agents"]
 	},
 	"linter": {
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"nursery": {
 				"noFloatingPromises": "error",
 				"noMisusedPromises": "error"

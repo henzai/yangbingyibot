@@ -17,11 +17,11 @@ and every rendered prompt is at most 16 KiB.
 
 The fixed candidates are:
 
-| Candidate | Answer | Thinking summary |
-| --- | --- | --- |
-| Current baseline | `gemini-3.5-flash-lite` | `gemini-2.5-flash-lite` |
-| Low-cost candidate | `gpt-5.6-luna` | disabled |
-| Balanced candidate | `gpt-5.6-terra` | disabled |
+| Candidate          | Answer                  | Thinking summary        |
+| ------------------ | ----------------------- | ----------------------- |
+| Current baseline   | `gemini-3.5-flash-lite` | `gemini-2.5-flash-lite` |
+| Low-cost candidate | `gpt-5.6-luna`          | disabled                |
+| Balanced candidate | `gpt-5.6-terra`         | disabled                |
 
 The fixed seed controls candidate interleaving and blinded IDs. The common
 production Gateway deliberately has no provider-specific seed parameter, so the
@@ -176,17 +176,17 @@ price sources/effective date.
 The evaluation runner supplements rather than replaces production regression
 tests. The following matrix makes every required compatibility area traceable:
 
-| Area | Test evidence |
-| --- | --- |
-| Shared Gateway contract | `src/llm/providers/gatewayContract.test.ts`: delta text, cumulative usage, one finish, `generateText`, missing usage for both adapters |
-| Legacy/default settings | `src/config.test.ts`: backward-compatible defaults, common-over-legacy precedence, provider-specific legacy isolation |
-| Missing selected key/model | `src/config.test.ts`: missing setting without secret exposure, OpenAI without Gemini, explicit OpenAI model requirement |
+| Area                                 | Test evidence                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared Gateway contract              | `src/llm/providers/gatewayContract.test.ts`: delta text, cumulative usage, one finish, `generateText`, missing usage for both adapters                                          |
+| Legacy/default settings              | `src/config.test.ts`: backward-compatible defaults, common-over-legacy precedence, provider-specific legacy isolation                                                           |
+| Missing selected key/model           | `src/config.test.ts`: missing setting without secret exposure, OpenAI without Gemini, explicit OpenAI model requirement                                                         |
 | History and checkpoint compatibility | `src/repositories/conversationHistory.test.ts`: mixed roles and rollback-compatible writes; `src/workflows/answerQuestionWorkflow.test.ts`: old checkpoint/history/usage replay |
-| Summary disabled/failure | `src/workflows/answerQuestionWorkflow.test.ts`: OpenAI without Gemini, summary fallback, separate/shared provider; `src/llm/thinkingSummarizer.test.ts`: empty/error fallback |
-| Provider API failures | `src/llm/providers/gemini.test.ts` and `openai.test.ts`: retryable establishment, permanent failure, interrupted stream, safe errors |
-| Discord delivery failures | `src/clients/discord.test.ts`: typed HTTP/network errors and Retry-After; `src/workflows/answerQuestionWorkflow.test.ts`: intermediate failure, final retry/exhaustion |
-| Request time limits | `src/llm/providers/gemini.test.ts` and `openai.test.ts`: cancellation, stalled request/stream deadlines, one budget across retries |
-| Discord PING and defer | `src/index.test.ts`: PONG and deferred command response; `src/middleware/verifyDiscordInteraction.test.ts`: valid signed PING continuation |
+| Summary disabled/failure             | `src/workflows/answerQuestionWorkflow.test.ts`: OpenAI without Gemini, summary fallback, separate/shared provider; `src/llm/thinkingSummarizer.test.ts`: empty/error fallback   |
+| Provider API failures                | `src/llm/providers/gemini.test.ts` and `openai.test.ts`: retryable establishment, permanent failure, interrupted stream, safe errors                                            |
+| Discord delivery failures            | `src/clients/discord.test.ts`: typed HTTP/network errors and Retry-After; `src/workflows/answerQuestionWorkflow.test.ts`: intermediate failure, final retry/exhaustion          |
+| Request time limits                  | `src/llm/providers/gemini.test.ts` and `openai.test.ts`: cancellation, stalled request/stream deadlines, one budget across retries                                              |
+| Discord PING and defer               | `src/index.test.ts`: PONG and deferred command response; `src/middleware/verifyDiscordInteraction.test.ts`: valid signed PING continuation                                      |
 
 Run the entire matrix with `npm run verify`. The Worker PING behavior, Workflow
 payload/checkpoint contract, and production LLM defaults are not changed by this
