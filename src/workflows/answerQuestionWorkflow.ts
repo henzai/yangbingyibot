@@ -9,6 +9,7 @@ import {
 	createMetricsClient,
 	type IMetricsClient,
 	NoOpMetricsClient,
+	type RequestLatencyMetricData,
 } from "../clients/metrics";
 import { getSheetData } from "../clients/spreadSheet";
 import { type AppConfig, loadConfig } from "../config";
@@ -95,7 +96,24 @@ export function normalizeStreamingOutput(
 			typeof result.answerRetryCount === "number"
 				? result.answerRetryCount
 				: null,
+		preAnswerDurationMs: numberOrNull(result.preAnswerDurationMs),
+		firstAnswerVisibleAt: numberOrNull(result.firstAnswerVisibleAt),
+		finalDeliveredAt: numberOrNull(result.finalDeliveredAt),
 	};
+}
+
+function numberOrNull(value: unknown): number | null {
+	return typeof value === "number" ? value : null;
+}
+
+/** Elapsed ms from a start that may be unknown (older payloads/checkpoints). */
+function elapsedSince(
+	start: number | null | undefined,
+	end: number | null | undefined,
+): number | null {
+	return typeof start === "number" && typeof end === "number"
+		? end - start
+		: null;
 }
 
 type LlmStepMetricState = {
@@ -228,6 +246,7 @@ export async function streamLlmWithDiscordEditsStep(
 	config: AppConfig = loadConfig(env),
 	metricState?: LlmStepMetricState,
 ): Promise<StreamingLlmOutput> {
+	const stepStartTime = Date.now();
 	const discord = createDiscordWebhookClient(
 		config.discordApplicationId,
 		token,
@@ -267,6 +286,7 @@ export async function streamLlmWithDiscordEditsStep(
 	let thinkingSummaryRetryCount = 0;
 	let answerAttemptCount = 0;
 	let answerFirstTextDurationMs: number | null = null;
+	let firstAnswerVisibleAt: number | null = null;
 
 	if (!summarizer) {
 		const started = Date.now();
@@ -345,6 +365,7 @@ export async function streamLlmWithDiscordEditsStep(
 		retryCount += result.retryCount;
 
 		if (result.success) {
+			if (decision.phase === "response") firstAnswerVisibleAt ??= Date.now();
 			coordinator.markDelivered(decision);
 			log.debug("Discord message edited", {
 				editCount,
@@ -402,9 +423,11 @@ export async function streamLlmWithDiscordEditsStep(
 	const finalDelivery = await delivery.deliverFinal(
 		response.length === 0 ? "" : formatAnswer(question, finalResponse),
 	);
-	deliveryDurationMs += Date.now() - finalDeliveryStartTime;
+	const finalDeliveredAt = Date.now();
+	deliveryDurationMs += finalDeliveredAt - finalDeliveryStartTime;
 	editCount += finalDelivery.editCount;
 	retryCount += finalDelivery.retryCount;
+	if (finalDelivery.success) firstAnswerVisibleAt ??= finalDeliveredAt;
 
 	log.info("Final Discord delivery completed", {
 		editCount,
@@ -431,6 +454,9 @@ export async function streamLlmWithDiscordEditsStep(
 		answerDurationMs,
 		answerFirstTextDurationMs,
 		answerRetryCount: Math.max(0, answerAttemptCount - 1),
+		preAnswerDurationMs: answerStartTime - stepStartTime,
+		firstAnswerVisibleAt,
+		finalDeliveredAt,
 		editCount,
 		chunkCount: finalDelivery.chunkCount,
 		deliveryStatus: finalDelivery.status,
@@ -539,7 +565,8 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 	WorkflowParams
 > {
 	async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep) {
-		const { token, message, requestId, conversationKey } = event.payload;
+		const { token, message, requestId, conversationKey, receivedAt } =
+			event.payload;
 		const log = logger.withContext({ requestId, workflowId: event.instanceId });
 		const metrics = getMetricsClient(this.env, log);
 		const config = loadConfig(this.env);
@@ -548,6 +575,32 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 		const workflowStartTime = Date.now();
 		let stepCount = 0;
 		let fromCache = false;
+		const latency: Omit<
+			RequestLatencyMetricData,
+			"requestId" | "success" | "fromCache" | "totalMs"
+		> = {
+			startDelayMs: elapsedSince(receivedAt, workflowStartTime),
+			sheetDataMs: null,
+			historyMs: null,
+			preAnswerMs: null,
+			llmFirstTextMs: null,
+			llmTotalMs: null,
+			firstAnswerVisibleMs: null,
+			answerDeliveredMs: null,
+			saveHistoryMs: null,
+			reasoningTokens: null,
+			inputTokens: null,
+		};
+		const recordLatency = (success: boolean) => {
+			const breakdown = {
+				success,
+				fromCache,
+				totalMs: elapsedSince(receivedAt, Date.now()),
+				...latency,
+			};
+			metrics.recordRequestLatency({ requestId, ...breakdown });
+			log.info("Request latency breakdown", breakdown);
+		};
 
 		try {
 			// Step 1: Get sheet data
@@ -562,6 +615,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			fromCache = sheetData.fromCache;
 
 			const sheetDataDurationMs = Date.now() - sheetDataStartTime;
+			latency.sheetDataMs = sheetDataDurationMs;
 
 			// Record cache access metric
 			metrics.recordKVCacheAccess({
@@ -582,6 +636,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			}
 
 			// Step 2: Get conversation history
+			const historyStartTime = Date.now();
 			const historyOutput = await step.do("getHistory", async () => {
 				return getHistoryStep(
 					this.env,
@@ -590,6 +645,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				);
 			});
 			stepCount++;
+			latency.historyMs = Date.now() - historyStartTime;
 
 			// Step 3: Stream the selected LLM and progressively edit Discord.
 			// Keep the persisted Gemini-era step ID to avoid replaying completed calls.
@@ -638,7 +694,20 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 					streamResult.thinkingSummaryRetryCount ?? null;
 				llmSuccess = true;
 				stepCount++;
+				latency.preAnswerMs = streamResult.preAnswerDurationMs ?? null;
+				latency.firstAnswerVisibleMs = elapsedSince(
+					receivedAt,
+					streamResult.firstAnswerVisibleAt,
+				);
+				latency.answerDeliveredMs = elapsedSince(
+					receivedAt,
+					streamResult.finalDeliveredAt,
+				);
 			} finally {
+				latency.llmFirstTextMs = llmMetrics.answerFirstTextDurationMs;
+				latency.llmTotalMs = llmMetrics.answerDurationMs;
+				latency.reasoningTokens = llmUsage?.reasoningTokens ?? null;
+				latency.inputTokens = llmUsage?.inputTokens ?? null;
 				metrics.recordLlmCall({
 					requestId,
 					success: llmSuccess,
@@ -679,6 +748,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 			});
 
 			// Step 4: Save history
+			const saveHistoryStartTime = Date.now();
 			await step.do("saveHistory", async () => {
 				return saveHistoryStep(
 					this.env,
@@ -688,6 +758,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				);
 			});
 			stepCount++;
+			latency.saveHistoryMs = Date.now() - saveHistoryStartTime;
 
 			// Record workflow completion (success)
 			metrics.recordWorkflowComplete({
@@ -698,6 +769,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				stepCount,
 				fromCache,
 			});
+			recordLatency(true);
 
 			log.info("Workflow completed successfully", {
 				durationMs: Date.now() - workflowStartTime,
@@ -721,6 +793,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 				stepCount,
 				fromCache,
 			});
+			recordLatency(false);
 
 			// Report error to GitHub Issues (non-fatal, outside step.do)
 			await reportErrorToGitHub(

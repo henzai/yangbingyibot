@@ -392,6 +392,36 @@ describe("MetricsClient", () => {
 		});
 	});
 
+	describe("recordRequestLatency", () => {
+		it("writes the breakdown in stable positions and encodes null as -1", () => {
+			metrics.recordRequestLatency({
+				requestId: "req_latency",
+				success: true,
+				fromCache: false,
+				totalMs: 5_000,
+				startDelayMs: 300,
+				sheetDataMs: 1_200,
+				historyMs: 20,
+				preAnswerMs: 40,
+				llmFirstTextMs: null,
+				llmTotalMs: 3_000,
+				firstAnswerVisibleMs: 4_500,
+				answerDeliveredMs: 4_900,
+				saveHistoryMs: 50,
+				reasoningTokens: 120,
+				inputTokens: null,
+			});
+
+			expect(mockDataset.writeDataPoint).toHaveBeenCalledWith({
+				indexes: ["req_latency"],
+				blobs: ["request_latency", "req_latency"],
+				doubles: [
+					5_000, 1, 0, 300, 1_200, 20, 40, -1, 3_000, 4_500, 4_900, 50, 120, -1,
+				],
+			});
+		});
+	});
+
 	describe("error handling", () => {
 		it("does not throw when writeDataPoint fails", () => {
 			mockDataset.writeDataPoint.mockImplementation(() => {

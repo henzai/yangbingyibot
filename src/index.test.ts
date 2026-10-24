@@ -137,6 +137,7 @@ describe("index", () => {
 					message: "What is this?",
 					requestId: "req_test_123",
 					conversationKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+					receivedAt: expect.any(Number),
 				},
 			});
 			expect(

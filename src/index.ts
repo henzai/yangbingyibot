@@ -20,6 +20,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 
 app.post("/", verifyDiscordInteraction, async (c) => {
+	const receivedAt = Date.now();
 	const requestId = generateRequestId();
 	const log = logger.withContext({ requestId });
 
@@ -51,7 +52,11 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 							message: question,
 							requestId,
 							conversationKey,
+							receivedAt,
 						},
+					});
+					log.info("AnswerQuestionWorkflow created", {
+						durationMs: Date.now() - receivedAt,
 					});
 				} catch (workflowError) {
 					log.error("Failed to create workflow", {

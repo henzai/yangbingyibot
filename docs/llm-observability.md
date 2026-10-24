@@ -96,6 +96,55 @@ in the aggregate is unknown (`-1`) rather than a partial total. Pricing is not
 embedded in the Worker. Cost analysis must join measured usage with an external
 price table that records its source and effective date.
 
+### `request_latency`
+
+Every Workflow run writes one data point with the end-to-end latency breakdown
+of one `/ask`, on success and on failure. The Workflow also logs the same values
+as `Request latency breakdown`. Receipt-relative values use `receivedAt`, the
+time the Worker accepted the interaction (after signature verification), which
+the Worker passes in the Workflow payload.
+
+| Position | Meaning |
+| --- | --- |
+| `index1` | request ID |
+| `blob1` | `request_latency` |
+| `blob2` | full request ID |
+| `double1` | interaction receipt → Workflow end |
+| `double2` | success: `1` or `0` |
+| `double3` | sheet data from cache: `1` or `0` |
+| `double4` | interaction receipt → Workflow run start |
+| `double5` | `getSheetData` step (includes the Google Sheets fetch on a cache miss) |
+| `double6` | `getHistory` step |
+| `double7` | answer step start → LLM request start (setup and placeholder edit) |
+| `double8` | LLM request start → first answer text |
+| `double9` | LLM request start → stream end |
+| `double10` | interaction receipt → first answer text shown in Discord |
+| `double11` | interaction receipt → final answer delivered to Discord |
+| `double12` | `saveHistory` step |
+| `double13` | reasoning tokens |
+| `double14` | input tokens, including cached input |
+
+All durations are milliseconds. Unavailable values are `-1`: receipt-relative
+values on payloads created before `receivedAt` existed, and stages a failed run
+never reached. Step durations are measured around `step.do`, so a run replayed
+after a failure reports near-zero durations for steps restored from
+checkpoints.
+
+Example: median and p95 time to the first visible answer by cache state.
+
+```sql
+SELECT
+  double3 AS from_cache,
+  SUM(_sample_interval) AS requests,
+  quantileExactWeighted(0.5)(double10, _sample_interval) AS first_answer_p50,
+  quantileExactWeighted(0.95)(double10, _sample_interval) AS first_answer_p95,
+  quantileExactWeighted(0.5)(double5, _sample_interval) AS sheet_p50
+FROM yangbingyibot_metrics
+WHERE blob1 = 'request_latency' AND double2 = 1 AND double10 >= 0
+  AND timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY from_cache
+```
+
 ### Compatibility and query migration
 
 Gemini calls are dual-written during migration:
