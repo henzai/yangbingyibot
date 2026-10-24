@@ -3,7 +3,6 @@ import {
 	GoogleGenAI,
 	ThinkingLevel,
 } from "@google/genai";
-import { ExternalServiceError } from "../../utils/errors";
 import { logger as defaultLogger, type Logger } from "../../utils/logger";
 import { withRetry } from "../../utils/retry";
 import { normalizeLlmError } from "../errors";
@@ -65,21 +64,9 @@ function toFinish(
 	return { reason, providerFinishReason, providerBlockReason };
 }
 
-function assertNoTools(request: LlmRequest): void {
-	if (request.tools?.length || request.continuation) {
-		throw new ExternalServiceError({
-			service: "llm",
-			provider: "gemini",
-			operation: "validate tool request",
-			retryable: false,
-			userMessage: "このAIプロバイダーはツール呼び出しに対応していません。",
-		});
-	}
-}
-
 export class GeminiLlmGateway implements ILlmGateway {
 	readonly provider = "gemini";
-	readonly capabilities = { reasoningSummary: true, tools: false } as const;
+	readonly capabilities = { reasoningSummary: true } as const;
 	private readonly client: GoogleGenAI;
 
 	constructor(
@@ -156,7 +143,6 @@ export class GeminiLlmGateway implements ILlmGateway {
 	}
 
 	async *generateStream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
-		assertNoTools(request);
 		const scope = new LlmRequestScope(
 			this.provider,
 			request.timeoutMs ?? 90_000,
@@ -256,7 +242,6 @@ export class GeminiLlmGateway implements ILlmGateway {
 	}
 
 	async generateText(request: LlmRequest): Promise<LlmTextResult> {
-		assertNoTools(request);
 		const scope = new LlmRequestScope(
 			this.provider,
 			request.timeoutMs ?? 15_000,

@@ -1,14 +1,4 @@
 import type { SpreadsheetConfig } from "../config";
-import {
-	isSheetSnapshotRef,
-	type SheetSnapshotRef,
-	SheetSnapshotRepository,
-} from "../sheets/snapshot";
-import { sourceFingerprint } from "../sheets/sourceFingerprint";
-import {
-	isSheetStructure,
-	type SheetStructure,
-} from "../sheets/structuredSheet";
 import { getErrorMessage } from "../utils/errors";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -18,11 +8,22 @@ const SHEET_CACHE_TTL_SECONDS = 5 * 60;
 export type SheetCacheEntry = {
 	sheetInfo: string;
 	description: string;
-	/** Optional because entries written before the structured-sheet rollout lack it. */
-	structuredSheet?: SheetStructure;
-	/** Pins the complete immutable bundle for future tool reads. */
-	snapshotRef?: SheetSnapshotRef;
 };
+
+async function sourceFingerprint(source: SpreadsheetConfig): Promise<string> {
+	const material = [
+		source.id,
+		source.dataSheetName,
+		source.descriptionSheetName,
+	].join("\n");
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(material),
+	);
+	return Array.from(new Uint8Array(digest), (byte) =>
+		byte.toString(16).padStart(2, "0"),
+	).join("");
+}
 
 async function cacheKey(source: SpreadsheetConfig): Promise<string> {
 	return `${SHEET_CACHE_KEY_PREFIX}${await sourceFingerprint(source)}`;
@@ -44,42 +45,20 @@ export class SheetCacheRepository {
 				return null;
 			}
 
-			const record = cachedData as Record<string, unknown>;
 			if (
 				typeof cachedData !== "object" ||
-				typeof record.sheetInfo !== "string" ||
-				typeof record.description !== "string"
+				typeof (cachedData as Record<string, unknown>).sheetInfo !== "string" ||
+				typeof (cachedData as Record<string, unknown>).description !== "string"
 			) {
 				this.log.warn("Invalid cache data structure, ignoring cache");
 				return null;
 			}
 
-			if (
-				record.structuredSheet !== undefined &&
-				!isSheetStructure(record.structuredSheet)
-			) {
-				this.log.warn(
-					"Invalid structured sheet cache data, refreshing legacy sheet data",
-				);
-			}
-
-			const entry: SheetCacheEntry = {
-				sheetInfo: record.sheetInfo,
-				description: record.description,
+			const entry = cachedData as SheetCacheEntry;
+			return {
+				sheetInfo: entry.sheetInfo,
+				description: entry.description,
 			};
-			if (isSheetStructure(record.structuredSheet)) {
-				entry.structuredSheet = record.structuredSheet;
-				if (
-					record.structuredSheet.status === "ready" &&
-					isSheetSnapshotRef(record.snapshotRef) &&
-					record.snapshotRef.sourceFingerprint ===
-						(await sourceFingerprint(source)) &&
-					record.snapshotRef.expiresAt > Date.now()
-				) {
-					entry.snapshotRef = record.snapshotRef;
-				}
-			}
-			return entry;
 		} catch (error) {
 			this.log.error("Failed to get cache from KV", {
 				error: getErrorMessage(error),
@@ -92,29 +71,12 @@ export class SheetCacheRepository {
 		source: SpreadsheetConfig,
 		sheetInfo: string,
 		description: string,
-		structuredSheet?: SheetStructure,
-	): Promise<SheetSnapshotRef | undefined> {
+	): Promise<void> {
 		try {
 			const entry: SheetCacheEntry = { sheetInfo, description };
-			if (structuredSheet !== undefined) {
-				entry.structuredSheet = structuredSheet;
-			}
-			if (structuredSheet?.status === "ready") {
-				const captured = await new SheetSnapshotRepository(this.kv).capture(
-					source,
-					structuredSheet,
-					description,
-				);
-				if (captured.status === "ready") entry.snapshotRef = captured.ref;
-				else
-					this.log.warn("Immutable sheet snapshot unavailable", {
-						reason: captured.reason,
-					});
-			}
 			await this.kv.put(await cacheKey(source), JSON.stringify(entry), {
 				expirationTtl: SHEET_CACHE_TTL_SECONDS,
 			});
-			return entry.snapshotRef;
 		} catch (error) {
 			this.log.error("Failed to save cache to KV", {
 				error: getErrorMessage(error),

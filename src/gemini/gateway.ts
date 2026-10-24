@@ -76,8 +76,6 @@ export class GeminiGateway implements IGeminiGateway {
 					case "reasoning_summary":
 						yield { type: "thinking", delta: event.delta };
 						break;
-					case "tool_calls":
-						break;
 					case "usage": {
 						const usage = toLegacyUsage(event.usage);
 						if (usage) yield { type: "usage", usage };

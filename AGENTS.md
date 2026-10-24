@@ -36,8 +36,7 @@ development.
   failures as Issues.
 - Optional runtime configuration, validated in `src/config.ts`:
   `LLM_PROVIDER`, `LLM_MODEL`, `LLM_SUMMARY_ENABLED`, `LLM_SUMMARY_PROVIDER`,
-  `LLM_SUMMARY_MODEL`, `LLM_ANSWER_MODE` (`legacy` default or `tools`; see
-  `docs/workflow-sheet-tools.md`), `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`,
+  `LLM_SUMMARY_MODEL`, `GEMINI_MODEL`, `GEMINI_SUMMARY_MODEL`,
   `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DATA_SHEET_NAME`,
   `GOOGLE_DESCRIPTION_SHEET_NAME`, `GITHUB_REPOSITORY` (`owner/repository`),
   and `HISTORY_TTL_SECONDS` (60–86400, default 300). Production values for

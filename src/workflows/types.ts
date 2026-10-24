@@ -1,7 +1,6 @@
 import type { HistoryEntry } from "../contracts";
 import type { DeliveryStatus } from "../discord/delivery";
 import type { LlmUsage } from "../llm/types";
-import type { SheetSnapshotRef } from "../sheets/snapshot";
 
 export type { WorkflowParams } from "../contracts";
 
@@ -10,26 +9,11 @@ export interface SheetDataOutput {
 	sheetInfo: string;
 	description: string;
 	fromCache: boolean;
-	/** Optional on older checkpoints or when snapshot capture is unavailable. */
-	snapshotRef?: SheetSnapshotRef;
-	/** Missing on checkpoints created before Sheets refresh telemetry was added. */
-	sheetsApiCall?: {
-		success: boolean;
-		durationMs: number;
-	};
 }
 
 export interface HistoryOutput {
 	history: HistoryEntry[];
-	/** Tool path only; absent on legacy runs and older checkpoints. */
-	deliveredIds?: string[];
 }
-
-export type {
-	SheetToolDeliveryOutput,
-	SheetToolPrepareOutput,
-	SheetToolRoundOutput,
-} from "./sheetTools/loop";
 
 export interface StreamingLlmOutput {
 	response: string;

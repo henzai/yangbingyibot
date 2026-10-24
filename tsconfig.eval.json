@@ -3,9 +3,5 @@
 	"compilerOptions": {
 		"types": ["node", "./worker-configuration.d.ts"]
 	},
-	"include": [
-		"tools/llm-eval/**/*.ts",
-		"tools/sheet-tools-eval/**/*.ts",
-		"vitest.eval.config.mts"
-	]
+	"include": ["tools/llm-eval/**/*.ts", "vitest.eval.config.mts"]
 }

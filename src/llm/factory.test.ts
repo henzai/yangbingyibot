@@ -16,7 +16,7 @@ describe("LLM factory", () => {
 	it("constructs only the selected provider", () => {
 		const gateway: ILlmGateway = {
 			provider: "fake",
-			capabilities: { reasoningSummary: false, tools: false },
+			capabilities: { reasoningSummary: false },
 			generateStream: vi.fn(),
 			generateText: vi.fn(),
 		};

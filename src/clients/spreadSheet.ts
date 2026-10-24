@@ -3,11 +3,7 @@ import GoogleAuth, {
 } from "cloudflare-workers-and-google-oauth";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { DEFAULT_RUNTIME_CONFIG, type SpreadsheetConfig } from "../config";
-import {
-	buildSheetStructureFromRows,
-	type SheetStructure,
-} from "../sheets/structuredSheet";
-import { compactSheetRows, parseCsv } from "../utils/compactSheet";
+import { compactSheetCsv } from "../utils/compactSheet";
 import {
 	ExternalServiceError,
 	getExternalErrorLogContext,
@@ -120,20 +116,14 @@ async function authenticateGoogle(
 export interface SheetData {
 	sheetInfo: string;
 	description: string;
-	structuredSheet: SheetStructure;
 }
-
-type FetchedSheetInfo = {
-	sheetInfo: string;
-	structuredSheet: SheetStructure;
-};
 
 // Helper to fetch sheet info from a loaded document
 async function fetchSheetInfo(
 	doc: GoogleSpreadsheet,
 	sheetName: string,
 	log: Logger,
-): Promise<FetchedSheetInfo> {
+): Promise<string> {
 	const sheet = doc.sheetsByTitle[sheetName];
 	if (!sheet) {
 		throw new ExternalServiceError({
@@ -166,20 +156,13 @@ async function fetchSheetInfo(
 		}
 
 		// CSVはGeminiへの入力トークンの大半を占めるため、渡す前に圧縮する
-		const rows = parseCsv(csvContent);
-		const compacted = compactSheetRows(rows);
-		const structuredSheet = buildSheetStructureFromRows(rows);
-		if (structuredSheet.status === "unavailable") {
-			log.warn("Sheet structure is unavailable; legacy TSV remains usable", {
-				reason: structuredSheet.reason,
-			});
-		}
+		const compacted = compactSheetCsv(csvContent);
 		log.info("Sheet CSV compacted", {
 			originalChars: csvContent.length,
 			compactedChars: compacted.length,
 		});
 
-		return { sheetInfo: compacted, structuredSheet };
+		return compacted;
 	} catch (error) {
 		log.error("Failed to download sheet as CSV", {
 			...getExternalErrorLogContext(error),
@@ -244,16 +227,12 @@ export async function getSheetData(
 		);
 
 		// Fetch both sheets in parallel using the same authenticated token
-		const [sheet, description] = await Promise.all([
+		const [sheetInfo, description] = await Promise.all([
 			fetchSheetInfo(doc, source.dataSheetName, logger),
 			fetchSheetDescription(doc, source.descriptionSheetName, logger),
 		]);
 
-		return {
-			sheetInfo: sheet.sheetInfo,
-			description,
-			structuredSheet: sheet.structuredSheet,
-		};
+		return { sheetInfo, description };
 	} catch (error) {
 		if (error instanceof ExternalServiceError) {
 			throw error;

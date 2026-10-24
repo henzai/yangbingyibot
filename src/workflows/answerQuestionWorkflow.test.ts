@@ -4,7 +4,6 @@ import { loadConfig } from "../config";
 import type { Bindings, HistoryEntry, WorkflowParams } from "../contracts";
 import { formatAnswer } from "../discord/formatter";
 import type { LlmRequest, LlmStreamEvent } from "../llm/types";
-import { memberFixture } from "../sheets/testFixtures";
 import { ExternalServiceError } from "../utils/errors";
 import type { Logger } from "../utils/logger";
 import type { HistoryOutput, SheetDataOutput } from "./types";
@@ -37,7 +36,7 @@ const mockDeduplicationStore = {
 
 const mockLlmGateway = {
 	provider: "gemini",
-	capabilities: { reasoningSummary: true, tools: false },
+	capabilities: { reasoningSummary: true },
 	generateStream: vi.fn(),
 	generateText: vi.fn(),
 };
@@ -102,7 +101,6 @@ import {
 	getHistoryStep,
 	getSheetDataStep,
 	normalizeStreamingOutput,
-	recordSheetDataAccessMetrics,
 	reportErrorToGitHub,
 	saveHistoryStep,
 	sendDiscordResponseStep,
@@ -118,13 +116,6 @@ const mockKVNamespace = {
 	get: vi.fn(),
 	put: vi.fn(),
 } as unknown as KVNamespace;
-
-const unavailableSheetStructure = {
-	status: "unavailable" as const,
-	schemaVersion: 2 as const,
-	catalogVersion: 2 as const,
-	reason: "unsupported_schema" as const,
-};
 
 const mockEnv: Bindings = {
 	DISCORD_TOKEN: "test-token",
@@ -142,7 +133,6 @@ const mockEnv: Bindings = {
 describe("AnswerQuestionWorkflow Steps", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockSheetCacheRepository.save.mockReset();
 		mockLlmGateway.provider = "gemini";
 		mockLlmGateway.capabilities.reasoningSummary = true;
 		vi.mocked(createLlmGateway).mockImplementation(() => mockLlmGateway);
@@ -161,47 +151,10 @@ describe("AnswerQuestionWorkflow Steps", () => {
 	});
 
 	describe("getSheetDataStep", () => {
-		it.each(["cached", "refresh", "fresh"])(
-			"checkpoints only a small immutable reference for %s data",
-			async (mode) => {
-				const snapshotRef = {
-					snapshotId: "a".repeat(64),
-					sourceFingerprint: "b".repeat(64),
-					expiresAt: Date.now() + 86400000,
-				};
-				const data = {
-					sheetInfo: "sheet",
-					description: "instructions",
-					structuredSheet: memberFixture(),
-					snapshotRef,
-				};
-				mockSheetCacheRepository.get.mockResolvedValue(
-					mode === "fresh"
-						? null
-						: mode === "refresh"
-							? { sheetInfo: "old", description: "old" }
-							: data,
-				);
-				vi.mocked(getSheetData).mockResolvedValue(data);
-				mockSheetCacheRepository.save.mockResolvedValue(snapshotRef);
-				const result = await getSheetDataStep(mockEnv, mockLogger);
-				expect(result.snapshotRef).toEqual(snapshotRef);
-				expect(result.description).toBe("instructions");
-				expect(result).not.toHaveProperty("structuredSheet");
-				expect(
-					new TextEncoder().encode(JSON.stringify(snapshotRef)).byteLength,
-				).toBeLessThan(256);
-				expect(JSON.parse(JSON.stringify(result)).snapshotRef).toEqual(
-					snapshotRef,
-				);
-			},
-		);
-
 		it("returns cached data when cache is available", async () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
-				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -219,97 +172,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			});
 		});
 
-		it("refreshes a legacy cache entry to obtain structured data", async () => {
-			mockSheetCacheRepository.get.mockResolvedValue({
-				sheetInfo: "legacy sheet",
-				description: "legacy desc",
-			});
-			vi.mocked(getSheetData).mockResolvedValue({
-				sheetInfo: "fresh sheet",
-				description: "fresh desc",
-				structuredSheet: unavailableSheetStructure,
-			});
-
-			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
-				sheetInfo: "fresh sheet",
-				description: "fresh desc",
-				fromCache: false,
-				sheetsApiCall: {
-					success: true,
-					durationMs: expect.any(Number),
-				},
-			});
-			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
-				expect.anything(),
-				"fresh sheet",
-				"fresh desc",
-				unavailableSheetStructure,
-			);
-		});
-
-		it("keeps legacy TSV when the structured refresh fails", async () => {
-			mockSheetCacheRepository.get.mockResolvedValue({
-				sheetInfo: "legacy sheet",
-				description: "legacy desc",
-			});
-			vi.mocked(getSheetData).mockRejectedValue(
-				new Error("Sheets unavailable"),
-			);
-
-			await expect(getSheetDataStep(mockEnv, mockLogger)).resolves.toEqual({
-				sheetInfo: "legacy sheet",
-				description: "legacy desc",
-				fromCache: true,
-				sheetsApiCall: {
-					success: false,
-					durationMs: expect.any(Number),
-				},
-			});
-			expect(mockSheetCacheRepository.save).toHaveBeenCalledWith(
-				expect.anything(),
-				"legacy sheet",
-				"legacy desc",
-				{
-					status: "unavailable",
-					schemaVersion: 2,
-					catalogVersion: 2,
-					reason: "invalid_snapshot",
-				},
-			);
-		});
-
-		it("still returns legacy TSV when caching the refresh failure fails", async () => {
-			mockSheetCacheRepository.get.mockResolvedValue({
-				sheetInfo: "legacy sheet",
-				description: "legacy desc",
-			});
-			vi.mocked(getSheetData).mockRejectedValue(
-				new Error("Sheets unavailable"),
-			);
-			mockSheetCacheRepository.save.mockRejectedValueOnce(
-				new Error("KV unavailable"),
-			);
-
-			await expect(
-				getSheetDataStep(mockEnv, mockLogger),
-			).resolves.toMatchObject({
-				sheetInfo: "legacy sheet",
-				description: "legacy desc",
-				fromCache: true,
-				sheetsApiCall: { success: false },
-			});
-			expect(mockLogger.warn).toHaveBeenCalledWith(
-				"Failed to cache legacy sheet fallback (non-fatal)",
-				expect.objectContaining({ error: "KV unavailable" }),
-			);
-		});
-
 		it("fetches from Google Sheets when cache is empty", async () => {
 			mockSheetCacheRepository.get.mockResolvedValue(null);
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
-				structuredSheet: unavailableSheetStructure,
 			});
 
 			const result = await getSheetDataStep(mockEnv, mockLogger);
@@ -318,10 +185,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
 				fromCache: false,
-				sheetsApiCall: {
-					success: true,
-					durationMs: expect.any(Number),
-				},
 			});
 			expect(getSheetData).toHaveBeenCalledWith(
 				mockEnv.GOOGLE_SERVICE_ACCOUNT,
@@ -339,7 +202,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			vi.mocked(getSheetData).mockResolvedValue({
 				sheetInfo: "fresh sheet",
 				description: "fresh desc",
-				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
@@ -352,7 +214,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				},
 				"fresh sheet",
 				"fresh desc",
-				unavailableSheetStructure,
 			);
 		});
 
@@ -360,46 +221,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			mockSheetCacheRepository.get.mockResolvedValue({
 				sheetInfo: "cached sheet",
 				description: "cached desc",
-				structuredSheet: unavailableSheetStructure,
 			});
 
 			await getSheetDataStep(mockEnv, mockLogger);
 
 			expect(mockSheetCacheRepository.save).not.toHaveBeenCalled();
-		});
-	});
-
-	describe("recordSheetDataAccessMetrics", () => {
-		it("records a failed Sheets refresh separately from a legacy cache hit", () => {
-			const metrics = {
-				recordKVCacheAccess: vi.fn(),
-				recordSheetsApiCall: vi.fn(),
-			} as unknown as import("../clients/metrics").IMetricsClient;
-
-			recordSheetDataAccessMetrics(
-				metrics,
-				"request-id",
-				{
-					sheetInfo: "legacy sheet",
-					description: "legacy desc",
-					fromCache: true,
-					sheetsApiCall: { success: false, durationMs: 321 },
-				},
-				500,
-			);
-
-			expect(metrics.recordKVCacheAccess).toHaveBeenCalledWith({
-				requestId: "request-id",
-				success: true,
-				durationMs: 500,
-				cacheHit: true,
-				operation: "get",
-			});
-			expect(metrics.recordSheetsApiCall).toHaveBeenCalledWith({
-				requestId: "request-id",
-				success: false,
-				durationMs: 321,
-			});
 		});
 	});
 
@@ -457,58 +283,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 			expect(result).toEqual({ history: [] });
 			expect(mockHistoryRepository.get).not.toHaveBeenCalled();
 		});
-
-		it("also returns delivered IDs when requested", async () => {
-			const existingHistory = [{ role: "user", text: "old question" }];
-			mockHistoryRepository.get.mockResolvedValue(existingHistory);
-			vi.mocked(mockKVNamespace.get).mockResolvedValueOnce({
-				version: 1,
-				ids: ["id-1", "id-2"],
-			} as never);
-
-			const result = await getHistoryStep(
-				mockEnv,
-				"conversation-key",
-				mockLogger,
-				true,
-			);
-
-			expect(result).toEqual({
-				history: existingHistory,
-				deliveredIds: ["id-1", "id-2"],
-			});
-			expect(mockKVNamespace.get).toHaveBeenCalledWith(
-				"chat_delivered:v1:conversation-key",
-				"json",
-			);
-		});
-
-		it("returns no delivered IDs key unless requested", async () => {
-			mockHistoryRepository.get.mockResolvedValue([]);
-
-			for (const flag of [undefined, false]) {
-				const result = await getHistoryStep(
-					mockEnv,
-					"conversation-key",
-					mockLogger,
-					flag,
-				);
-				expect(Object.keys(result)).toEqual(["history"]);
-			}
-			expect(mockKVNamespace.get).not.toHaveBeenCalled();
-		});
-
-		it("returns empty delivered IDs when the key is missing from KV", async () => {
-			mockHistoryRepository.get.mockResolvedValue([]);
-			vi.mocked(mockKVNamespace.get).mockResolvedValueOnce(null as never);
-
-			await expect(
-				getHistoryStep(mockEnv, "conversation-key", mockLogger, true),
-			).resolves.toEqual({ history: [], deliveredIds: [] });
-			await expect(
-				getHistoryStep(mockEnv, undefined, mockLogger, true),
-			).resolves.toEqual({ history: [], deliveredIds: [] });
-		});
 	});
 
 	describe("saveHistoryStep", () => {
@@ -550,55 +324,6 @@ describe("AnswerQuestionWorkflow Steps", () => {
 
 			expect(result).toEqual({ success: false });
 			expect(mockHistoryRepository.save).not.toHaveBeenCalled();
-		});
-
-		it("does not write delivered IDs without the fifth argument", async () => {
-			mockHistoryRepository.save.mockResolvedValue(undefined);
-			await saveHistoryStep(mockEnv, "conversation-key", [], mockLogger);
-
-			expect(mockKVNamespace.put).not.toHaveBeenCalled();
-		});
-
-		it("saves history and delivered IDs together", async () => {
-			mockHistoryRepository.save.mockResolvedValue(undefined);
-			const history: HistoryEntry[] = [{ role: "user", text: "question" }];
-
-			const result = await saveHistoryStep(
-				mockEnv,
-				"conversation-key",
-				history,
-				mockLogger,
-				["id-1", "id-2"],
-			);
-
-			expect(result).toEqual({ success: true });
-			expect(mockHistoryRepository.save).toHaveBeenCalledWith(
-				"conversation-key",
-				history,
-			);
-			expect(mockKVNamespace.put).toHaveBeenCalledWith(
-				"chat_delivered:v1:conversation-key",
-				'{"version":1,"ids":["id-1","id-2"]}',
-				{ expirationTtl: 300 },
-			);
-		});
-
-		it("treats a failing delivered ID save as non-fatal", async () => {
-			mockHistoryRepository.save.mockResolvedValue(undefined);
-			vi.mocked(mockKVNamespace.put).mockRejectedValueOnce(
-				new Error("KV error"),
-			);
-
-			const result = await saveHistoryStep(
-				mockEnv,
-				"conversation-key",
-				[],
-				mockLogger,
-				["id-1"],
-			);
-
-			expect(result).toEqual({ success: true });
-			expect(mockHistoryRepository.save).toHaveBeenCalled();
 		});
 	});
 
@@ -1747,117 +1472,5 @@ describe("completed Workflow checkpoint compatibility", () => {
 		expect(result.usage?.outputTokens).toBe(5);
 		expect(result.deliveryStatus).toBe("success");
 		expect(result.editCount).toBe(1);
-	});
-});
-
-describe("Workflow answer mode routing", () => {
-	function eventWith(answerMode?: "tools") {
-		return {
-			instanceId: "workflow-id",
-			payload: {
-				token: "token",
-				message: "question",
-				requestId: "request-id",
-				conversationKey: "conversation",
-				...(answerMode ? { answerMode } : {}),
-			},
-		} as WorkflowEvent<WorkflowParams>;
-	}
-
-	function fakeStep(results: Record<string, unknown>) {
-		const names: string[] = [];
-		const execute = vi.fn(async (name: string, ...args: unknown[]) => {
-			names.push(name);
-			if (name in results) return results[name];
-			return (args.at(-1) as () => Promise<unknown>)();
-		});
-		return { names, execute, step: { do: execute } as unknown as WorkflowStep };
-	}
-
-	beforeEach(() => {
-		vi.clearAllMocks();
-		mockHistoryRepository.save.mockResolvedValue(undefined);
-		mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
-		mockDiscordInstance.postMessage.mockResolvedValue(undefined);
-	});
-
-	it("uses the legacy step names and never prepares sheet tools without answerMode", async () => {
-		const { names, step } = fakeStep({
-			getSheetData: {
-				sheetInfo: "knowledge",
-				description: "description",
-				fromCache: true,
-			},
-			getHistory: { history: [] },
-			streamGeminiAndEditDiscord: {
-				response: "answer",
-				updatedHistory: [
-					{ role: "user", text: "question" },
-					{ role: "assistant", text: "answer" },
-				],
-				usage: null,
-				thinkingSummaryUsage: null,
-				thinkingSummaryCallCount: 0,
-				thinkingSummarySuccessCount: 0,
-				thinkingSummaryDurationMs: 0,
-				editCount: 1,
-				chunkCount: 1,
-				deliveryStatus: "success",
-				failedChunks: [],
-				retryCount: 0,
-				deliveryDurationMs: 1,
-			},
-		});
-
-		await AnswerQuestionWorkflow.prototype.run.call(
-			{ env: mockEnv } as unknown as AnswerQuestionWorkflow,
-			eventWith(),
-			step,
-		);
-
-		expect(names).toEqual([
-			"getSheetData",
-			"getHistory",
-			"streamGeminiAndEditDiscord",
-			"saveHistory",
-		]);
-		expect(names).not.toContain("prepareSheetTools");
-	});
-
-	it("reports an error without any tool round when the gateway lacks tool support", async () => {
-		mockLlmGateway.capabilities.tools = false;
-		const toolEnv: Bindings = {
-			...mockEnv,
-			GEMINI_API_KEY: undefined,
-			OPENAI_API_KEY: "test-openai-key",
-			LLM_PROVIDER: "openai",
-			LLM_MODEL: "gpt-6-luna",
-			LLM_SUMMARY_ENABLED: "false",
-			LLM_ANSWER_MODE: "tools",
-		};
-		const { names, step } = fakeStep({
-			getSheetData: {
-				sheetInfo: "knowledge",
-				description: "description",
-				fromCache: true,
-			},
-			getHistory: { history: [], deliveredIds: [] },
-		});
-
-		await AnswerQuestionWorkflow.prototype.run.call(
-			{ env: toolEnv } as unknown as AnswerQuestionWorkflow,
-			eventWith("tools"),
-			step,
-		);
-
-		expect(names).toEqual(["getSheetData", "getHistory", "sendErrorResponse"]);
-		expect(names.some((name) => name.startsWith("sheetToolRound"))).toBe(false);
-		expect(names).not.toContain("prepareSheetTools");
-		// The specific capability error, not an unrelated failure on the same path.
-		expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
-			expect.stringContaining(
-				"回答モデルがシート検索ツールに対応していません。",
-			),
-		);
 	});
 });

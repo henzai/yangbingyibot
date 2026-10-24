@@ -501,34 +501,4 @@ describe("request lifetime", () => {
 			expect(mocks.generate).not.toHaveBeenCalled();
 		},
 	);
-
-	it("rejects tools and continuations before any request", async () => {
-		const gateway = new GeminiLlmGateway("key");
-		expect(gateway.capabilities.tools).toBe(false);
-		const withTools = {
-			...request,
-			tools: [
-				{ name: "t", description: "d", parameters: {}, strict: true as const },
-			],
-		};
-		await expect(gateway.generateText(withTools)).rejects.toMatchObject({
-			retryable: false,
-		});
-		await expect(
-			(async () => {
-				for await (const _ of gateway.generateStream(withTools));
-			})(),
-		).rejects.toMatchObject({ retryable: false });
-		await expect(
-			gateway.generateText({
-				...request,
-				continuation: {
-					state: { provider: "gemini", items: [], pendingCallIds: [] },
-					results: [],
-				},
-			}),
-		).rejects.toMatchObject({ retryable: false });
-		expect(mocks.generate).not.toHaveBeenCalled();
-		expect(mocks.stream).not.toHaveBeenCalled();
-	});
 });

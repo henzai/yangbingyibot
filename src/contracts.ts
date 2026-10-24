@@ -8,19 +8,12 @@ export type ParsedDiscordAskCommand = {
 	conversationKey: string;
 };
 
-export type AnswerMode = "legacy" | "tools";
-
 // Workflow event payload shared by the Worker boundary and Workflow entrypoint.
 export interface WorkflowParams {
 	token: string;
 	message: string;
 	requestId: string;
 	conversationKey: string;
-	/**
-	 * Fixed when the instance is created so replay never switches paths.
-	 * Absent on legacy instances and whenever the legacy path is selected.
-	 */
-	answerMode?: AnswerMode;
 }
 
 /**
@@ -47,7 +40,6 @@ export type Bindings = {
 	LLM_SUMMARY_ENABLED?: string;
 	LLM_SUMMARY_PROVIDER?: string;
 	LLM_SUMMARY_MODEL?: string;
-	LLM_ANSWER_MODE?: string;
 	GOOGLE_SPREADSHEET_ID?: string;
 	GOOGLE_DATA_SHEET_NAME?: string;
 	GOOGLE_DESCRIPTION_SHEET_NAME?: string;
