@@ -14,6 +14,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           cache: "npm"
       - run: npm ci
       - run: npm test
@@ -25,6 +26,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           cache: "npm"
       - run: npm ci
       - name: Build verification (dry-run)
@@ -37,6 +39,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           cache: "npm"
       - run: npm ci
       - run: npm run typecheck
@@ -51,6 +54,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           cache: "npm"
       - run: npm ci
       - run: npm run check:ci
@@ -64,6 +68,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          check-latest: true
           cache: "npm"
       - run: npm ci
       - run: npm run deploy
