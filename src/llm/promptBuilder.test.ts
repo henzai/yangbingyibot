@@ -15,6 +15,8 @@ describe("provider-independent prompts", () => {
 		});
 		expect(prompt.systemInstruction).toContain("policy");
 		expect(prompt.systemInstruction).toContain("HTMLタグは使わず");
+		expect(prompt.systemInstruction).toContain("1項目を1行にまとめ");
+		expect(prompt.systemInstruction).toContain("![名前](URL)");
 		expect(prompt.systemInstruction).not.toContain("knowledge");
 		expect(prompt.systemInstruction).not.toContain("new question");
 		expect(prompt.systemInstruction).not.toContain("思考過程は必ず");
