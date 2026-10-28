@@ -31,8 +31,12 @@ is not used as a substitute for checking the configured model. Real generation
 belongs to the explicit evaluation procedure in #433 and may incur usage.
 
 Probe outcomes are `healthy`, `unhealthy`, or `unverified`. Authentication
-(`401`/`403`), timeout, transport, and capability failures have distinct
-`errorKind` values. A provider without a safe non-generating probe is
+(`401`/`403`), timeout, transport, upstream (`5xx`/`429`), and capability
+failures have distinct `errorKind` values. A timeout, transport, or upstream
+failure gets one more probe call after a short delay; each call has its own
+deadline, so a single transient metadata failure does not open an incident.
+Authentication, other `4xx`, an `unavailable` result, and a `Retry-After`
+longer than the delay are not retried. A provider without a safe non-generating probe is
 `unverified`, which makes `allHealthy` false; it is never silently promoted to
 healthy. A summary-only target retains purpose `summary`, so its failure is
 distinguishable from answer unavailability.
@@ -166,7 +170,8 @@ operationally before the legacy event is removed. The short-lived pre-v2
 Gemini during that interval, so it has no expected OpenAI production data.
 
 The existing `health_check` event retains `double1 = duration` and
-`double2 = success`. Its blobs are now:
+`double2 = success`. `double3` is the number of LLM probe calls, or `-1` for
+checks that are not LLM probes. Its blobs are now:
 
 | Position | Meaning                                 |
 | -------- | --------------------------------------- |

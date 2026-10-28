@@ -45,6 +45,25 @@ const available: LlmProbeResult = {
 	generationSupport: "supported",
 };
 
+const noSleep = async () => {};
+
+function probeError(
+	kind: "http" | "timeout" | "transport",
+	status?: number,
+	retryAfterMs?: number,
+): ExternalServiceError {
+	return new ExternalServiceError({
+		service: "llm",
+		provider: "gemini",
+		kind,
+		operation: "retrieve model metadata",
+		status,
+		retryable: kind !== "timeout",
+		retryAfterMs,
+		userMessage: "probe failed",
+	});
+}
+
 function gateway(provider: string, probe?: ILlmGateway["probe"]): ILlmGateway {
 	return {
 		provider,
@@ -204,6 +223,7 @@ describe("health check", () => {
 				createMockEnv({ LLM_SUMMARY_ENABLED: "false" }),
 				log,
 				vi.fn(() => gateway("gemini", vi.fn().mockRejectedValue(error))),
+				{ probeSleep: noSleep },
 			);
 			expect(result.checks).toContainEqual(
 				expect.objectContaining({ status: "unhealthy", errorKind }),
@@ -269,7 +289,7 @@ describe("health check", () => {
 				"model_metadata",
 				"supported",
 			],
-			doubles: [expect.any(Number), 1],
+			doubles: [expect.any(Number), 1, 1],
 		});
 	});
 
@@ -309,6 +329,7 @@ describe("health check", () => {
 					vi.fn().mockRejectedValue(failure(selection.provider)),
 				),
 			),
+			{ probeSleep: noSleep },
 		);
 
 		const searchUrls = vi
@@ -321,5 +342,100 @@ describe("health check", () => {
 		expect(searchUrls[0]).not.toContain("openai-summary");
 		expect(searchUrls[1]).toContain("openai:openai-summary:summary");
 		expect(searchUrls[1]).not.toContain("gemini-answer");
+	});
+	describe("probe retry", () => {
+		async function runWithProbe(probe: ILlmGateway["probe"]) {
+			const env = createMockEnv({
+				LLM_SUMMARY_ENABLED: "false",
+				GITHUB_TOKEN: "github-token",
+			});
+			const sleep = vi.fn(noSleep);
+			const result = await runHealthCheck(
+				env,
+				log,
+				vi.fn(() => gateway("gemini", probe)),
+				{ probeSleep: sleep },
+			);
+			const check = result.checks.find((c) => c.provider === "gemini");
+			return { result, check, sleep };
+		}
+
+		it.each([
+			["a timeout", probeError("timeout")],
+			["a 5xx response", probeError("http", 500)],
+			["a 429 response", probeError("http", 429, 500)],
+			["a transport failure", probeError("transport")],
+		])("recovers from %s with a fresh probe call", async (_, error) => {
+			const probe = vi
+				.fn()
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce(available);
+
+			const { result, check, sleep } = await runWithProbe(probe);
+
+			expect(probe).toHaveBeenCalledTimes(2);
+			expect(sleep).toHaveBeenCalledOnce();
+			expect(result.allHealthy).toBe(true);
+			expect(check).toMatchObject({ status: "healthy", probeAttempts: 2 });
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+		});
+
+		it("reports a timeout that persists after the retry", async () => {
+			const probe = vi.fn().mockRejectedValue(probeError("timeout"));
+
+			const { result, check } = await runWithProbe(probe);
+
+			expect(probe).toHaveBeenCalledTimes(2);
+			expect(result.allHealthy).toBe(false);
+			expect(check).toMatchObject({
+				status: "unhealthy",
+				errorKind: "timeout",
+				probeAttempts: 2,
+			});
+		});
+
+		it("classifies a persistent 5xx as upstream, not capability", async () => {
+			const probe = vi.fn().mockRejectedValue(probeError("http", 500));
+
+			const { check } = await runWithProbe(probe);
+
+			expect(probe).toHaveBeenCalledTimes(2);
+			expect(check).toMatchObject({
+				status: "unhealthy",
+				errorKind: "upstream",
+			});
+		});
+
+		it.each([
+			["authentication", probeError("http", 401), "authentication"],
+			["a non-transient 4xx", probeError("http", 404), "capability"],
+			["a long Retry-After", probeError("http", 429, 60_000), "upstream"],
+		] as const)("does not retry %s", async (_, error, errorKind) => {
+			const probe = vi.fn().mockRejectedValue(error);
+
+			const { check, sleep } = await runWithProbe(probe);
+
+			expect(probe).toHaveBeenCalledOnce();
+			expect(sleep).not.toHaveBeenCalled();
+			expect(check).toMatchObject({ errorKind, probeAttempts: 1 });
+		});
+
+		it("does not retry a probe that resolves as unavailable", async () => {
+			const probe = vi.fn().mockResolvedValue({
+				status: "unavailable",
+				scope: "model_metadata",
+				generationSupport: "unverified",
+				detail: "Selected model does not advertise generateContent support",
+			} satisfies LlmProbeResult);
+
+			const { check } = await runWithProbe(probe);
+
+			expect(probe).toHaveBeenCalledOnce();
+			expect(check).toMatchObject({
+				status: "unhealthy",
+				errorKind: "capability",
+				probeAttempts: 1,
+			});
+		});
 	});
 });
