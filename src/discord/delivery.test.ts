@@ -224,7 +224,7 @@ describe("DiscordDeliveryService", () => {
 			expect(transport.postComponentsMessage).toHaveBeenCalledTimes(2);
 			expect(transport.postMessage).toHaveBeenCalledTimes(1);
 			expect(transport.postMessage).toHaveBeenCalledWith(
-				urls(30)
+				urls(27)
 					.map(({ url }) => `<${url}>`)
 					.join("\n"),
 			);

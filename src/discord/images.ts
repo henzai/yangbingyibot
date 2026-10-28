@@ -3,7 +3,9 @@ import type {
 	DiscordMediaGalleryItem,
 } from "../clients/discord";
 
-export const GALLERY_MAX_ITEMS = 10;
+// Discord allows 10 per gallery, but lays out 10 as one large image above a
+// 3x3 grid. 9 keeps every full gallery an even 3x3 grid.
+export const GALLERY_MAX_ITEMS = 9;
 // Stays within Discord's 40-component limit even if gallery items count.
 export const GALLERIES_PER_MESSAGE = 3;
 const DESCRIPTION_MAX_LENGTH = 1024;
