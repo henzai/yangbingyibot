@@ -63,6 +63,16 @@ describe("extractImageUrls", () => {
 			image(6),
 		]);
 	});
+
+	it("keeps balanced parentheses inside a URL", () => {
+		const inQuery = "https://example.com/a.jpg?crop=(10,20)";
+		const inPath = "https://upload.wikimedia.org/x/Foo_(bar).jpg";
+
+		expect(extractImageUrls(`${inQuery} [画像](${inPath})`)).toEqual([
+			inQuery,
+			inPath,
+		]);
+	});
 });
 
 describe("suppressImageEmbeds", () => {
@@ -74,6 +84,13 @@ describe("suppressImageEmbeds", () => {
 			`[画像](<${image(1)}>)`,
 		);
 		expect(suppressImageEmbeds(`${image(1)}.`)).toBe(`<${image(1)}>.`);
+	});
+
+	it("wraps the whole URL when it contains parentheses", () => {
+		const url = "https://example.com/a.jpg?crop=(10,20)";
+
+		expect(suppressImageEmbeds(`画像 ${url}`)).toBe(`画像 <${url}>`);
+		expect(suppressImageEmbeds(`[画像](${url})`)).toBe(`[画像](<${url}>)`);
 	});
 
 	it("leaves wrapped image URLs and non-image URLs unchanged", () => {

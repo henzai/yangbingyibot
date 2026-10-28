@@ -8,9 +8,11 @@ export const GALLERIES_PER_MESSAGE = 3;
 const IS_COMPONENTS_V2 = 1 << 15;
 const MEDIA_GALLERY_TYPE = 12;
 
-// RFC 3986 URL characters except parentheses, so Markdown links and
-// full-width punctuation around a URL are not part of the match.
-const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'*+,;=%]+/g;
+// RFC 3986 URL characters, with parentheses only as balanced pairs, so the
+// closing ")" of a Markdown link and full-width punctuation around a URL are
+// not part of the match.
+const URL_PATTERN =
+	/https?:\/\/(?:[A-Za-z0-9\-._~:/?#[\]@!$&'*+,;=%]|\([A-Za-z0-9\-._~:/?#[\]@!$&'*+,;=%]*\))+/g;
 const TRAILING_PUNCTUATION = /[.,;:!?'*]+$/;
 const IMAGE_EXTENSION = /\.(?:png|jpe?g|gif|webp)$/i;
 
