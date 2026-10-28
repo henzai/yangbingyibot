@@ -6,7 +6,7 @@ import {
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { type RetryConfig, withRetry } from "../utils/retry";
 import { splitContent } from "./formatter";
-import { buildGalleryMessages } from "./images";
+import { buildGalleryMessages, type GalleryImage } from "./images";
 
 export type DeliveryStatus = "success" | "empty" | "partial" | "failed";
 
@@ -153,8 +153,10 @@ export class DiscordDeliveryService {
 		);
 	}
 
-	async deliverImageGallery(urls: readonly string[]): Promise<DeliveryResult> {
-		const messages = buildGalleryMessages(urls);
+	async deliverImageGallery(
+		images: readonly GalleryImage[],
+	): Promise<DeliveryResult> {
+		const messages = buildGalleryMessages(images);
 		return this.postAll(
 			messages,
 			(message) => this.transport.postComponentsMessage(message),

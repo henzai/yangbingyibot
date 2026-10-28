@@ -6,9 +6,14 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 
+export interface DiscordMediaGalleryItem {
+	media: { url: string };
+	description?: string;
+}
+
 export interface DiscordMediaGalleryComponent {
 	type: number;
-	items: { media: { url: string } }[];
+	items: DiscordMediaGalleryItem[];
 }
 
 export interface DiscordComponentsMessage {

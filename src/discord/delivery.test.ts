@@ -186,10 +186,9 @@ describe("DiscordDeliveryService", () => {
 
 	describe("deliverImageGallery", () => {
 		const urls = (count: number) =>
-			Array.from(
-				{ length: count },
-				(_, index) => `https://example.com/${index}.jpg`,
-			);
+			Array.from({ length: count }, (_, index) => ({
+				url: `https://example.com/${index}.jpg`,
+			}));
 
 		it("posts one Components V2 message per three galleries", async () => {
 			const { service, transport } = createService();

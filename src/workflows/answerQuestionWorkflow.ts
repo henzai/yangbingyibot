@@ -21,11 +21,7 @@ import {
 	formatThinking,
 	normalizeDiscordText,
 } from "../discord/formatter";
-import {
-	extractImageUrls,
-	MIN_GALLERY_IMAGES,
-	suppressImageEmbeds,
-} from "../discord/images";
+import { extractImages, suppressLinkEmbeds } from "../discord/images";
 import { createLlmGateway } from "../llm/factory";
 import { buildAnswerPrompt } from "../llm/promptBuilder";
 import { StreamCoordinator } from "../llm/streamCoordinator";
@@ -361,9 +357,9 @@ export async function streamLlmWithDiscordEditsStep(
 			}
 			content = formatThinking(question, summaryResult.text);
 		} else {
-			// The final delivery decides on a gallery; until then, keep image
-			// previews from stacking up while the answer streams in.
-			content = suppressImageEmbeds(formatAnswer(question, decision.text));
+			content = suppressLinkEmbeds(
+				formatAnswer(question, extractImages(decision.text).text),
+			);
 		}
 		const deliveryStartTime = Date.now();
 		const result = await delivery.deliverPreview(content);
@@ -426,19 +422,15 @@ export async function streamLlmWithDiscordEditsStep(
 			? `${response}\n\n（回答が出力上限に達しました。続きが必要な場合は質問を分けてください。）`
 			: response;
 
-	// Several image URLs would preview one per row, so they go to a Media
-	// Gallery message instead and stay in the text as plain links.
-	const imageUrls = extractImageUrls(finalResponse);
-	const useGallery = imageUrls.length >= MIN_GALLERY_IMAGES;
-	const finalContent = formatAnswer(question, finalResponse);
+	// Link previews stack one per row and make the answer very long, so the
+	// text carries plain links and images go to a Media Gallery message.
+	const { text: answerText, images } = extractImages(finalResponse);
 
 	const finalDeliveryStartTime = Date.now();
 	const finalDelivery = await delivery.deliverFinal(
 		response.length === 0
 			? ""
-			: useGallery
-				? suppressImageEmbeds(finalContent)
-				: finalContent,
+			: suppressLinkEmbeds(formatAnswer(question, answerText)),
 	);
 	const finalDeliveredAt = Date.now();
 	deliveryDurationMs += finalDeliveredAt - finalDeliveryStartTime;
@@ -455,12 +447,12 @@ export async function streamLlmWithDiscordEditsStep(
 	});
 
 	// Non-fatal: throwing here would rerun the whole step, including the LLM.
-	if (useGallery && finalDelivery.success) {
+	if (images.length > 0 && finalDelivery.success) {
 		const galleryStartTime = Date.now();
-		const gallery = await delivery.deliverImageGallery(imageUrls);
+		const gallery = await delivery.deliverImageGallery(images);
 		deliveryDurationMs += Date.now() - galleryStartTime;
 		log.info("Image gallery delivery completed", {
-			galleryImageCount: imageUrls.length,
+			galleryImageCount: images.length,
 			galleryStatus: gallery.status,
 			failedChunks: gallery.failedChunks,
 			statusCode: gallery.statusCode,

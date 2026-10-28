@@ -679,6 +679,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 		describe("image gallery", () => {
 			const image = (sid: number) =>
 				`https://www.snh48.com/images/member/zp_${sid}.jpg`;
+			const page = (sid: number) =>
+				`https://www.snh48.com/member_details.html?sid=${sid}#SNH`;
 			const runStep = () =>
 				streamGeminiWithDiscordEditsStep(
 					mockEnv,
@@ -696,8 +698,12 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				mockDiscordInstance.postComponentsMessage.mockResolvedValue(undefined);
 			});
 
-			it("posts several images as a gallery after the text without previews", async () => {
-				const response = `唐果さん ${image(1)}\n苏杉杉さん ${image(2)}`;
+			it("moves images to a gallery and suppresses every link preview", async () => {
+				const response = [
+					"Team NII メンバー",
+					`- ![胡晓慧](${image(1)}) [胡晓慧さん](${page(1)})`,
+					`- ![潘瑛琪](${image(2)}) [潘瑛琪さん](${page(2)})`,
+				].join("\n");
 				mockStream([{ type: "text", delta: response }]);
 
 				const result = await runStep();
@@ -707,7 +713,11 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				).toBe(
 					formatAnswer(
 						"question",
-						`唐果さん <${image(1)}>\n苏杉杉さん <${image(2)}>`,
+						[
+							"Team NII メンバー",
+							`- [胡晓慧さん](<${page(1)}>)`,
+							`- [潘瑛琪さん](<${page(2)}>)`,
+						].join("\n"),
 					),
 				);
 				expect(mockDiscordInstance.postComponentsMessage).toHaveBeenCalledWith({
@@ -716,8 +726,8 @@ describe("AnswerQuestionWorkflow Steps", () => {
 						{
 							type: 12,
 							items: [
-								{ media: { url: image(1) } },
-								{ media: { url: image(2) } },
+								{ media: { url: image(1) }, description: "胡晓慧" },
+								{ media: { url: image(2) }, description: "潘瑛琪" },
 							],
 						},
 					],
@@ -734,34 +744,50 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				expect(result.updatedHistory.at(-1)?.text).toBe(response);
 			});
 
-			it("keeps a single image as an inline preview", async () => {
-				const response = `唐果さん ${image(1)}`;
-				mockStream([{ type: "text", delta: response }]);
+			it("posts a single image as a gallery too", async () => {
+				mockStream([{ type: "text", delta: `唐果さん ${image(1)}` }]);
 
 				await runStep();
 
 				expect(
 					mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
-				).toBe(formatAnswer("question", response));
+				).toBe(formatAnswer("question", `唐果さん <${image(1)}>`));
+				expect(mockDiscordInstance.postComponentsMessage).toHaveBeenCalledWith({
+					flags: 1 << 15,
+					components: [{ type: 12, items: [{ media: { url: image(1) } }] }],
+				});
+			});
+
+			it("posts no gallery when the answer has no images", async () => {
+				mockStream([{ type: "text", delta: `唐果さん ${page(1)}` }]);
+
+				await runStep();
+
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
+				).toBe(formatAnswer("question", `唐果さん <${page(1)}>`));
 				expect(
 					mockDiscordInstance.postComponentsMessage,
 				).not.toHaveBeenCalled();
 			});
 
-			it("suppresses image previews while the answer streams", async () => {
+			it("suppresses link previews and Markdown images while the answer streams", async () => {
 				mockStream([
-					{ type: "text", delta: `唐果さん ${image(1)}` },
+					{
+						type: "text",
+						delta: `- ![唐果](${image(1)}) [唐果さん](${page(1)})`,
+					},
 					{ type: "finish", finish: { reason: "stop" } },
 				]);
 
 				await runStep();
 
-				expect(
-					mockDiscordInstance.editOriginalMessage.mock.calls.some(
-						([content]) =>
-							content === formatAnswer("question", `唐果さん <${image(1)}>`),
-					),
-				).toBe(true);
+				const previews = mockDiscordInstance.editOriginalMessage.mock.calls
+					.slice(0, -1)
+					.map(([content]) => content);
+				expect(previews).toContain(
+					formatAnswer("question", `- [唐果さん](<${page(1)}>)`),
+				);
 			});
 
 			it("does not fail the step when the gallery cannot be posted", async () => {
