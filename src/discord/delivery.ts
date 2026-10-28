@@ -6,7 +6,11 @@ import {
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { type RetryConfig, withRetry } from "../utils/retry";
 import { splitContent } from "./formatter";
-import { buildGalleryMessages } from "./images";
+import {
+	buildGalleryFallbackText,
+	buildGalleryMessages,
+	type GalleryImage,
+} from "./images";
 
 export type DeliveryStatus = "success" | "empty" | "partial" | "failed";
 
@@ -153,13 +157,27 @@ export class DiscordDeliveryService {
 		);
 	}
 
-	async deliverImageGallery(urls: readonly string[]): Promise<DeliveryResult> {
-		const messages = buildGalleryMessages(urls);
-		return this.postAll(
+	async deliverImageGallery(
+		images: readonly GalleryImage[],
+	): Promise<DeliveryResult> {
+		const messages = buildGalleryMessages(images);
+		const result = await this.postAll(
 			messages,
 			(message) => this.transport.postComponentsMessage(message),
 			"image gallery message",
 		);
+		if (result.failedChunks.length > 0) {
+			const fallback = await this.deliverFollowup(
+				buildGalleryFallbackText(
+					result.failedChunks.map((index) => messages[index]),
+				),
+			);
+			this.log.warn("Image gallery fell back to links", {
+				failedChunks: result.failedChunks,
+				fallbackStatus: fallback.status,
+			});
+		}
+		return result;
 	}
 
 	private async postAll<T>(
