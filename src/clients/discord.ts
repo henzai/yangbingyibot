@@ -6,6 +6,16 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 
+export interface DiscordMediaGalleryComponent {
+	type: number;
+	items: { media: { url: string } }[];
+}
+
+export interface DiscordComponentsMessage {
+	flags: number;
+	components: DiscordMediaGalleryComponent[];
+}
+
 export class DiscordWebhookClient {
 	private endpoint: string;
 	private log: Logger;
@@ -52,17 +62,31 @@ export class DiscordWebhookClient {
 	 * Throws on failure.
 	 */
 	async postMessage(content: string): Promise<void> {
+		await this.post({ content }, "post message");
+	}
+
+	/**
+	 * Post a Components V2 message (POST), such as a Media Gallery.
+	 * Throws on failure.
+	 */
+	async postComponentsMessage(
+		message: DiscordComponentsMessage,
+	): Promise<void> {
+		await this.post(message, "post components message");
+	}
+
+	private async post(body: object, operation: string): Promise<void> {
 		try {
 			const res = await fetch(this.endpoint, {
 				method: "POST",
-				body: JSON.stringify({ content }),
+				body: JSON.stringify(body),
 				headers: { "Content-Type": "application/json" },
 			});
 
 			if (!res.ok) {
 				throw externalServiceErrorFromResponse(
 					"discord",
-					"post message",
+					operation,
 					res,
 					"Discordへのメッセージ送信に失敗しました。",
 				);
@@ -72,7 +96,7 @@ export class DiscordWebhookClient {
 		} catch (error) {
 			throw normalizeExternalServiceError(error, {
 				service: "discord",
-				operation: "post message",
+				operation,
 				userMessage: "Discordへのメッセージ送信に失敗しました。",
 			});
 		}

@@ -28,6 +28,7 @@ function createService() {
 	const transport = {
 		editOriginalMessage: vi.fn().mockResolvedValue(undefined),
 		postMessage: vi.fn().mockResolvedValue(undefined),
+		postComponentsMessage: vi.fn().mockResolvedValue(undefined),
 	};
 	const sleep = vi.fn().mockResolvedValue(undefined);
 	const service = new DiscordDeliveryService(transport, log, {
@@ -181,5 +182,74 @@ describe("DiscordDeliveryService", () => {
 		});
 		expect(permanent.transport.postMessage).toHaveBeenCalledTimes(1);
 		expect(permanent.sleep).not.toHaveBeenCalled();
+	});
+
+	describe("deliverImageGallery", () => {
+		const urls = (count: number) =>
+			Array.from(
+				{ length: count },
+				(_, index) => `https://example.com/${index}.jpg`,
+			);
+
+		it("posts one Components V2 message per three galleries", async () => {
+			const { service, transport } = createService();
+
+			const result = await service.deliverImageGallery(urls(31));
+
+			expect(transport.postComponentsMessage).toHaveBeenCalledTimes(2);
+			expect(transport.postComponentsMessage.mock.calls[0]?.[0]).toMatchObject({
+				flags: 1 << 15,
+				components: [{ type: 12 }, { type: 12 }, { type: 12 }],
+			});
+			expect(transport.postMessage).not.toHaveBeenCalled();
+			expect(transport.editOriginalMessage).not.toHaveBeenCalled();
+			expect(result).toEqual({
+				status: "success",
+				success: true,
+				editCount: 0,
+				chunkCount: 2,
+				failedChunks: [],
+				retryCount: 0,
+				statusCode: 200,
+			});
+		});
+
+		it("reports a partial result when one gallery message fails", async () => {
+			const { service, transport } = createService();
+			transport.postComponentsMessage
+				.mockRejectedValueOnce(discordError(400, { retryable: false }))
+				.mockResolvedValueOnce(undefined);
+
+			const result = await service.deliverImageGallery(urls(31));
+
+			expect(transport.postComponentsMessage).toHaveBeenCalledTimes(2);
+			expect(result).toMatchObject({
+				status: "partial",
+				success: false,
+				chunkCount: 1,
+				failedChunks: [0],
+				statusCode: 400,
+			});
+		});
+
+		it("reports failure without throwing when every gallery message fails", async () => {
+			const { service, transport } = createService();
+			transport.postComponentsMessage.mockRejectedValue(
+				discordError(400, { retryable: false }),
+			);
+
+			await expect(service.deliverImageGallery(urls(2))).resolves.toMatchObject(
+				{ status: "failed", success: false, chunkCount: 0, failedChunks: [0] },
+			);
+		});
+
+		it("returns an empty result without posting when there are no images", async () => {
+			const { service, transport } = createService();
+
+			await expect(service.deliverImageGallery([])).resolves.toMatchObject({
+				status: "empty",
+			});
+			expect(transport.postComponentsMessage).not.toHaveBeenCalled();
+		});
 	});
 });
