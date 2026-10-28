@@ -446,8 +446,12 @@ export async function streamLlmWithDiscordEditsStep(
 		responseLength: response.length,
 	});
 
-	// Non-fatal: throwing here would rerun the whole step, including the LLM.
-	if (images.length > 0 && finalDelivery.success) {
+	// Images were removed from the text, so send them whenever any of the text
+	// arrived. Non-fatal: throwing here would rerun the whole step, including
+	// the LLM.
+	const textDelivered =
+		finalDelivery.status === "success" || finalDelivery.status === "partial";
+	if (images.length > 0 && textDelivered) {
 		const galleryStartTime = Date.now();
 		const gallery = await delivery.deliverImageGallery(images);
 		deliveryDurationMs += Date.now() - galleryStartTime;

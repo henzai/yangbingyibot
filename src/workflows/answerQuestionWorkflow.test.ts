@@ -818,6 +818,33 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				);
 			});
 
+			it("still posts the gallery when only part of the text is delivered", async () => {
+				const response = `${"a".repeat(2500)}\n![唐果](${image(1)})`;
+				mockStream([{ type: "text", delta: response }]);
+				mockDiscordInstance.postMessage.mockRejectedValue(
+					new ExternalServiceError({
+						service: "discord",
+						operation: "post message",
+						status: 400,
+						retryable: false,
+						userMessage: "Discordへのメッセージ送信に失敗しました。",
+					}),
+				);
+
+				const result = await runStep();
+
+				expect(result.deliveryStatus).toBe("partial");
+				expect(mockDiscordInstance.postComponentsMessage).toHaveBeenCalledWith({
+					flags: 1 << 15,
+					components: [
+						{
+							type: 12,
+							items: [{ media: { url: image(1) }, description: "唐果" }],
+						},
+					],
+				});
+			});
+
 			it("skips the gallery when the text delivery fails", async () => {
 				mockStream([{ type: "text", delta: `${image(1)} ${image(2)}` }]);
 				mockDiscordInstance.editOriginalMessage.mockRejectedValue(
