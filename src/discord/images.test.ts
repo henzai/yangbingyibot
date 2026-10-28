@@ -176,13 +176,13 @@ describe("buildGalleryMessages", () => {
 		]);
 	});
 
-	it("puts 10 images per gallery and 3 galleries per message", () => {
+	it("puts 9 images per gallery and 3 galleries per message", () => {
 		expect(shape(0)).toEqual([]);
 		expect(shape(1)).toEqual([[1]]);
-		expect(shape(10)).toEqual([[10]]);
-		expect(shape(11)).toEqual([[10, 1]]);
-		expect(shape(30)).toEqual([[10, 10, 10]]);
-		expect(shape(31)).toEqual([[10, 10, 10], [1]]);
+		expect(shape(9)).toEqual([[9]]);
+		expect(shape(10)).toEqual([[9, 1]]);
+		expect(shape(27)).toEqual([[9, 9, 9]]);
+		expect(shape(28)).toEqual([[9, 9, 9], [1]]);
 	});
 
 	it("keeps every image in order", () => {
