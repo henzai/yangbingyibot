@@ -1,3 +1,4 @@
+import type { DiscordComponentsMessage } from "../clients/discord";
 import {
 	ExternalServiceError,
 	getExternalErrorLogContext,
@@ -5,6 +6,7 @@ import {
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 import { type RetryConfig, withRetry } from "../utils/retry";
 import { splitContent } from "./formatter";
+import { buildGalleryMessages } from "./images";
 
 export type DeliveryStatus = "success" | "empty" | "partial" | "failed";
 
@@ -21,6 +23,7 @@ export interface DeliveryResult {
 export interface DiscordWebhookTransport {
 	editOriginalMessage(content: string): Promise<void>;
 	postMessage(content: string): Promise<void>;
+	postComponentsMessage(message: DiscordComponentsMessage): Promise<void>;
 }
 
 const DEFAULT_DISCORD_RETRY_CONFIG: Partial<RetryConfig> = {
@@ -143,7 +146,28 @@ export class DiscordDeliveryService {
 
 	async deliverFollowup(content: string): Promise<DeliveryResult> {
 		const chunks = splitContent(content);
-		if (chunks.length === 0) {
+		return this.postAll(
+			chunks,
+			(chunk) => this.transport.postMessage(chunk),
+			"follow-up message",
+		);
+	}
+
+	async deliverImageGallery(urls: readonly string[]): Promise<DeliveryResult> {
+		const messages = buildGalleryMessages(urls);
+		return this.postAll(
+			messages,
+			(message) => this.transport.postComponentsMessage(message),
+			"image gallery message",
+		);
+	}
+
+	private async postAll<T>(
+		items: readonly T[],
+		post: (item: T) => Promise<void>,
+		operationName: string,
+	): Promise<DeliveryResult> {
+		if (items.length === 0) {
 			return this.emptyResult();
 		}
 
@@ -152,11 +176,11 @@ export class DiscordDeliveryService {
 		let statusCode: number | undefined = 200;
 		const failedChunks: number[] = [];
 
-		for (let index = 0; index < chunks.length; index++) {
-			const chunk = chunks[index] as string;
+		for (let index = 0; index < items.length; index++) {
+			const item = items[index] as T;
 			const attempt = await this.attemptDelivery(
-				() => this.transport.postMessage(chunk),
-				"follow-up message",
+				() => post(item),
+				operationName,
 				index,
 			);
 			retryCount += attempt.retryCount;

@@ -21,6 +21,11 @@ import {
 	formatThinking,
 	normalizeDiscordText,
 } from "../discord/formatter";
+import {
+	extractImageUrls,
+	MIN_GALLERY_IMAGES,
+	suppressImageEmbeds,
+} from "../discord/images";
 import { createLlmGateway } from "../llm/factory";
 import { buildAnswerPrompt } from "../llm/promptBuilder";
 import { StreamCoordinator } from "../llm/streamCoordinator";
@@ -356,7 +361,9 @@ export async function streamLlmWithDiscordEditsStep(
 			}
 			content = formatThinking(question, summaryResult.text);
 		} else {
-			content = formatAnswer(question, decision.text);
+			// The final delivery decides on a gallery; until then, keep image
+			// previews from stacking up while the answer streams in.
+			content = suppressImageEmbeds(formatAnswer(question, decision.text));
 		}
 		const deliveryStartTime = Date.now();
 		const result = await delivery.deliverPreview(content);
@@ -419,9 +426,19 @@ export async function streamLlmWithDiscordEditsStep(
 			? `${response}\n\n（回答が出力上限に達しました。続きが必要な場合は質問を分けてください。）`
 			: response;
 
+	// Several image URLs would preview one per row, so they go to a Media
+	// Gallery message instead and stay in the text as plain links.
+	const imageUrls = extractImageUrls(finalResponse);
+	const useGallery = imageUrls.length >= MIN_GALLERY_IMAGES;
+	const finalContent = formatAnswer(question, finalResponse);
+
 	const finalDeliveryStartTime = Date.now();
 	const finalDelivery = await delivery.deliverFinal(
-		response.length === 0 ? "" : formatAnswer(question, finalResponse),
+		response.length === 0
+			? ""
+			: useGallery
+				? suppressImageEmbeds(finalContent)
+				: finalContent,
 	);
 	const finalDeliveredAt = Date.now();
 	deliveryDurationMs += finalDeliveredAt - finalDeliveryStartTime;
@@ -436,6 +453,19 @@ export async function streamLlmWithDiscordEditsStep(
 		failedChunks: finalDelivery.failedChunks,
 		responseLength: response.length,
 	});
+
+	// Non-fatal: throwing here would rerun the whole step, including the LLM.
+	if (useGallery && finalDelivery.success) {
+		const galleryStartTime = Date.now();
+		const gallery = await delivery.deliverImageGallery(imageUrls);
+		deliveryDurationMs += Date.now() - galleryStartTime;
+		log.info("Image gallery delivery completed", {
+			galleryImageCount: imageUrls.length,
+			galleryStatus: gallery.status,
+			failedChunks: gallery.failedChunks,
+			statusCode: gallery.statusCode,
+		});
+	}
 
 	return {
 		response,

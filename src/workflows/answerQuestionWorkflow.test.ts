@@ -72,6 +72,7 @@ vi.mock("../llm/thinkingSummarizer", async (importOriginal) => ({
 const mockDiscordInstance = {
 	editOriginalMessage: vi.fn(),
 	postMessage: vi.fn(),
+	postComponentsMessage: vi.fn(),
 };
 
 vi.mock("../clients/discord", () => ({
@@ -672,6 +673,140 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				chunkCount: 2,
 				deliveryStatus: "success",
 				failedChunks: [],
+			});
+		});
+
+		describe("image gallery", () => {
+			const image = (sid: number) =>
+				`https://www.snh48.com/images/member/zp_${sid}.jpg`;
+			const runStep = () =>
+				streamGeminiWithDiscordEditsStep(
+					mockEnv,
+					"test-token",
+					"question",
+					"message",
+					sheetData,
+					history,
+					mockLogger,
+				);
+
+			beforeEach(() => {
+				mockDiscordInstance.editOriginalMessage.mockResolvedValue(undefined);
+				mockDiscordInstance.postMessage.mockResolvedValue(undefined);
+				mockDiscordInstance.postComponentsMessage.mockResolvedValue(undefined);
+			});
+
+			it("posts several images as a gallery after the text without previews", async () => {
+				const response = `唐果さん ${image(1)}\n苏杉杉さん ${image(2)}`;
+				mockStream([{ type: "text", delta: response }]);
+
+				const result = await runStep();
+
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
+				).toBe(
+					formatAnswer(
+						"question",
+						`唐果さん <${image(1)}>\n苏杉杉さん <${image(2)}>`,
+					),
+				);
+				expect(mockDiscordInstance.postComponentsMessage).toHaveBeenCalledWith({
+					flags: 1 << 15,
+					components: [
+						{
+							type: 12,
+							items: [
+								{ media: { url: image(1) } },
+								{ media: { url: image(2) } },
+							],
+						},
+					],
+				});
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.invocationCallOrder.at(
+						-1,
+					),
+				).toBeLessThan(
+					mockDiscordInstance.postComponentsMessage.mock
+						.invocationCallOrder[0] as number,
+				);
+				expect(result.response).toBe(response);
+				expect(result.updatedHistory.at(-1)?.text).toBe(response);
+			});
+
+			it("keeps a single image as an inline preview", async () => {
+				const response = `唐果さん ${image(1)}`;
+				mockStream([{ type: "text", delta: response }]);
+
+				await runStep();
+
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.calls.at(-1)?.[0],
+				).toBe(formatAnswer("question", response));
+				expect(
+					mockDiscordInstance.postComponentsMessage,
+				).not.toHaveBeenCalled();
+			});
+
+			it("suppresses image previews while the answer streams", async () => {
+				mockStream([
+					{ type: "text", delta: `唐果さん ${image(1)}` },
+					{ type: "finish", finish: { reason: "stop" } },
+				]);
+
+				await runStep();
+
+				expect(
+					mockDiscordInstance.editOriginalMessage.mock.calls.some(
+						([content]) =>
+							content === formatAnswer("question", `唐果さん <${image(1)}>`),
+					),
+				).toBe(true);
+			});
+
+			it("does not fail the step when the gallery cannot be posted", async () => {
+				mockStream([{ type: "text", delta: `${image(1)} ${image(2)}` }]);
+				mockDiscordInstance.postComponentsMessage.mockRejectedValue(
+					new ExternalServiceError({
+						service: "discord",
+						operation: "post components message",
+						status: 400,
+						retryable: false,
+						userMessage: "Discordへのメッセージ送信に失敗しました。",
+					}),
+				);
+
+				const result = await runStep();
+
+				expect(result.deliveryStatus).toBe("success");
+				expect(mockLogger.info).toHaveBeenCalledWith(
+					"Image gallery delivery completed",
+					expect.objectContaining({
+						galleryImageCount: 2,
+						galleryStatus: "failed",
+						statusCode: 400,
+					}),
+				);
+			});
+
+			it("skips the gallery when the text delivery fails", async () => {
+				mockStream([{ type: "text", delta: `${image(1)} ${image(2)}` }]);
+				mockDiscordInstance.editOriginalMessage.mockRejectedValue(
+					new ExternalServiceError({
+						service: "discord",
+						operation: "edit original message",
+						status: 404,
+						retryable: false,
+						userMessage: "Discordへの応答送信に失敗しました。",
+					}),
+				);
+
+				const result = await runStep();
+
+				expect(result.deliveryStatus).toBe("failed");
+				expect(
+					mockDiscordInstance.postComponentsMessage,
+				).not.toHaveBeenCalled();
 			});
 		});
 

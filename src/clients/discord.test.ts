@@ -154,6 +154,51 @@ describe("DiscordWebhookClient", () => {
 		});
 	});
 
+	describe("postComponentsMessage", () => {
+		const message = {
+			flags: 1 << 15,
+			components: [
+				{ type: 12, items: [{ media: { url: "https://x/a.jpg" } }] },
+			],
+		};
+
+		it("sends the components payload as a POST", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(new Response(null));
+			globalThis.fetch = mockFetch;
+
+			const client = new DiscordWebhookClient("app-id", "test-token");
+			await client.postComponentsMessage(message);
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"https://discord.com/api/v10/webhooks/app-id/test-token",
+				{
+					method: "POST",
+					body: JSON.stringify(message),
+					headers: { "Content-Type": "application/json" },
+				},
+			);
+		});
+
+		it("throws a typed error on non-ok response", async () => {
+			globalThis.fetch = vi
+				.fn()
+				.mockResolvedValue(new Response(null, { status: 400 }));
+
+			const client = new DiscordWebhookClient("app-id", "token");
+			const error = await client
+				.postComponentsMessage(message)
+				.catch((caught) => caught);
+
+			expect(error).toBeInstanceOf(ExternalServiceError);
+			expect(error).toMatchObject({
+				service: "discord",
+				operation: "post components message",
+				status: 400,
+				retryable: false,
+			});
+		});
+	});
+
 	describe("createDiscordWebhookClient", () => {
 		it("creates a new DiscordWebhookClient instance", () => {
 			const client = createDiscordWebhookClient("app-id", "token");
