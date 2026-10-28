@@ -140,6 +140,7 @@ export interface HealthCheckMetricData {
 	purposes?: string[];
 	errorKind?: string;
 	probeScope?: string;
+	probeAttempts?: number;
 	generationSupport?: string;
 }
 
@@ -322,7 +323,11 @@ export class MetricsClient implements IMetricsClient {
 				data.probeScope ?? "",
 				data.generationSupport ?? "",
 			],
-			doubles: [data.durationMs, data.success ? 1 : 0],
+			doubles: [
+				data.durationMs,
+				data.success ? 1 : 0,
+				data.probeAttempts ?? -1,
+			],
 		});
 	}
 

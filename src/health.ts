@@ -19,6 +19,7 @@ import {
 	getExternalErrorLogContext,
 } from "./utils/errors";
 import type { Logger } from "./utils/logger";
+import { type RetryConfig, withRetry } from "./utils/retry";
 
 type HealthStatus = "healthy" | "unhealthy" | "unverified";
 type HealthPurpose = "answer" | "summary";
@@ -33,12 +34,14 @@ export type CheckResult = {
 		| "authentication"
 		| "timeout"
 		| "transport"
+		| "upstream"
 		| "capability"
 		| "probe_unavailable";
 	provider?: string;
 	model?: string;
 	purposes?: HealthPurpose[];
 	probeScope?: "model_metadata";
+	probeAttempts?: number;
 	generationSupport?: "supported" | "unverified";
 	detail?: string;
 };
@@ -50,6 +53,13 @@ export type HealthCheckResult = {
 
 const ERROR_REPORTED_TTL_SECONDS = 60 * 60; // 1 hour
 const LLM_PROBE_TIMEOUT_MS = 5_000;
+const LLM_PROBE_RETRY = {
+	maxAttempts: 2,
+	initialDelayMs: 1_000,
+	maxDelayMs: 1_000,
+};
+
+type ProbeSleep = RetryConfig["sleep"];
 
 type GatewayFactory = (selection: LlmSelection, log?: Logger) => ILlmGateway;
 
@@ -108,13 +118,38 @@ function classifyProbeError(error: unknown): CheckResult["errorKind"] {
 	if (!(error instanceof ExternalServiceError)) return "transport";
 	if (error.kind === "timeout") return "timeout";
 	if (error.status === 401 || error.status === 403) return "authentication";
-	return error.kind === "transport" ? "transport" : "capability";
+	if (error.kind === "transport") return "transport";
+	if (
+		error.status !== undefined &&
+		(error.status >= 500 || error.status === 429)
+	) {
+		return "upstream";
+	}
+	return "capability";
+}
+
+/**
+ * A probe gets one more call after a transient failure. Each call opens its
+ * own request scope, so a timed-out attempt does not consume the next deadline.
+ */
+function isTransientProbeError(error: Error): boolean {
+	const kind = classifyProbeError(error);
+	if (kind === "timeout" || kind === "transport") return true;
+	if (kind !== "upstream" || !(error instanceof ExternalServiceError)) {
+		return false;
+	}
+	return (
+		error.retryAfterMs === undefined ||
+		error.retryAfterMs <= LLM_PROBE_RETRY.maxDelayMs
+	);
 }
 
 async function checkLlmTarget(
 	selection: LlmSelection,
 	purposes: HealthPurpose[],
 	gateway: ILlmGateway,
+	log: Logger,
+	sleep?: ProbeSleep,
 ): Promise<CheckResult> {
 	const start = Date.now();
 	const name = `llm:${selection.provider}:${selection.model}:${purposes.join("+")}`;
@@ -131,11 +166,21 @@ async function checkLlmTarget(
 			purposes,
 		};
 	}
+	const probe = gateway.probe.bind(gateway);
+	let probeAttempts = 0;
 	try {
-		const result = await gateway.probe({
-			model: selection.model,
-			timeoutMs: LLM_PROBE_TIMEOUT_MS,
-		});
+		const result = await withRetry(
+			() => {
+				probeAttempts++;
+				return probe({
+					model: selection.model,
+					timeoutMs: LLM_PROBE_TIMEOUT_MS,
+				});
+			},
+			{ ...LLM_PROBE_RETRY, ...(sleep ? { sleep } : {}) },
+			isTransientProbeError,
+			log,
+		);
 		const status: HealthStatus =
 			result.status === "available"
 				? "healthy"
@@ -158,6 +203,7 @@ async function checkLlmTarget(
 			model: selection.model,
 			purposes,
 			probeScope: result.scope,
+			probeAttempts,
 			generationSupport: result.generationSupport,
 			detail: status === "healthy" ? result.detail : undefined,
 		};
@@ -173,6 +219,7 @@ async function checkLlmTarget(
 			model: selection.model,
 			purposes,
 			probeScope: "model_metadata",
+			probeAttempts,
 		};
 	}
 }
@@ -182,6 +229,7 @@ function checkConfiguredLlms(
 	config: LlmRoutingConfig,
 	log: Logger,
 	gatewayFactory: GatewayFactory,
+	probeSleep?: ProbeSleep,
 ): Array<Promise<CheckResult>> {
 	const targets = new Map<
 		string,
@@ -204,7 +252,13 @@ function checkConfiguredLlms(
 				gateway = gatewayFactory(selection, log);
 				gateways.set(selection.provider, gateway);
 			}
-			return await checkLlmTarget(selection, purposes, gateway);
+			return await checkLlmTarget(
+				selection,
+				purposes,
+				gateway,
+				log,
+				probeSleep,
+			);
 		} catch (error) {
 			return {
 				name: `llm:${selection.provider}:${selection.model}:${purposes.join("+")}`,
@@ -331,6 +385,7 @@ export async function runHealthCheck(
 	env: Bindings,
 	log: Logger,
 	gatewayFactory: GatewayFactory = createLlmGateway,
+	options: { probeSleep?: ProbeSleep } = {},
 ): Promise<HealthCheckResult> {
 	const config = loadConfig(env);
 	const metrics: IMetricsClient = env.METRICS
@@ -340,7 +395,7 @@ export async function runHealthCheck(
 	// Run all checks in parallel
 	const checks = await Promise.all([
 		checkKV(env.sushanshan_bot),
-		...checkConfiguredLlms(config.llm, log, gatewayFactory),
+		...checkConfiguredLlms(config.llm, log, gatewayFactory, options.probeSleep),
 		Promise.resolve(checkGoogleSA(config.googleServiceAccount)),
 	]);
 
@@ -356,6 +411,7 @@ export async function runHealthCheck(
 			purposes: check.purposes,
 			errorKind: check.errorKind,
 			probeScope: check.probeScope,
+			probeAttempts: check.probeAttempts,
 			generationSupport: check.generationSupport,
 		});
 	}
