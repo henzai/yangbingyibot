@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildGalleryFallbackText,
 	buildGalleryMessages,
 	extractImages,
 	suppressLinkEmbeds,
@@ -192,5 +193,23 @@ describe("buildGalleryMessages", () => {
 		);
 
 		expect(delivered).toEqual(images(31).map((item) => item.url));
+	});
+});
+
+describe("buildGalleryFallbackText", () => {
+	it("lists every gallery image as a link without a preview", () => {
+		const messages = buildGalleryMessages([
+			{ url: image(1), description: "胡晓慧" },
+			{ url: image(2), description: "[a] b" },
+			{ url: image(3) },
+		]);
+
+		expect(buildGalleryFallbackText(messages)).toBe(
+			[
+				`[胡晓慧](<${image(1)}>)`,
+				`[\\[a\\] b](<${image(2)}>)`,
+				`<${image(3)}>`,
+			].join("\n"),
+		);
 	});
 });

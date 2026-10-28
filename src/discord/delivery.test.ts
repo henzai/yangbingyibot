@@ -213,7 +213,7 @@ describe("DiscordDeliveryService", () => {
 			});
 		});
 
-		it("reports a partial result when one gallery message fails", async () => {
+		it("reports a partial result and sends links for the failed message", async () => {
 			const { service, transport } = createService();
 			transport.postComponentsMessage
 				.mockRejectedValueOnce(discordError(400, { retryable: false }))
@@ -222,6 +222,12 @@ describe("DiscordDeliveryService", () => {
 			const result = await service.deliverImageGallery(urls(31));
 
 			expect(transport.postComponentsMessage).toHaveBeenCalledTimes(2);
+			expect(transport.postMessage).toHaveBeenCalledTimes(1);
+			expect(transport.postMessage).toHaveBeenCalledWith(
+				urls(30)
+					.map(({ url }) => `<${url}>`)
+					.join("\n"),
+			);
 			expect(result).toMatchObject({
 				status: "partial",
 				success: false,
@@ -240,6 +246,14 @@ describe("DiscordDeliveryService", () => {
 			await expect(service.deliverImageGallery(urls(2))).resolves.toMatchObject(
 				{ status: "failed", success: false, chunkCount: 0, failedChunks: [0] },
 			);
+		});
+
+		it("sends no fallback links when every gallery message succeeds", async () => {
+			const { service, transport } = createService();
+
+			await service.deliverImageGallery(urls(2));
+
+			expect(transport.postMessage).not.toHaveBeenCalled();
 		});
 
 		it("returns an empty result without posting when there are no images", async () => {

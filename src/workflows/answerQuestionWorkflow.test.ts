@@ -805,6 +805,9 @@ describe("AnswerQuestionWorkflow Steps", () => {
 				const result = await runStep();
 
 				expect(result.deliveryStatus).toBe("success");
+				expect(mockDiscordInstance.postMessage).toHaveBeenCalledWith(
+					`<${image(1)}>\n<${image(2)}>`,
+				);
 				expect(mockLogger.info).toHaveBeenCalledWith(
 					"Image gallery delivery completed",
 					expect.objectContaining({

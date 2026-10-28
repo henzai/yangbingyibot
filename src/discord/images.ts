@@ -126,3 +126,21 @@ export function buildGalleryMessages(
 		components,
 	}));
 }
+
+/**
+ * Plain links to the images in gallery messages, for when Discord rejects
+ * them. Without this, Markdown images removed from the text would be lost.
+ */
+export function buildGalleryFallbackText(
+	messages: readonly DiscordComponentsMessage[],
+): string {
+	return messages
+		.flatMap((message) => message.components)
+		.flatMap((gallery) => gallery.items)
+		.map(({ media, description }) =>
+			description
+				? `[${description.replace(/[[\]]/g, "\\$&")}](<${media.url}>)`
+				: `<${media.url}>`,
+		)
+		.join("\n");
+}
