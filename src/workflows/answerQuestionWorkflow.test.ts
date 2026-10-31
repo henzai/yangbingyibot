@@ -1669,6 +1669,60 @@ describe("completed Workflow checkpoint compatibility", () => {
 	});
 });
 
+describe("face photo option", () => {
+	it("asks the LLM for photos without changing the displayed question", async () => {
+		vi.clearAllMocks();
+		mockHistoryRepository.save.mockResolvedValue(undefined);
+		mockDiscordInstance.editOriginalMessage.mockResolvedValue(true);
+		mockLlmGateway.generateStream.mockImplementation(async function* () {
+			yield { type: "text", delta: "answer" };
+			yield { type: "finish", finish: { reason: "stop" } };
+		});
+		const execute = vi.fn(async (name: string, ...args: unknown[]) => {
+			if (name === "getSheetData")
+				return {
+					sheetInfo: "knowledge",
+					description: "description",
+					fromCache: true,
+				};
+			if (name === "getHistory") return { history: [] };
+			const callback = args.at(-1) as () => Promise<unknown>;
+			return callback();
+		});
+		const event = {
+			instanceId: "workflow-id",
+			payload: {
+				token: "token",
+				message: "question",
+				requestId: "request-id",
+				conversationKey: "conversation",
+				includeFacePhotos: true,
+			},
+		} as WorkflowEvent<WorkflowParams>;
+		await AnswerQuestionWorkflow.prototype.run.call(
+			{ env: mockEnv } as unknown as AnswerQuestionWorkflow,
+			event,
+			{ do: execute } as unknown as WorkflowStep,
+		);
+
+		const request = mockLlmGateway.generateStream.mock.calls[0]?.[0] as
+			| LlmRequest
+			| undefined;
+		const userText = request?.prompt.messages.at(-1)?.text;
+		expect(userText).toMatch(/^質問: question\n/);
+		expect(userText).toContain("顔写真");
+		expect(mockDiscordInstance.editOriginalMessage).toHaveBeenCalled();
+		for (const [content] of mockDiscordInstance.editOriginalMessage.mock
+			.calls) {
+			expect(String(content)).not.toContain("顔写真");
+		}
+		expect(mockHistoryRepository.save).toHaveBeenCalledWith(
+			"conversation",
+			expect.arrayContaining([{ role: "user", text: userText }]),
+		);
+	});
+});
+
 describe("request latency breakdown", () => {
 	afterEach(() => {
 		vi.useRealTimers();

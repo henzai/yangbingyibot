@@ -14,6 +14,13 @@ const WEN_COMMAND = {
 			required: true,
 			max_length: 6000,
 		},
+		{
+			type: 5,
+			name: "photo",
+			description: "Include face photos of the people in the answer",
+			description_localizations: { ja: "回答に人物の顔写真を付ける" },
+			required: false,
+		},
 	],
 };
 

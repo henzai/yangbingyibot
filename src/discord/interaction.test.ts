@@ -54,11 +54,34 @@ describe("Discord interaction parsing", () => {
 		expect(parsed).toEqual({
 			token: "interaction-token",
 			question: "質問です",
+			includeFacePhotos: false,
 			conversationKey: expect.stringMatching(/^[0-9a-f]{64}$/),
 		});
 		expect(JSON.stringify(parsed)).not.toContain("user-1");
 		expect(JSON.stringify(parsed)).not.toContain("channel-1");
 		expect(JSON.stringify(parsed)).not.toContain("guild-1");
+	});
+
+	it("reads the photo option only when it is an explicit boolean true", async () => {
+		const withPhoto = (option: unknown) => {
+			const interaction = guildInteraction();
+			interaction.data.options.push(option as never);
+			return parseDiscordAskCommand(interaction);
+		};
+
+		await expect(
+			withPhoto({ name: "photo", type: 5, value: true }),
+		).resolves.toMatchObject({ includeFacePhotos: true });
+		for (const option of [
+			{ name: "photo", type: 5, value: false },
+			{ name: "photo", type: 3, value: "true" },
+			{ name: "photo", type: 5, value: "true" },
+			{ name: "other", type: 5, value: true },
+		]) {
+			await expect(withPhoto(option)).resolves.toMatchObject({
+				includeFacePhotos: false,
+			});
+		}
 	});
 
 	it("parses a DM command using the top-level user", async () => {

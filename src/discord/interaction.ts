@@ -2,8 +2,10 @@ import type { ParsedDiscordAskCommand } from "../contracts";
 
 const APPLICATION_COMMAND_INTERACTION_TYPE = 2;
 const STRING_COMMAND_OPTION_TYPE = 3;
+const BOOLEAN_COMMAND_OPTION_TYPE = 5;
 const ASK_COMMAND_NAME = "ask";
 const QUESTION_OPTION_NAME = "question";
+const PHOTO_OPTION_NAME = "photo";
 const MAX_QUESTION_LENGTH = 6000;
 const DM_GUILD_NAMESPACE = "dm";
 
@@ -137,9 +139,19 @@ export async function parseDiscordAskCommand(
 		);
 	}
 
+	// Optional flag: anything other than an explicit boolean true means "off".
+	const includeFacePhotos = data.options.some(
+		(option) =>
+			isRecord(option) &&
+			option.name === PHOTO_OPTION_NAME &&
+			option.type === BOOLEAN_COMMAND_OPTION_TYPE &&
+			option.value === true,
+	);
+
 	return {
 		token,
 		question,
+		includeFacePhotos,
 		conversationKey: await createConversationKey({
 			guildId,
 			channelId,

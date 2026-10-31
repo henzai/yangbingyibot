@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { buildAnswerPrompt, buildThinkingSummaryPrompt } from "./promptBuilder";
+import {
+	buildAnswerPrompt,
+	buildQuestionMessage,
+	buildThinkingSummaryPrompt,
+} from "./promptBuilder";
 import type { ILlmGateway, LlmMessage, LlmStreamEvent } from "./types";
 
 describe("provider-independent prompts", () => {
+	it("adds the face photo request only when asked", () => {
+		expect(buildQuestionMessage("誰？", { includeFacePhotos: false })).toBe(
+			"誰？",
+		);
+		const withPhotos = buildQuestionMessage("誰？", {
+			includeFacePhotos: true,
+		});
+		expect(withPhotos.startsWith("誰？\n")).toBe(true);
+		expect(withPhotos).toContain("顔写真");
+		expect(withPhotos).toContain("![名前](URL)");
+	});
+
 	it("keeps knowledge and conversation separate from instructions and copies history", () => {
 		const history: LlmMessage[] = [
 			{ role: "assistant", text: "previous answer" },

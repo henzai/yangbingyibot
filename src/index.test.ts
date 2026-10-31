@@ -137,12 +137,37 @@ describe("index", () => {
 					message: "What is this?",
 					requestId: "req_test_123",
 					conversationKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+					includeFacePhotos: false,
 					receivedAt: expect.any(Number),
 				},
 			});
 			expect(
 				JSON.stringify(mockWorkflowCreate.mock.calls[0]?.[0]?.params),
 			).not.toContain("user-123");
+		});
+
+		it("passes the photo option to the workflow", async () => {
+			mockWorkflowCreate.mockResolvedValue(undefined);
+			const interaction = guildAskInteraction();
+			interaction.data.options.push({
+				name: "photo",
+				type: 5,
+				value: true,
+			} as never);
+
+			const res = await app.fetch(
+				postRequest(interaction),
+				mockEnv,
+				mockExecutionCtx,
+			);
+
+			expect(res.status).toBe(200);
+			expect(mockWorkflowCreate).toHaveBeenCalledWith({
+				params: expect.objectContaining({
+					message: "What is this?",
+					includeFacePhotos: true,
+				}),
+			});
 		});
 
 		it("returns error response for an invalid command payload", async () => {

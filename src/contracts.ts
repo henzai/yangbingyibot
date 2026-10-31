@@ -5,6 +5,7 @@ export type HistoryEntry = LlmMessage;
 export type ParsedDiscordAskCommand = {
 	token: string;
 	question: string;
+	includeFacePhotos: boolean;
 	conversationKey: string;
 };
 
@@ -14,6 +15,8 @@ export interface WorkflowParams {
 	message: string;
 	requestId: string;
 	conversationKey: string;
+	/** Absent on instances created before the `photo` option existed. */
+	includeFacePhotos?: boolean;
 	/**
 	 * Epoch ms when the Worker accepted the interaction, for latency metrics.
 	 * Absent on instances created before this field existed.

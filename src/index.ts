@@ -37,12 +37,13 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 			case InteractionType.APPLICATION_COMMAND: {
 				// Fail fast at the request boundary before creating a Workflow.
 				loadConfig(c.env);
-				const { token, question, conversationKey } =
+				const { token, question, includeFacePhotos, conversationKey } =
 					await parseDiscordAskCommand(body);
 
 				// Start the workflow
 				log.info("Starting AnswerQuestionWorkflow", {
 					messageLength: question.length,
+					includeFacePhotos,
 				});
 
 				try {
@@ -52,6 +53,7 @@ app.post("/", verifyDiscordInteraction, async (c) => {
 							message: question,
 							requestId,
 							conversationKey,
+							includeFacePhotos,
 							receivedAt,
 						},
 					});
