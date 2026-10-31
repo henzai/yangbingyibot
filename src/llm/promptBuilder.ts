@@ -29,7 +29,7 @@ export function buildAnswerPrompt(input: AnswerPromptInput): LlmPrompt {
 }
 
 const FACE_PHOTO_REQUEST =
-	"（回答に登場する人物の顔写真の画像URLが情報源にあれば、![名前](URL) の形式で付けてください。情報源にないURLは作らないでください。）";
+	"（回答に登場する人物の顔写真を、情報源に書かれた画像URLの作り方に従って ![名前](URL) の形式で付けてください。）";
 
 /** Builds the question text sent to the LLM and kept in history. */
 export function buildQuestionMessage(

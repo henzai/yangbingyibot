@@ -17,6 +17,9 @@ describe("provider-independent prompts", () => {
 		expect(withPhotos.startsWith("誰？\n")).toBe(true);
 		expect(withPhotos).toContain("顔写真");
 		expect(withPhotos).toContain("![名前](URL)");
+		// The description sheet tells the model how to build photo URLs from
+		// each member's sid, so the request must not forbid derived URLs.
+		expect(withPhotos).not.toContain("作らない");
 	});
 
 	it("keeps knowledge and conversation separate from instructions and copies history", () => {
