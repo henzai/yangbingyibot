@@ -23,7 +23,7 @@ import {
 } from "../discord/formatter";
 import { extractImages, suppressLinkEmbeds } from "../discord/images";
 import { createLlmGateway } from "../llm/factory";
-import { buildAnswerPrompt } from "../llm/promptBuilder";
+import { buildAnswerPrompt, buildQuestionMessage } from "../llm/promptBuilder";
 import { StreamCoordinator } from "../llm/streamCoordinator";
 import {
 	createThinkingSummarizer,
@@ -591,8 +591,14 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 	WorkflowParams
 > {
 	async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep) {
-		const { token, message, requestId, conversationKey, receivedAt } =
-			event.payload;
+		const {
+			token,
+			message,
+			requestId,
+			conversationKey,
+			includeFacePhotos = false,
+			receivedAt,
+		} = event.payload;
 		const log = logger.withContext({ requestId, workflowId: event.instanceId });
 		const metrics = getMetricsClient(this.env, log);
 		const config = loadConfig(this.env);
@@ -696,7 +702,7 @@ export class AnswerQuestionWorkflow extends WorkflowEntrypoint<
 							this.env,
 							token,
 							message,
-							message,
+							buildQuestionMessage(message, { includeFacePhotos }),
 							sheetData,
 							historyOutput,
 							log.withContext({ step: "streamGeminiAndEditDiscord" }),
