@@ -28,6 +28,7 @@ Cron (5分間隔) → Health Check → GitHub Issues (障害通知)
 ```
 
 **リクエストフロー:**
+
 1. Discordから `/` エンドポイントへPOSTリクエスト
 2. ミドルウェアでDiscord署名を検証（Ed25519）
 3. 即座に遅延レスポンス（DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE）を返却
