@@ -30,7 +30,7 @@
 		"wrangler": "^4.0.0"
 	},
 	"dependencies": {
-		"@google/genai": "^2.0.0",
+		"@google/genai": "^3.0.0",
 		"cloudflare-workers-and-google-oauth": "^2.0.0",
 		"discord-api-types": "^0.38.0",
 		"discord-interactions": "^4.0.0",
